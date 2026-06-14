@@ -1,0 +1,28 @@
+=== STARTING BATCH 2 DUMP ===
+Fetching raw_daybook_fullyear.xml...
+  -> Success: 466545 bytes saved.
+Fetching raw_daybook_lastyear.xml...
+  -> Success: 466545 bytes saved.
+Fetching raw_ledger_vouchers_sample.xml...
+  -> Success: 23 bytes saved.
+Fetching raw_stock_summary.xml...
+  -> Success: 913 bytes saved.
+Fetching raw_trial_balance.xml...
+  -> Success: 2731 bytes saved.
+Fetching raw_balance_sheet.xml...
+  -> Success: 1302 bytes saved.
+Fetching raw_cashflow.xml...
+  -> Success: 755 bytes saved.
+Fetching raw_gst.xml...
+  -> Success: 92 bytes saved.
+
+
+Sales vouchers: 0
+Receipt vouchers: 0
+Other voucher types: {''}
+
+First 5 sales:
+
+First 5 receipts:
+
+Top 10 outstanding parties:

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<title>Invoice {{ invoice_number }}</title>
+<style>
+  @page { size: A4; margin: 15mm 12mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    color: #1a1a1a;
+    line-height: 1.4;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid #1a1a1a;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+  }
+  .header .biz-name {
+    font-size: 18pt;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .header .biz-details {
+    font-size: 9pt;
+    color: #555;
+    margin-top: 2px;
+  }
+  .header .invoice-label {
+    text-align: right;
+    font-size: 14pt;
+    font-weight: 700;
+    color: #333;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .meta-grid {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    gap: 20px;
+  }
+  .meta-box {
+    flex: 1;
+    background: #f7f7f7;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 10px 12px;
+  }
+  .meta-box .label {
+    font-size: 8pt;
+    text-transform: uppercase;
+    color: #888;
+    letter-spacing: 0.5px;
+    margin-bottom: 3px;
+  }
+  .meta-box .value {
+    font-size: 11pt;
+    font-weight: 600;
+  }
+
+  .party-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    gap: 20px;
+  }
+  .party-box {
+    flex: 1;
+  }
+  .party-box .section-title {
+    font-size: 8pt;
+    text-transform: uppercase;
+    color: #888;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 3px;
+    margin-bottom: 6px;
+  }
+  .party-box .name {
+    font-size: 12pt;
+    font-weight: 600;
+  }
+
+  /* Amount table */
+  .amount-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+  }
+  .amount-table th {
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 9pt;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 10px;
+    text-align: left;
+  }
+  .amount-table th:last-child { text-align: right; }
+  .amount-table td {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    font-size: 11pt;
+  }
+  .amount-table td:last-child {
+    text-align: right;
+    font-weight: 600;
+  }
+
+  /* Summary block — previous outstanding + this bill + total */
+  .summary-block {
+    width: 55%;
+    margin-left: auto;
+    margin-bottom: 20px;
+  }
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 11pt;
+  }
+  .summary-row.divider {
+    border-top: 1px solid #ccc;
+    margin-top: 4px;
+    padding-top: 8px;
+  }
+  .summary-row.total {
+    border-top: 2px solid #1a1a1a;
+    margin-top: 4px;
+    padding-top: 8px;
+    font-size: 13pt;
+    font-weight: 700;
+  }
+
+  /* Payment section */
+  .payment-section {
+    background: #f0f8f0;
+    border: 1px solid #c8e6c9;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+  .payment-section .title {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #2e7d32;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .payment-section .upi-id {
+    font-size: 14pt;
+    font-weight: 700;
+    color: #1b5e20;
+    font-family: 'Courier New', monospace;
+  }
+  .payment-section .fallback {
+    font-size: 11pt;
+    color: #555;
+  }
+
+  .footer {
+    margin-top: 24px;
+    padding-top: 10px;
+    border-top: 1px solid #ddd;
+    font-size: 9pt;
+    color: #888;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div>
+    <div class="biz-name">{{ business_name }}</div>
+    {% if business_address %}
+    <div class="biz-details">{{ business_address }}</div>
+    {% endif %}
+    {% if business_phone %}
+    <div class="biz-details">Ph: {{ business_phone }}</div>
+    {% endif %}
+  </div>
+  <div class="invoice-label">Tax Invoice</div>
+</div>
+
+<!-- Invoice meta -->
+<div class="meta-grid">
+  <div class="meta-box">
+    <div class="label">Invoice No.</div>
+    <div class="value">{{ invoice_number }}</div>
+  </div>
+  <div class="meta-box">
+    <div class="label">Invoice Date</div>
+    <div class="value">{{ invoice_date }}</div>
+  </div>
+  <div class="meta-box">
+    <div class="label">Due Date</div>
+    <div class="value">{{ due_date }}</div>
+  </div>
+  <div class="meta-box">
+    <div class="label">Credit Period</div>
+    <div class="value">{{ credit_days }} days</div>
+  </div>
+</div>
+
+<!-- Bill To / Ship To -->
+<div class="party-row">
+  <div class="party-box">
+    <div class="section-title">Bill To</div>
+    <div class="name">{{ client_name }}</div>
+    {% if client_address %}
+    <div style="font-size:10pt; color:#555; margin-top:2px;">{{ client_address }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Amount -->
+<table class="amount-table">
+  <thead>
+    <tr>
+      <th>Description</th>
+      <th>Amount (₹)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ description | default("Goods as per invoice") }}</td>
+      <td>{{ amount }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Summary with previous outstanding -->
+<div class="summary-block">
+  <div class="summary-row">
+    <span>This Bill</span>
+    <span>₹{{ amount }}</span>
+  </div>
+  {% if previous_outstanding and previous_outstanding > 0 %}
+  <div class="summary-row">
+    <span>Previous Outstanding</span>
+    <span>₹{{ previous_outstanding }}</span>
+  </div>
+  {% endif %}
+  <div class="summary-row total">
+    <span>Total Payable</span>
+    <span>₹{{ total_payable }}</span>
+  </div>
+</div>
+
+<!-- Payment -->
+<div class="payment-section">
+  {% if upi_vpa %}
+  <div class="title">Pay via UPI</div>
+  <div class="upi-id">{{ upi_vpa }}</div>
+  <div style="font-size:9pt; color:#555; margin-top:4px;">
+    Amount: ₹{{ total_payable }} | Ref: {{ invoice_number }}
+  </div>
+  {% else %}
+  <div class="title">Payment</div>
+  <div class="fallback">Please contact {{ business_name }} for payment details.</div>
+  {% endif %}
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  This is a computer-generated invoice. | {{ business_name }}
+  {% if business_phone %} | {{ business_phone }}{% endif %}
+</div>
+
+</body>
+</html>

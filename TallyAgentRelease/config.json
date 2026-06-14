@@ -1,0 +1,8 @@
+{
+  "business_id": "94e2e0a7-2cc9-4bd4-b5a2-eca6ce924d17",
+  "agent_token": "9_E-A6kV2cYvjBh4JiTmGg0GAWNkYyUmUr-gSL_W-fQ",
+  "tally_host": "localhost",
+  "tally_port": 9000,
+  "backend_url": "https://your-railway-url.railway.app",
+  "company_name": "RISHAB TRADING COMPANY"
+}

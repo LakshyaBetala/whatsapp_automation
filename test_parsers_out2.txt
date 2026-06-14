@@ -1,0 +1,936 @@
+--- Testing Debtors Parser ---
+Found 928 debtors.
+{'name': 'AADITHYA ELECTRICALS      KALLAKURICHI', 'opening_balance': 0.0, 'parent': 'Kallakurichi'}
+{'name': 'Aadithya Enterprises', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Abirami Electricals', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Adinath Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Agathiyar Agencies', 'opening_balance': -8180.0, 'parent': 'Mannargudi'}
+{'name': 'AGENTS FAN HOUSE', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Akash Cable Corp.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Akash Electrical', 'opening_balance': -750.0, 'parent': 'G N St'}
+{'name': 'AKASH ELECTRICAL SERVICE CENTRE        EL DAMS RD', 'opening_balance': 0.0, 'parent': 'Teynampet   &  ELDAMS RD'}
+{'name': 'Akash Electric Company', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'AKASH PIPES & PIPES', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Akilan Agencies', 'opening_balance': -32316.96, 'parent': 'THIRKOLIUR.'}
+{'name': 'A.K.PAINT&  ELECTRICALS', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'AKR ENTERPRISES  UTHIRAMERUR', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'AKSHAY ELECTRICALS', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'A.K.TRADERS        PERAVURANI', 'opening_balance': 0.0, 'parent': 'Peravurani'}
+{'name': 'Al Burhan Enteprises', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Allied Enterprises', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'A .L.Nathan Traders', 'opening_balance': 0.0, 'parent': 'RANIPET SIPCOT'}
+{'name': 'AL.S.T  & CO', 'opening_balance': 0.0, 'parent': 'B] Villupuram'}
+{'name': 'Amardeep Electrical', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Ambica Sanitary & Electrical  Chirala', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Ambika Corp.', 'opening_balance': -52762.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Ambika Electricals and Hardware    Mettuppakam', 'opening_balance': 0.0, 'parent': 'PORUR'}
+{'name': 'Ambika Electricals----Ekkattuthangal', 'opening_balance': 0.0, 'parent': 'EKKATUTHANGAL'}
+{'name': 'Ambika Electric Company', 'opening_balance': 0.0, 'parent': 'A]Sirkali'}
+{'name': 'Ambika Traders   Gpd', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'AMCO ELECTRICAL', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Amith Electrical Enterprises', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'AMMA HARDWARES ELECTRICALS  MELMALAYANUR', 'opening_balance': 0.0, 'parent': 'Melmalayanur'}
+{'name': 'Amman Electricals', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Amman Hardwares and Electrical  Panruti', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Amman Hardwares & Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Ammu Electricals', 'opening_balance': 0.0, 'parent': 'Arakkonam'}
+{'name': 'AMR HARDWARES [ UBS]      MANAMELKUDI', 'opening_balance': 0.0, 'parent': 'Manamelkudi'}
+{'name': 'Amrit Enterprises', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'AMUDHA MACHINERY STORES         KALLAKURICHI', 'opening_balance': 0.0, 'parent': 'Kallakurichi'}
+{'name': 'Anand Electrical Croporation', 'opening_balance': -1500.0, 'parent': 'Brodway'}
+{'name': 'Anand Electricals--- Padi', 'opening_balance': 0.0, 'parent': 'PADI'}
+{'name': 'Anandha Electricals', 'opening_balance': 0.0, 'parent': 'THIRUNIRAVUR'}
+{'name': 'ANAND HARDWARE AND ELECTRICALS  WALAJABAD', 'opening_balance': 0.0, 'parent': 'WALAJABAD'}
+{'name': 'Anbu Electrical           Sirkali', 'opening_balance': 0.0, 'parent': 'A]Sirkali'}
+{'name': 'ANBU  REWINDING SPARES    PUDUKKOTTAI', 'opening_balance': 0.0, 'parent': 'Pudhukotai'}
+{'name': 'Andhra Electricals Center', 'opening_balance': -15130.0, 'parent': 'Customer'}
+{'name': 'Annai Fathima Agencies and Electricals', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Annai Lighting  & Fans MADIPAKAM', 'opening_balance': 0.0, 'parent': 'MADIPAKKAM'}
+{'name': 'Anna Malai & C0      VILLUPURAM', 'opening_balance': -4745.0, 'parent': 'B] Villupuram'}
+{'name': 'Annamalai Enterpriese', 'opening_balance': 0.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'Annasilai Muruga Hardware', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'A - ONE LIGHTING WORLD', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Apex Plywoods & HARDWARES', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'A.R. Electricals', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'A R Enterprises    Guntur', 'opening_balance': -9364.0, 'parent': 'A P Route'}
+{'name': 'Arham Engineering Co', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Arihant Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Arihant Electricals & Hardwares ADYAR', 'opening_balance': 0.0, 'parent': 'Adyar'}
+{'name': 'Arihant Electricals --Mannurpet', 'opening_balance': 0.0, 'parent': 'AMBATTUR'}
+{'name': 'Arihant Electricals Tiles & Sanitary Wares', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'Arjun Electrical & Home Fitting  T V MALAI', 'opening_balance': -35530.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'A R M  Electrical & Electroincals   Polur', 'opening_balance': 0.0, 'parent': 'Polur'}
+{'name': 'A R M  ELECTRIC HOUSE  TINDIVANAM', 'opening_balance': 0.0, 'parent': 'Tindivanam'}
+{'name': 'Arsan Electricals   CHETPET', 'opening_balance': -1150.0, 'parent': 'Chetpet'}
+{'name': 'ARULJANANI PIPES CORPORATION', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Arunai Enterprises  Ekkatuthangal', 'opening_balance': 0.0, 'parent': 'EKKATUTHANGAL'}
+{'name': 'Arundevi Electricals & Hardware  Minijur', 'opening_balance': 0.0, 'parent': 'Minjur'}
+{'name': 'Arun Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Ashapura Electricals & Hardwares   Mathur-Vargadam', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Ashika Fancy', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Ashirvad Electricals Hardwares &Painting      AAVUR', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Ashok Electricals   S M M St', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Ashok Electricals Sriperumbudur', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Ashok Enterprises', 'opening_balance': -1340.0, 'parent': 'G N St'}
+{'name': 'Asian Electricals&Engg.  Guntur', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'A Swetha Electricals  Avalurpet', 'opening_balance': 0.0, 'parent': 'Avalurpet'}
+{'name': 'Athisayam Agencies----Ariyalur', 'opening_balance': 0.0, 'parent': 'Ariyalur'}
+{'name': 'A V G ELECTRICALS', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Avighna Enterprises', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'AYYAN ELECTRICALS & TRADERS  Mq', 'opening_balance': 0.0, 'parent': 'Mannargudi'}
+{'name': 'Bafna Electric Corp.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Balaji Electrical &Headwares  GOWARTHANAGIRI  AVADI', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'Balaji Electricals & Contractors', 'opening_balance': 0.0, 'parent': 'Thanjavur'}
+{'name': 'BALAJI ELECTRICALS & HARDWARE  AVALURPETTAI', 'opening_balance': 0.0, 'parent': 'Avalurpet'}
+{'name': 'Balaji Electricals & Hardware    Vallakottai', 'opening_balance': 0.0, 'parent': 'Sriperumbadur'}
+{'name': 'Balaji Electricals Padi', 'opening_balance': 0.0, 'parent': 'PADI'}
+{'name': 'Balaji Traders', 'opening_balance': -25077.83, 'parent': 'A]Sirkali'}
+{'name': 'Balaji Trading', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'Barani Pump House', 'opening_balance': 0.0, 'parent': 'THIRKOLIUR.'}
+{'name': 'Basheera Hardwares and ElecticalsPERURMBAKKAM', 'opening_balance': 0.0, 'parent': 'PERUMBAKKAM'}
+{'name': 'Benefit Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'BFOCUS SECURITY SYSTEMS', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Bhagwati Electric House', 'opening_balance': 0.0, 'parent': 'Pattukottai'}
+{'name': 'Bhagya Lakshmi Hardwares      Thandalam', 'opening_balance': 0.0, 'parent': 'UTHOKOTTAI'}
+{'name': 'BHARAT ENTRPRISE   TADA', 'opening_balance': 0.0, 'parent': 'Tada'}
+{'name': 'BHARATHI ENTERPRISES   VADASURI', 'opening_balance': 0.0, 'parent': 'VADASURI'}
+{'name': 'Bharath Mobile', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Bharat Luminaires', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'BHAVANI ELECTRICAL', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Bhavani Electricala & Hardwars -Thazhambur', 'opening_balance': 0.0, 'parent': 'THAZHAMBUR'}
+{'name': 'BHAVANI ELECTRICAL & HARDWARES    - PONNERI', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'Bhavani Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Bhavani Electricals & Hardwares   Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'BHAVANI  ELECTRICALS & HARDWARES    WALAJAPET', 'opening_balance': 0.0, 'parent': 'Arcot'}
+{'name': 'Bhavani Electricals Tmyl', 'opening_balance': 0.0, 'parent': 'Raj Che Route'}
+{'name': 'B.H.ELECTRICAL& HARDWERS TENAMPET', 'opening_balance': 0.0, 'parent': 'Teynampet   &  ELDAMS RD'}
+{'name': 'Bismi Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'B  N Security System', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Bohra Seles Centre', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Bombay Electrical', 'opening_balance': -2091.0, 'parent': 'Customer'}
+{'name': 'BRIGHT HOME  -MADURAVOYAL', 'opening_balance': 0.0, 'parent': 'MADURAVOYAL'}
+{'name': 'Brite India Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'B V Electricals & Electronics  Thanipadi', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Cash Sales ', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Cee Yes Electrical EKKATUTHANGAL', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Chamunda Electicals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Choudhary Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'CHOZHAN AGENCY RAJOTHILAGAM', 'opening_balance': 0.0, 'parent': 'Kalpakkam'}
+{'name': 'CITY ELECTRICAL & HARDWARES ASHOK NAGAR', 'opening_balance': 0.0, 'parent': 'K K / ASHOK -- NAGAR'}
+{'name': 'CITY Electricals', 'opening_balance': 0.0, 'parent': 'D] Chidambaram'}
+{'name': 'CITY HARDWARE ELECTRICALS    MIMISAL', 'opening_balance': 0.0, 'parent': 'Mimisal'}
+{'name': 'C.K.Power House', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'C . N  Jagadeesan Traders   GANESH', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'C.N.J.Traders     KPM', 'opening_balance': -9043.0, 'parent': 'Kanchipuram'}
+{'name': 'COSMO Enterprises     Thanipati', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Crecent Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Crecent Sanitary Wares & Electricals TRIPLICANE', 'opening_balance': 0.0, 'parent': 'Triplicane'}
+{'name': 'C.S Agencies  Lingam Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'DEEKAY ELECTRICALS', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'DEEN TRADERS     T V MALAI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'DEEPAM ELECTRICALS &POWER TOOLS    DEVIKAPURAM', 'opening_balance': 0.0, 'parent': 'DEVIKAPURAM'}
+{'name': 'DEEPIKA ELECTRICALS , HARDWARE & PAINTS   VETTAVALA', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Delite Electric Supply Corporation', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Delta Electrical', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'DEV ELECTRICAL POLUR', 'opening_balance': 0.0, 'parent': 'Polur'}
+{'name': 'DEV ELECTRICALS', 'opening_balance': 0.0, 'parent': 'CHE INER BAZZAR'}
+{'name': 'Devesh Electricals and Hardwares    Vandavasi', 'opening_balance': 0.0, 'parent': 'Vandavasi'}
+{'name': 'Dhana Electrica Agencies', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'DHANALAKSHMI ELECTRICALS & HARDWARES   KALPAKKAM', 'opening_balance': 0.0, 'parent': 'Kalpakkam'}
+{'name': 'Dhanalakshmi Hardwares  Peripaliyam Arani', 'opening_balance': 0.0, 'parent': 'Arani -Periyapalayam'}
+{'name': 'Dhan Lakshmi Hardwares & Electricals Electronic', 'opening_balance': 0.0, 'parent': 'KANNIGAIPAIR'}
+{'name': 'Dhanlaxmi Electricals & Hardwares Varanavasi', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'DHANUSH ELECTRICALS & HARDWARS    DEVARIYAMBAKKAM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Dharmichand Mobiles & Electronics', 'opening_balance': 0.0, 'parent': 'T N UN-Route'}
+{'name': 'Dharmshri Electricals Private Limited', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Dinesh Cable', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'DINESH ELECTRICALS    GUMMIDIPOONDI', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'DINESH ELECTRICALS & HARDWARS  AJJ', 'opening_balance': 0.0, 'parent': 'Arakkonam'}
+{'name': 'DINESH ELECTRICALS & H/W CHENGALPET', 'opening_balance': 0.0, 'parent': 'Chengalpattu'}
+{'name': 'Disha Cables', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Disha Wires & Cables P.V.T.  L.T.D.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'DMS ENTERPRISES  GUMMIDIPUNDI', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'Dolphin Supermart', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'D R & Sons', 'opening_balance': -3780.0, 'parent': 'D] Chidambaram'}
+{'name': 'ELECTRO POWER SYSTEM', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Emco Mechatronics', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'E.Pachiyappan Pwd Contractor', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'ESSVEE ELECTRICALA & ELECTRONICE', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'ESTRUCTURA SPECIALISED CONSTRUCTION PVT LTD', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'E V R Croporation', 'opening_balance': -8437.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'FARMSHAALA', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Gandhi Industrial Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'GANESH ELECTRICAL & HARDWARES    GUMMIDIPOONDI', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'GANESH ELECTRICAL & HARDWARE THANDALAM', 'opening_balance': 0.0, 'parent': 'Arani -Periyapalayam'}
+{'name': 'Ganesh Electricals', 'opening_balance': 0.0, 'parent': 'Teynampet   &  ELDAMS RD'}
+{'name': 'Ganesh Electricals Agencies', 'opening_balance': -9050.0, 'parent': 'Perambalur'}
+{'name': 'GANESH ELECTRICALS AND HARDWARES       VADAPERUMBAK', 'opening_balance': 0.0, 'parent': 'VADAPERUMBAKKAM'}
+{'name': 'Ganesh Electricals &Cycles    Thirukkalukundram', 'opening_balance': 0.0, 'parent': 'Thirukkalukundram'}
+{'name': 'Ganesh Hardwares and Electricals Manali', 'opening_balance': 0.0, 'parent': 'MANALI'}
+{'name': 'Ganesh Stores TRIPLICANE', 'opening_balance': 0.0, 'parent': 'Triplicane'}
+{'name': 'G G ELECTRICAL&ELECTROINS K K NAGAR', 'opening_balance': 0.0, 'parent': 'K K / ASHOK -- NAGAR'}
+{'name': 'GLOBE ELECTRICALS  VEPERY', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Globe Electric Co', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'G M Electricals & Hardwares', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Golden Electricals & Electronics VILLIVAKKAM', 'opening_balance': 0.0, 'parent': 'VILLIVAKKAM'}
+{'name': 'Golden Steels     KALLAKURICHI', 'opening_balance': -3520.0, 'parent': 'Kallakurichi'}
+{'name': 'Gomathi Corporation', 'opening_balance': -4080.0, 'parent': 'Sankarapuram'}
+{'name': 'Goutham Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'GOWS ELECTRICALS       KILLPENNATHUR', 'opening_balance': 0.0, 'parent': 'Killpennathur'}
+{'name': 'Gurudev Agency', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Guru Electricals & Hardwares  Boodur', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'HAMA Electricals &Hardwares   Nataramagalam', 'opening_balance': 0.0, 'parent': 'NATAMANGALAM'}
+{'name': 'HANSA ELECTRICALS', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'HANUMAN ELECTRICALS & SANITARY        CHIRALA', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'HARIHARAN PUMP SPARAN    PONNERI', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'HARI OM ELECTRICAL AND HARDWARE   AMMOOR', 'opening_balance': 0.0, 'parent': 'WALLAJAPET'}
+{'name': 'Harish Enterprises', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'Henlay Electrical Industrial', 'opening_balance': -2513.0, 'parent': 'S M M St'}
+{'name': 'Himmat Electrical', 'opening_balance': 0.0, 'parent': 'Pattukottai'}
+{'name': 'Hindustan Electricals', 'opening_balance': 0.0, 'parent': 'Thanjavur'}
+{'name': 'Hindustan Hardwares & Electricals   Keerapakkam', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'Hirani  Marketing Combines', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'IJK HARDWARE', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Indian Electricals Fitting', 'opening_balance': 0.0, 'parent': 'Pudhukotai'}
+{'name': 'INDIAN ELECTRICALS & PLUMBING   MQ', 'opening_balance': 0.0, 'parent': 'Mannargudi'}
+{'name': 'Industrial Electric Spare Centre', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'ISWARYA AGENCIES         TIRUKOVILUR', 'opening_balance': 0.0, 'parent': 'THIRKOLIUR.'}
+{'name': 'Jaayam Electric Enterprises  Ekkaduthangal', 'opening_balance': 0.0, 'parent': 'EKKATUTHANGAL'}
+{'name': 'Jagdamba Electricals', 'opening_balance': -24841.0, 'parent': 'G N St'}
+{'name': 'Jaigurudev Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'JAI GURU ELECTRICALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Jain Electricals', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'Jaishree Electricals and Hardwares    [Krishna]', 'opening_balance': 0.0, 'parent': 'ACHERAPAKKAM'}
+{'name': 'Jai Shree Electric &  Hardware', 'opening_balance': -42350.0, 'parent': 'Customer'}
+{'name': 'Jai  Shree Mahaveer Ent', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Jalaram Lights', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Jaya Bala Enterprises', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Jayamani Engineering Corporation', 'opening_balance': -2386.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'Jayam Electricals & Pipes   THIRUVARUR', 'opening_balance': 0.0, 'parent': 'Thiruvarur'}
+{'name': 'JAYAM TRADER', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'JAYAPARKASH ELECTRICALS & HARDWARES', 'opening_balance': 0.0, 'parent': 'JANAPPANCHATRAM'}
+{'name': 'Jayaram Electrical  Madthuranthakam', 'opening_balance': 0.0, 'parent': 'Madhuranthakam'}
+{'name': 'JAYA STORES           THATHIENGARETTAI', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'JAYAVEL ELECTRICALS    THIRUPPORUR', 'opening_balance': 0.0, 'parent': 'Thirupporur'}
+{'name': 'JAY GURU ELECTRICALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Jeevraj Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Jeffrey Enterprises KOTTURPURAM', 'opening_balance': 0.0, 'parent': 'Kotturpuram'}
+{'name': 'Jitendra Kumar & Co', 'opening_balance': -2480.0, 'parent': 'Brodway'}
+{'name': 'Jiyo Life Style Appliances   Suresh Aditiya', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'J J Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'J J S GUEST HOUSE    T .NAGAR', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'J.K.Electrical & Pipe', 'opening_balance': -3695.0, 'parent': 'Thiruvarur'}
+{'name': 'J.K. Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'J.K.Lights', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Jothi Electrical &Hardwares    Redhills', 'opening_balance': 0.0, 'parent': 'Lakshmipuram'}
+{'name': 'Jothi Electrical & SERVICE   DEVIKAPURAM', 'opening_balance': 0.0, 'parent': 'DEVIKAPURAM'}
+{'name': 'J R  ELECTRICAL    T V Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'J T ASSOCIATES      WALAJABAD', 'opening_balance': 0.0, 'parent': 'WALAJABAD'}
+{'name': 'Jugsun Lighting& Electrical AMINIJIKARAI', 'opening_balance': 0.0, 'parent': 'AMINIJIKARAI'}
+{'name': 'Juke Organic', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Kalpana Switch Spaers', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Kalpvriksh Appts', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Kalyan Impex India', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'KAMALA TRADERS   TINDIVANAM', 'opening_balance': 0.0, 'parent': 'Tindivanam'}
+{'name': 'Kamatchi Electricals and Hardwares      Ennore', 'opening_balance': 0.0, 'parent': 'Ennore'}
+{'name': 'KARTHICK ELECTRICALS &HARDWARES KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'K.ASHOK  -  - Manachanallur[Trichy]', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'KAVERI HARDWARES & ELECTRICALS     ARUMANDAI', 'opening_balance': 0.0, 'parent': 'Minjur'}
+{'name': 'Kavi Sankar Pipe Corporation', 'opening_balance': -10800.0, 'parent': 'Sundry Debtors'}
+{'name': 'Kaviya Electrical & Plumbing Works  Kk Nagar', 'opening_balance': 0.0, 'parent': 'K K / ASHOK -- NAGAR'}
+{'name': 'K.B.ENTERPRISES', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'K C Sons', 'opening_balance': -4350.0, 'parent': 'G N St'}
+{'name': 'Kesari Maruthi Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Kesariya Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Kesavan Electricals & Hardwares Utmr', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'Khushi Marketing', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'KIRAN ELECTRICALS /      99 G N ST', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'KIRAN ELECTRICALS & PIPES       KARAIKUDI', 'opening_balance': 0.0, 'parent': 'Karaikkudi'}
+{'name': 'Kiran Lites', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'KIRAN MARKETING', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Kishore Electricals & Hardwares LAKSHMIPURAM', 'opening_balance': 0.0, 'parent': 'KOLATHUR'}
+{'name': 'Kishor Electrical Corportion Gudur', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'KK ENGINEERING SERVICES', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'K.M. Electric Co', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'K.M.G.Electricals', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'K. MOHAN RAJ', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'Kothari Cable Corporation', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Kothari Electrical & Hardwares   Ayyapakkam', 'opening_balance': 0.0, 'parent': 'AYAPAKKAM'}
+{'name': 'KOTHARI ELECTRICALS', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Krishna  Electrical', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Krishna Electrical & Hardwares       Chromepet', 'opening_balance': 0.0, 'parent': 'Chromepet'}
+{'name': 'Krishna Electrical &Hardwares  THALAMBUR', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'KRISHNA ELECTRICALS & PIPE      MADUKKUR', 'opening_balance': 0.0, 'parent': 'MADUKKUR'}
+{'name': 'Krishna Electricals   VIRUDHACHALAM', 'opening_balance': -5000.0, 'parent': 'C] Virudhachalam'}
+{'name': 'KRISHNA.ELECTRICALS [ ARIAYALUR]', 'opening_balance': 0.0, 'parent': 'Ariyalur'}
+{'name': 'Krishna Electrical  Thiruneermalai', 'opening_balance': 0.0, 'parent': 'Thiruneermalai'}
+{'name': 'KRISHNA ELECTRONIC & ELECTRICALS        POZHICHULAR', 'opening_balance': 0.0, 'parent': 'PALLAVARAM'}
+{'name': 'Krishna Spare    Anakaputhur', 'opening_balance': 0.0, 'parent': 'ANAKAPUTHUR'}
+{'name': 'Krishna Traders', 'opening_balance': 0.0, 'parent': 'Mannargudi'}
+{'name': 'KRISHNA TRADERS         GUMMIDIPOONDI', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'Krystal New Lights', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'K S P ELECTRICALS  TIMIRI', 'opening_balance': 0.0, 'parent': 'TIMIRI'}
+{'name': 'K T  Garments', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'KUMAR ELECTRICALS      ARNI', 'opening_balance': 0.0, 'parent': 'Arani'}
+{'name': 'Kumar Enterprise', 'opening_balance': 0.0, 'parent': 'Chengalpattu'}
+{'name': 'Kumar Pipes & Electricals', 'opening_balance': -16850.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'K V S Electricals & Hardwars PADUR', 'opening_balance': 0.0, 'parent': 'PADUR'}
+{'name': 'K.WINSOR ELECTRICALS PVT. LTD.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Lakshmi Agency     Vettavalam', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'LAKSHMI ELECTRICALS & HARDWARE    ENNORE', 'opening_balance': 0.0, 'parent': 'Ennore'}
+{'name': 'Lakshmi Electricals & Hardwares  // Kavery Arumandh', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'Lakshmi Electricals & Hardwars Ponneri //arumandhai', 'opening_balance': 0.0, 'parent': 'Minjur'}
+{'name': 'LAKSHMI ELECTRICALS   PERAVURANI', 'opening_balance': 0.0, 'parent': 'Peravurani'}
+{'name': 'Lakshmi Kala Tradera', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'LAKSHMI SALES CORPORATION', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Latha  Traders     Mq', 'opening_balance': 0.0, 'parent': 'Mannargudi'}
+{'name': 'Leela Krishna Enterprise', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Leela Lights', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'LEHRANSH ELECTRICALS KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Lights N Beyend', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'LIKE POWER ELECTRRONICS', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Lion Electricals  Tiruvannamalai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'L K Electricals         KATARIYA', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'L.K.ELECTRICALS            LALITH', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'L S Electricals & Hardware Periyapaliyam Arani', 'opening_balance': 0.0, 'parent': 'Arani -Periyapalayam'}
+{'name': 'Lucky Electrical,Electronics & Hardares', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'Maa Led House', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'MADHAVI ENTERPRISES', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'MADHURA ELECTRICALS & PLUMBING     MADUKKUR', 'opening_balance': 0.0, 'parent': 'MADUKKUR'}
+{'name': 'MADRAS HARDWARE MART SIRALI', 'opening_balance': 0.0, 'parent': 'A]Sirkali'}
+{'name': 'Madras Light House', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'MAHADEV ELECTRICALS & CO       MADUKKUR', 'opening_balance': 0.0, 'parent': 'MADUKKUR'}
+{'name': 'MAHADEV ELECTRICALS & HARDWARES   MADHAVARAM', 'opening_balance': 0.0, 'parent': 'Madhavaram'}
+{'name': 'MAHADEV INDUSTRIES MADAVARAM', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'MAHADEV LIGHT CENTER', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Maha Enterprises', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'MAHALAKSHMI   ELECTRICALS', 'opening_balance': -21321.0, 'parent': 'G N St'}
+{'name': 'Mahalakshmi Electricals & Hardwares', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'MAHALAKSHMI ELECTRICALS & HARDWARES   WALLAJAPET', 'opening_balance': 0.0, 'parent': 'WALLAJAPET'}
+{'name': 'Mahalakshmi Electricals & Paints----Kallakurichi', 'opening_balance': 0.0, 'parent': 'Kallakurichi'}
+{'name': 'Mahalakshmi Electrical     Triplican', 'opening_balance': -15451.0, 'parent': 'Triplicane'}
+{'name': 'MAHALAKSHMI HARDWARE & ELECTRICAL  THIRUPPORUR', 'opening_balance': 0.0, 'parent': 'Thirupporur'}
+{'name': 'Mahalashmi Electricals    Utmr', 'opening_balance': -8805.0, 'parent': 'Uthiramerur'}
+{'name': 'MAHALAXMI ELECTRICALS AND HARDWAES[MPT]', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Mahalaxshmi Electrical & Hardwards', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'Maharaja Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Mahasakthi Electricals & Plumbing', 'opening_balance': -1612.0, 'parent': 'Thiruvarur'}
+{'name': 'MAHAVEER ELECTRICAL &COMPANY', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Mahaveer Electricals     Dilip', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Mahaveer Electricals & Hardwar    Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'MAHAVEER ELECTRICALS & H/WS   VEERAPURAM', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'MAHAVEER ENTERPRISES  Jain Ele Cdm', 'opening_balance': 0.0, 'parent': 'D] Chidambaram'}
+{'name': 'MAHENDER-ELECTRICALS.&.HARDWARES......GUMMIDIPONDY', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'Mahendra Electrical & Hardware', 'opening_balance': -7215.0, 'parent': 'T N UN-Route'}
+{'name': 'Mahendra Electricals', 'opening_balance': -80813.0, 'parent': 'Attur'}
+{'name': 'MAHENDRA ELECYRICALS & HARDWARES  KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Mahesh Electricals   G N St', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Mahesh Hardware & Pipe Pvt.Ltd', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Mahindra Agency VILLIVAKKAM', 'opening_balance': 0.0, 'parent': 'VILLIVAKKAM'}
+{'name': 'Malayasia Electricals & Hardware   Arcot', 'opening_balance': 0.0, 'parent': 'Arcot'}
+{'name': 'Malaysia Corporation', 'opening_balance': -24555.0, 'parent': 'D] Chidambaram'}
+{'name': 'Malliha Traders   Tv Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Mandar Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Mangaldeep Electrical & Hardwares', 'opening_balance': 0.0, 'parent': 'KOLATHUR'}
+{'name': 'Manibhadra Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Mani Electric Agencies', 'opening_balance': -5800.0, 'parent': 'C] Virudhachalam'}
+{'name': 'Mani Home Appliances', 'opening_balance': 0.0, 'parent': 'B] Villupuram'}
+{'name': 'Manimekalai Electricals', 'opening_balance': 0.0, 'parent': 'Alwarpet'}
+{'name': 'Manisha Elecricals Kanda Chipuram', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Manju Promoters Private Ltd', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'MANOJ ELECTRICALS', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'MANOJ ELECTRONICS & ELECTRICALS     VELACHERY', 'opening_balance': 0.0, 'parent': 'VELACHERY'}
+{'name': 'Marudhar Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'MARUDHAR ELECTRICALS     3K.I.ST', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'MARUTH HARDWARE ELECTICALS & ELETRONICS  PONNERI', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'MARUTHI ELECTRICAL', 'opening_balance': 0.0, 'parent': 'T N UN-Route'}
+{'name': 'Maruthi Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Maruthi Electricals &Hardwares', 'opening_balance': -3290.0, 'parent': 'Uthiramerur'}
+{'name': 'M A S ENGINEERING  KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Mataji Electricals     90 Thirpporur', 'opening_balance': 0.0, 'parent': 'Thirupporur'}
+{'name': 'MATAJI ELECTRICALS   /ASHOK- THIRUPPORUR', 'opening_balance': 0.0, 'parent': 'PADUR'}
+{'name': 'Mataji Hardware & Electricals  CAMP RD Ayapakkam', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Mathaji  Electicals & Harddwars  Vallipuram', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'MATHAJI ELECTRICAL & HARDWARES    AYYAPAKKAM AMBATT', 'opening_balance': 0.0, 'parent': 'AYAPAKKAM'}
+{'name': 'MATHAJI ELECTRICALS AND HARDWARS      KANDIGAI', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Maya Electricals & Hardwares    Thiruverkadu', 'opening_balance': 0.0, 'parent': 'Thiruerkadu'}
+{'name': 'M D Enterprises', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'M.E.Agencies', 'opening_balance': 0.0, 'parent': 'Pattukottai'}
+{'name': 'Meera  Machinery Electricals', 'opening_balance': 0.0, 'parent': 'T N UN-Route'}
+{'name': 'Mehta Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Mercury Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Metro Enterprises', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'MICRO LITES', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Milan Electric Company', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Mjl Electronics and Electricals', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'M.K ELECTRIC AND HARDWARE Ammapettai', 'opening_balance': 0.0, 'parent': 'Ammapet'}
+{'name': 'M K TRADERS', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'M.M.ELECTRICALS         THIRUPORUR', 'opening_balance': 0.0, 'parent': 'Thirupporur'}
+{'name': 'M M ENGINEERS & AGENCIES  VILLVAKKAM', 'opening_balance': 0.0, 'parent': 'VILLIVAKKAM'}
+{'name': 'Modern Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Modi Enterprises         Seven Wells', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Mogarala  Nageswara Roa &Co Gudur', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Mohan Electricals KOTTUR', 'opening_balance': 0.0, 'parent': 'Kotturpuram'}
+{'name': 'MOHAN ENTERPRIESE', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Mohan Enterprises', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'MOHAN HARDWARE ELECTRICAL & PAINT    -- CHROMPET', 'opening_balance': 0.0, 'parent': 'Thiruneermalai'}
+{'name': 'Mohanlal & Co', 'opening_balance': -9860.0, 'parent': 'S M M St'}
+{'name': 'Mohit Electricals', 'opening_balance': -28101.0, 'parent': 'S M M St'}
+{'name': 'Mohta Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'MOTHI ELECTRICALS  Hardwares    Vellonoor', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'MP ENTERPRISE     GPD', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'M.S.D.STORES     GUMMIPOONDI', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'MSR TRADERS      MANAMELKUDI', 'opening_balance': 0.0, 'parent': 'Manamelkudi'}
+{'name': 'M S V ELECTRICAL & HARDWAR   KATTU REHILS', 'opening_balance': 0.0, 'parent': 'Kattur'}
+{'name': 'M.S.V. TRADERS   PONNERI', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'MUKESH ELECTRICALS & SANITARYWARES    MINJUR', 'opening_balance': 0.0, 'parent': 'Minjur'}
+{'name': 'MUKESH LITES -AMINIJIKARAI', 'opening_balance': 0.0, 'parent': 'AMINIJIKARAI'}
+{'name': 'Mumtaaz Electricals', 'opening_balance': -5000.0, 'parent': 'Kallakurichi'}
+{'name': 'Mundhra Brathers', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Murugan Agencies    Thirkoliur', 'opening_balance': 0.0, 'parent': 'THIRKOLIUR.'}
+{'name': 'NAHAR ELECTRIC COMPANY', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Nakoda Pipes & Cables [ Sanjay]New Ele G N St', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Nama Electrical', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Naman Marketing', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Naramada Electrical', 'opening_balance': -19511.0, 'parent': 'Uthiramerur'}
+{'name': 'Naresh Electrcals & Hardwares Paint   T Kundarm', 'opening_balance': 0.0, 'parent': 'Thirukkalukundram'}
+{'name': 'Naresh Hardwares & Electricals  Pavunjur', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'NARMADA ELECTRICALS         PARAMAGUDI', 'opening_balance': 0.0, 'parent': 'Paramakudi'}
+{'name': 'NATIONAL ELECTRICAL & HARDWAERS      VEERAPURAM', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'National Spare Parts', 'opening_balance': -12256.0, 'parent': 'Nagapattinam'}
+{'name': 'NAVEEN ELECTIRCALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Naveen Electricals', 'opening_balance': -15335.0, 'parent': 'Chennai'}
+{'name': 'Naveen Electricals &Hardwars   Redhils', 'opening_balance': 0.0, 'parent': 'REDHILLS'}
+{'name': 'Naveen Traders  - ARIYALUR', 'opening_balance': 0.0, 'parent': 'Ariyalur'}
+{'name': 'NEW ARCOT ELECTRICAL   WALAJABAD', 'opening_balance': 0.0, 'parent': 'WALAJABAD'}
+{'name': 'New Electrical Agencies', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'New Electric Company', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'NEW KASIM STORES   KARAI KUUDI', 'opening_balance': 0.0, 'parent': 'Karaikkudi'}
+{'name': 'New Pitha Hardwadware  & Electrical', 'opening_balance': 0.0, 'parent': 'AYAPAKKAM'}
+{'name': 'NEW POOJA ELECRICALS AND HARDWARE   AYAPAKKAM', 'opening_balance': 0.0, 'parent': 'AYAPAKKAM'}
+{'name': 'New Poonam Electricals ROYAPURAM', 'opening_balance': 0.0, 'parent': 'ROYAPURAM'}
+{'name': 'NEW SWAMY & SONS      JANAPPANCHATRAM', 'opening_balance': 0.0, 'parent': 'JANAPPANCHATRAM'}
+{'name': 'New Thangam Electricais', 'opening_balance': -2072.0, 'parent': 'Kallakurichi'}
+{'name': 'NEXUS BIOTEH', 'opening_balance': 0.0, 'parent': 'T N UN-Route'}
+{'name': 'Nikil Markrting', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'NISHA TRADERS --GUMMIDIPOONDI BYEPASS', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'Nitin Traders   Kandukur     Good Cash', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Nivas Electrical', 'opening_balance': -9083.0, 'parent': 'Thanjavur'}
+{'name': 'Nivetha Electricals     ---Tirchy', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'NIVETH ELECTRICALS', 'opening_balance': 0.0, 'parent': 'T N UN-Route'}
+{'name': 'Noor Traders', 'opening_balance': -9843.0, 'parent': 'Perambalur'}
+{'name': 'N R .Traders     Thiruneermalai', 'opening_balance': 0.0, 'parent': 'Thiruneermalai'}
+{'name': 'Olympic Electrical', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Omm Electrical Corportion', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Om Muruga Electricals & Hardwares   Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Om Muruga Traders  Kilpenatur', 'opening_balance': 0.0, 'parent': 'Killpennathur'}
+{'name': 'Omsakthi Electricals and Hardware     CHITHAMOOR', 'opening_balance': 0.0, 'parent': 'Madhuranthakam'}
+{'name': 'ONCHIP PRODUCTS PRIVATE LIMITED', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'ONS Electrical Enterprises', 'opening_balance': 0.0, 'parent': 'T N UN-Route'}
+{'name': 'ORIENT ELECTRIC INDUSTRIAL', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Padamavahi Electricals & Hardware Keshavapuram', 'opening_balance': 0.0, 'parent': 'Minjur'}
+{'name': 'PADMAVATHI   HARDWARE & ELECTRICAL     VALLANOOR', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'Padmavati Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'PANDIYAN HARDWARS MAMBALAM', 'opening_balance': 0.0, 'parent': 'T NAGAR'}
+{'name': 'PANDURANGAN AGENCIES -  THIRKOLIUR', 'opening_balance': 0.0, 'parent': 'THIRKOLIUR.'}
+{'name': 'PARAMESHWARI HARDWARES ELECTRICAL & SANITARY WARE', 'opening_balance': 0.0, 'parent': 'PUNMAR'}
+{'name': 'Parthiban Electricals   T V Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'PARTHIBAN HARDWARES     KAVARAIPETTAI', 'opening_balance': 0.0, 'parent': 'KAVARAIPETTAI'}
+{'name': 'Parthik Electricals', 'opening_balance': 0.0, 'parent': 'Chennai'}
+{'name': 'PARVATHI HARDWARE & ELECTRICALS   THIRUERKADU', 'opening_balance': 0.0, 'parent': 'Thiruerkadu'}
+{'name': 'Patel Electricals    Babu', 'opening_balance': -7600.0, 'parent': 'B] Villupuram'}
+{'name': 'Patel Electricals        Raju', 'opening_balance': 0.0, 'parent': 'B] Villupuram'}
+{'name': 'PG Kavya Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'PINEMA AGENCY ELECTRICALS TV.MALAI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Pioner Electric Co.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'PIPES & PIPES', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'P.M.S.ELECTRICAL & HARDWARE ALAMPOONDI', 'opening_balance': 0.0, 'parent': 'Alampoondi'}
+{'name': 'Ponni Electrical', 'opening_balance': 0.0, 'parent': 'Pudhukotai'}
+{'name': 'Ponnusamy Traders', 'opening_balance': 0.0, 'parent': 'Kandachipuram'}
+{'name': 'Ponram Electronics', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'POOJA ELECTRICALA AND HARDWARES     REDHILLS', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Poonam Electricals ROYAPURAM', 'opening_balance': 0.0, 'parent': 'ROYAPURAM'}
+{'name': 'POWER CARE SOLUTIONS', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'P.P Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'P P JAYAGOPAL HARDWARES & ELECTRICALS   PONNERI', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'P.P.Textiles', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'PRADEEP ELECTRICALS & HARDWARES      CHROMEPET', 'opening_balance': 0.0, 'parent': 'Chromepet'}
+{'name': 'PRAKASH ELECTRICALS', 'opening_balance': 0.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'PRAKASH  ELECTRICALS & HARDWARES  Kolarthur', 'opening_balance': 0.0, 'parent': 'KOLATHUR'}
+{'name': 'Prakash Electricals & Hardwares     Mangadu', 'opening_balance': 0.0, 'parent': 'Mangadu'}
+{'name': 'PRAKASH ELECTRICALS      REDHILLS', 'opening_balance': 0.0, 'parent': 'REDHILLS'}
+{'name': 'Prakash Electricasls   Ashish', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Prakash Industrial Corporation     Ashish', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Prasana Spares', 'opening_balance': 0.0, 'parent': 'Pattukottai'}
+{'name': 'Praveen Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'PREM PRASAN CHARITABLE TRUST. KOTHUR, TITUTTANI-206', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Pudukkai Pipe Agencies', 'opening_balance': 0.0, 'parent': 'Pudhukotai'}
+{'name': 'P.V Marketing', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'P V N  Corporation  T V Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'QUALITY PIPES', 'opening_balance': 0.0, 'parent': 'Pudhukotai'}
+{'name': 'Raakesh Electricals  Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Rabhany Hardwares', 'opening_balance': -6630.0, 'parent': 'Chetpet'}
+{'name': 'Radhae Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Radhe KRISHNA ELECTRICALS & HARDWARES  [SSS] PONNE', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'RAGHVENDRA ELECTRICALS  BUCHI', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Raja Electicals', 'opening_balance': -3600.0, 'parent': 'Vandavasi'}
+{'name': 'RAJA ENTERPRISES      CHOZEN KALAPAKAM', 'opening_balance': 0.0, 'parent': 'Kalpakkam'}
+{'name': 'RAJALAKSHMI ELECTRICALAS & HARDWARES   ARCOT', 'opening_balance': 0.0, 'parent': 'Arcot'}
+{'name': 'Rajalakshmi Enterpries  GUMMIDIPOONDI', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'RajaRam Enterprices (Sirkali)', 'opening_balance': 0.0, 'parent': 'A]Sirkali'}
+{'name': 'Rajasthan Electric Stores', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Rajee Hardware & Electrical', 'opening_balance': 0.0, 'parent': 'Perambalur'}
+{'name': 'RAJ ELECTRICALS & ELECTRONICS -- SAIDAPET', 'opening_balance': 0.0, 'parent': 'T NAGAR'}
+{'name': 'RAJESH BOREWELLS HARDWARES & ELECTRICALS   AVADI', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'Rajesh Wires & Electricals PADI', 'opening_balance': 0.0, 'parent': 'PADI'}
+{'name': 'RAJESWARI SPARES & ELECTRICALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Raji Traders     Timiri', 'opening_balance': 0.0, 'parent': 'TIMIRI'}
+{'name': 'Rajkumar Gupta', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'RAJLAXMI ELECTRICALS & HARDWARES   VELLONOOR/AVADI', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'Rajshree Lights', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Rajsri Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Raju Electricals & Hardware  MamaLLapuram', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'Raju Electricals   KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'RAJU HARDWARES & ELECTRICALS    KAVARAIPETTA', 'opening_balance': 0.0, 'parent': 'KAVARAIPETTAI'}
+{'name': 'RAKAVEENDRA ENTERPRISES   SHOLAVARAM', 'opening_balance': 0.0, 'parent': 'Sholavaram'}
+{'name': 'Rakesh Electricals & Plumbing', 'opening_balance': -36070.0, 'parent': 'Chengalpattu'}
+{'name': 'RAKSHANA ELECTRICALS VELANANDAL', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Ramco Engineering Company  GUNTUR', 'opening_balance': -40653.0, 'parent': 'A P Route'}
+{'name': 'Ramdav Electrical     Gudur', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Ramdev Electricals Hardware & Borewell  Thirumullal', 'opening_balance': 0.0, 'parent': 'Thirumullavoyal'}
+{'name': 'Ramdev Electricals & Hardwares Tindivanam', 'opening_balance': 0.0, 'parent': 'Tindivanam'}
+{'name': 'RAMDEV ELECTRICALS & HARDWARS    NATAMANGALAM', 'opening_balance': 0.0, 'parent': 'NATAMANGALAM'}
+{'name': 'RAMDEV HARDWARE & ELECTRICALS  MUDUGARAI', 'opening_balance': 0.0, 'parent': 'Madhuranthakam'}
+{'name': 'Ramdev Motor Parts', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'RAMDEV PIPES & ELECTRICALS   Ranipet', 'opening_balance': 0.0, 'parent': 'WALLAJAPET'}
+{'name': 'Ram Electricals         Gummidipoondi', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'Ramesh Electricals & Hardwares', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'Ramesh Hardware & Electricals MYLAPORE', 'opening_balance': 0.0, 'parent': 'Mylapore'}
+{'name': 'RAMESH HARDWARES     KAVARAIPETTAI', 'opening_balance': 0.0, 'parent': 'KAVARAIPETTAI'}
+{'name': 'RAMESH TRADERS   ARIYALUR', 'opening_balance': 0.0, 'parent': 'Ariyalur'}
+{'name': 'Ram Textiles', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'Ranjith Electricals & Hardwares    Kattankadai', 'opening_balance': 0.0, 'parent': 'Koovathur'}
+{'name': 'RANKA TRADING CO', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'RASI ELECTRICALS AND HARDWARES   Natarmagalam', 'opening_balance': 0.0, 'parent': 'NATAMANGALAM'}
+{'name': 'Rasi Electricals    Chetpet', 'opening_balance': 0.0, 'parent': 'Chetpet'}
+{'name': 'RASI ELECTRICALS LIGHTING  VANDVASI', 'opening_balance': 0.0, 'parent': 'Vandavasi'}
+{'name': 'Rasi Electricals PUDHUKOTAI', 'opening_balance': -23060.0, 'parent': 'Pudhukotai'}
+{'name': 'RASI TRADERS   MIMISAL', 'opening_balance': 0.0, 'parent': 'Mimisal'}
+{'name': 'RASMI HARDWARES OTTERI', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Ratan Electricals', 'opening_balance': -5440.0, 'parent': 'G N St'}
+{'name': 'Ravi Electricals', 'opening_balance': 0.0, 'parent': 'C] Virudhachalam'}
+{'name': 'Ravi Electricals & Hardwars Paints       Polur', 'opening_balance': 0.0, 'parent': 'Polur'}
+{'name': 'Rekha Electrcals  Manali', 'opening_balance': 0.0, 'parent': 'MANALI'}
+{'name': 'Reliable Electrical Enterprises', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'R G ELECTRICALS     MUGAPPAR', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Rich Marketing', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'RIFA Electrical & Electronics', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Rishabh Sales Croporation', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'R.K.ELECTRICAL', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'R K Electrical & Hardwares', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'R K Traders    PERAMBALUR', 'opening_balance': 0.0, 'parent': 'Perambalur'}
+{'name': 'R M Electrical    GN ST', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'R.M.Enterprises', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'RMS IMPX      65 G N ST', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Roop Electrical India', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Roop Electricals[ India]', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Roop Enterprises', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Royal Elecrtric CO   GN ST.', 'opening_balance': -7830.0, 'parent': 'G N St'}
+{'name': 'ROYAL ELECTRICALS & ELECTRONICS POONAMALI', 'opening_balance': 0.0, 'parent': 'AMINIJIKARAI'}
+{'name': 'Royal Electricals & Hardwares. Kalambakkam', 'opening_balance': 0.0, 'parent': 'Kelambakkam'}
+{'name': 'ROYAL ELECTRICALS    KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Royal Electricals -  Porur', 'opening_balance': 0.0, 'parent': 'PORUR'}
+{'name': 'Royal Electricals - Teynampet', 'opening_balance': 0.0, 'parent': 'Teynampet   &  ELDAMS RD'}
+{'name': 'ROYAL INDIA MARKETING & SUPPLIES', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Royal Vikaas Agency', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'R.P.Ravichandran Agency', 'opening_balance': 0.0, 'parent': 'THIRKOLIUR.'}
+{'name': 'RPT Engineering Design & Consultancy Services', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'R.S.TOOLS & HARDWARES   THIRUMUDIVAKKAM', 'opening_balance': 0.0, 'parent': 'THIRUMUDIVAKKAM'}
+{'name': 'Ruthviik Engineering Company    Ramco Engg.Guntur', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Sabri Eletricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'SAGAR ELECTRICALS & HARDWARES    WALAJABAD', 'opening_balance': 0.0, 'parent': 'WALAJABAD'}
+{'name': 'Sagar Electricals & Industrial Hardwares', 'opening_balance': -2688.0, 'parent': 'Sriperumbadur'}
+{'name': 'Sagar Electric Company', 'opening_balance': -5265.0, 'parent': 'S M M St'}
+{'name': 'SAI ELECTRICAL AND HARDWARE', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Sainath Moter & Wires', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Sai Niketh Bakers Maart', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sakthi Electricals', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'Sakthi Electricals  Peravurani', 'opening_balance': 0.0, 'parent': 'Peravurani'}
+{'name': 'Sakthi Hardwares & Electricals', 'opening_balance': -8780.0, 'parent': 'Sriperumbadur'}
+{'name': 'Sakthi Hardwares & Electricals     Adambakkam', 'opening_balance': 0.0, 'parent': 'ADAMBAKKAM'}
+{'name': 'Sakthi Hardwares & Electricals Thiruverkadu', 'opening_balance': 0.0, 'parent': 'Thiruerkadu'}
+{'name': 'Sakthi Hi Teck', 'opening_balance': 0.0, 'parent': 'D] Chidambaram'}
+{'name': 'Sampat Electrical Enyerpries', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Samraat Electric Co.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Sandeep Lites', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Sandesh Electricals', 'opening_balance': -36321.6, 'parent': 'S M M St'}
+{'name': 'Sangam Hardware & Electricals     Uthokottai', 'opening_balance': 0.0, 'parent': 'UTHOKOTTAI'}
+{'name': 'SANGHVI ELECTRIC COMPANY', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Sanjay Electricals', 'opening_balance': -1740.0, 'parent': 'G N St'}
+{'name': 'Sanjay Electricals G N St.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Sanjay Electricals [Nse.Boss Road ]', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Santhi  Electricals & Co', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'Santhosh Electrical & Electronics MANALI', 'opening_balance': 0.0, 'parent': 'MANALI'}
+{'name': 'Santhosh Electrical & Hardwares', 'opening_balance': 0.0, 'parent': 'Chennai'}
+{'name': 'Santhosh Electricals     Adambakkam', 'opening_balance': 0.0, 'parent': 'ADAMBAKKAM'}
+{'name': 'Santhosh Electricals & Electronics', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'SANTHOSH ELECTRICALS & HARDWARS     REDHILLS', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Santhosh Electricals     Mayiladuthurai', 'opening_balance': 0.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'Santi Hardware', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'SANTOSH ELECTRICAL AND HARDWARE  ELAVUR', 'opening_balance': 0.0, 'parent': 'Elavur'}
+{'name': 'SARAS  ELECTRICAL', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Saras Electrical Agency', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Saraswathi Electicals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Saravana Enterprises  Gingee', 'opening_balance': 0.0, 'parent': 'Gingee'}
+{'name': 'Saravana Hardwares', 'opening_balance': 0.0, 'parent': 'Adyar'}
+{'name': 'Saravana Traders Mambakkam[ Murgan Velacherry]', 'opening_balance': 0.0, 'parent': 'VELACHERY'}
+{'name': 'Saravana Traders ,Sirkali', 'opening_balance': 0.0, 'parent': 'A]Sirkali'}
+{'name': 'SARAVANA TRADERS - Thiruvarur', 'opening_balance': 0.0, 'parent': 'Thiruvarur'}
+{'name': 'SASI ELECTRICALS', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'Sasi Electricals & Hardwares', 'opening_balance': 0.0, 'parent': 'Arani'}
+{'name': 'SATHANA ELECTRICAL   T V MALAI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sathiya Motors', 'opening_balance': 0.0, 'parent': 'Perambalur'}
+{'name': 'S B ELECTRICALS', 'opening_balance': 0.0, 'parent': 'ADAMBAKKAM'}
+{'name': 'S.B.M.Light', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'S B .Traders', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SEKAR AGENCIES', 'opening_balance': 0.0, 'parent': 'Arcot'}
+{'name': 'Selva Electrical and Hardware  Avoour', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'SELVA GANAPATHI ELECTRICALS & ELECTRONIC', 'opening_balance': 0.0, 'parent': 'ACHERAPAKKAM'}
+{'name': 'Selvi Electric Co ADYAR', 'opening_balance': 0.0, 'parent': 'Adyar'}
+{'name': 'SGP ELECTRICALS       PATTUKKOTTAI', 'opening_balance': 0.0, 'parent': 'Pattukottai'}
+{'name': 'SHANKAR INDUSTRIE', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'SHANKAR INDUSTRIEAL SPARES', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Shanmar', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SHANTHI HARDWARES & ELECTRICALS   MYLAPORE', 'opening_balance': 0.0, 'parent': 'Mylapore'}
+{'name': 'Shanti Electricals', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Shape Lights', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Sharma Electricals', 'opening_balance': -1350.0, 'parent': 'S M M St'}
+{'name': 'SHA VASTIMAL JAWANJEE', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Shiva Electricals NUNGAMABAKKAM', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Shiva Electrical Works', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Shivam Pumps & Spares', 'opening_balance': -6060.0, 'parent': 'Pattukottai'}
+{'name': 'SHIVA SAKTHI ELECTRICAL AGENCY  AMBUR', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SHIV  ENTERPRISE', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Shree Arihant Enterprises', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Shree Electrical & Hardware 120G N ST', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Shree Electricals Hardwares &Industrial  Manali Tow', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Shree Electrical S M M St', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'SHREE ELECTRICALS [HARDWARE AND PLUMMBING   MANALI', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Shree Electro Suppliers', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Shree Ganesh Karthic Electrical MYLAPORE', 'opening_balance': 0.0, 'parent': 'Mylapore'}
+{'name': 'SHREE KAVERI ELECTRICAL & HARDARES   GPD', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'SHREE KESAVA ELECTRICALS  POLUR', 'opening_balance': 0.0, 'parent': 'Polur'}
+{'name': 'SHREE KRISHNA ELECTRICALS    ASHOK NAGAR', 'opening_balance': 0.0, 'parent': 'K K / ASHOK -- NAGAR'}
+{'name': 'SHREE PADAM ENTERPRISES', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Shree P B Impx', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'SHREE RAM ELECTRICAL & HARDWARES ---- CHROMEPET', 'opening_balance': 0.0, 'parent': 'Chromepet'}
+{'name': 'SHREE RAM ELECTRICALS & H/W    NAGALKENNI', 'opening_balance': 0.0, 'parent': 'NAGALKENI'}
+{'name': 'Shree Sakthi Electricals', 'opening_balance': 0.0, 'parent': 'Thanjavur'}
+{'name': 'Shree Shoba Lites', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Shree Swastik Light', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Shree Veerprabhu Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Shree Venkateshwara Hardwares     Kathankadai', 'opening_balance': 0.0, 'parent': 'Kathankadai'}
+{'name': 'Shree Vijay Shanthisurishwarji Jain Bha0', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Shri Hingulaj Marketing', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Shri Padmavati Minerals', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Shri Ramajayam Hardwares& Electrical', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Siddarth Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Simhapuri Electrical', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Simran Electric Company', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Sireen Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'SIVA ELECTRICALS   PALLAVARAM', 'opening_balance': 0.0, 'parent': 'PALLAVARAM'}
+{'name': 'SIVAM HARDWARES AND ELECTRICALS         ARUMBAKKAM', 'opening_balance': 0.0, 'parent': 'ARUMBAKKAM'}
+{'name': 'Siva Sakthi Electricals', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Siva Sakthi Electricals--Aminjikarai', 'opening_balance': 0.0, 'parent': 'AMINIJIKARAI'}
+{'name': 'SIVASHAKTHI ELECTRICALS &HARDWARES', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'S K ELECTRICALA & HARDWARES        CHENGALPATTU', 'opening_balance': 0.0, 'parent': 'Chengalpattu'}
+{'name': 'S K Electricals &Hardwares   Kadamalaiputhur', 'opening_balance': 0.0, 'parent': 'ACHERAPAKKAM'}
+{'name': 'S.K.Electricalss   Triplicane', 'opening_balance': 0.0, 'parent': 'Triplicane'}
+{'name': 'S K ELECTRICALS     THANJAVUR', 'opening_balance': 0.0, 'parent': 'Thanjavur'}
+{'name': 'S K  Enterprises   K.I.St', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'S K Thirumala Electricals & Electronics', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'S K V Agencies VIRUDHACHALM', 'opening_balance': 0.0, 'parent': 'C] Virudhachalam'}
+{'name': 'Smart E Motors', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'S . M .Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'S M Tech Traders    T V Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sona Electrical', 'opening_balance': 0.0, 'parent': 'Thiruvarur'}
+{'name': 'Sona Lites', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Sowbhakya Electricals and Hardwares       Melavalam', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'Spark Lites', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'SREE BALAJI SPARES', 'opening_balance': 0.0, 'parent': 'Kallakurichi'}
+{'name': 'Sree Lakshmi Electricals  Nagalkeni', 'opening_balance': 0.0, 'parent': 'NAGALKENI'}
+{'name': 'Sree Lakshmi Engineering', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Sree Lakshmi Power Controls   GUNTUR', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'SREE MARKTING', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'SREE SARADHA PAPAR STPRES     PANRUTI', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sree Subham Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Sre Laxmi Tools & Hardwares', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'S R Electrical', 'opening_balance': -3480.0, 'parent': 'G N St'}
+{'name': 'S.R.ELECTRICAL & HARDWARE        SRW-RANIPET', 'opening_balance': 0.0, 'parent': 'Arcot'}
+{'name': 'S R ELECTRICALS &HARDWARES  MELMALAYANUR', 'opening_balance': 0.0, 'parent': 'Melmalayanur'}
+{'name': 'S.R.Electricals  &Refrigeration', 'opening_balance': -6840.0, 'parent': 'G N St'}
+{'name': 'S R Electronics & Electricals - Villivakkam', 'opening_balance': 0.0, 'parent': 'VILLIVAKKAM'}
+{'name': 'Sri Adhikaligambal Hardwares & Electrical   Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Sri Adhvaithaa Electricals Hardwarers', 'opening_balance': 0.0, 'parent': 'NANGANALLUR'}
+{'name': 'Sri Ambigai Marketing   TJ', 'opening_balance': -23430.0, 'parent': 'Thanjavur'}
+{'name': 'SRI AMBIKA ELECTRICAL    SELAIYUR', 'opening_balance': 0.0, 'parent': 'Selaiyur'}
+{'name': 'SRI AMMAN ELECTRICAL', 'opening_balance': 0.0, 'parent': 'Kallakurichi'}
+{'name': 'SRIANDAL ELECTRICALS', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Andavar Elevtrical & Hardwares', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'Sri Angal Amman Corp  Thanipadi', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Angalamman Electricals  T V Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'SRI ARAVINDAN ENTERPRISES ALWARPET', 'opening_balance': 0.0, 'parent': 'Alwarpet'}
+{'name': 'SRI BALA ABHIRAMI HARDWARS        TIMIRI', 'opening_balance': 0.0, 'parent': 'TIMIRI'}
+{'name': 'SRI BALAJI AGENCIES   THIRUMUDIVAKKAM', 'opening_balance': 0.0, 'parent': 'THIRUMUDIVAKKAM'}
+{'name': 'SRI BALAJI AGENCIES [OPP EVR] T V Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Balaji Electrical ARIYALUR', 'opening_balance': -7843.0, 'parent': 'Ariyalur'}
+{'name': 'SRI BALAJI ELECTRICAL & HARDWARES PVC PIPE   VARANV', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'SRI BALAJI ELECTRICAL & REWINDING  WORKS /TV MALAI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Balaji Electricals   Alandur', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SRI BALAJI ELECTRICALS & HAEDWARES  PERUMBAKKAM', 'opening_balance': 0.0, 'parent': 'PERUMBAKKAM'}
+{'name': 'SRI BALAJI ELECTRICALS & HARDWARES   ACHERAPAKKAM', 'opening_balance': 0.0, 'parent': 'ACHERAPAKKAM'}
+{'name': 'Sri Balaji Electrical [Stores ]', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'Sri Balaji Motors & Spares', 'opening_balance': -21889.0, 'parent': 'Customer'}
+{'name': 'SRI BALAJI TRADERS     ARCOT', 'opening_balance': 0.0, 'parent': 'Arcot'}
+{'name': 'Sri Balamurugan Electricals', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Bhavani Electricals   Chromepet', 'opening_balance': 0.0, 'parent': 'Chromepet'}
+{'name': 'Sri Bhavani Hardwares & Electricals', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'SRI BHAVANI HARDWARES & ELECTRICAS  Ashok Ponneri', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'SRI BHAWANI ELECTRICALS H/WS       THIRUMUDIVAKKAM', 'opening_balance': 0.0, 'parent': 'THIRUMUDIVAKKAM'}
+{'name': 'Sri Chetan Electrcals &  Electronics', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'SRI DEVI ELECTRICAL   ACHARAPAKKAM', 'opening_balance': 0.0, 'parent': 'ACHERAPAKKAM'}
+{'name': 'Sri Devi Electrical & Hardwares   Mangalkootroad', 'opening_balance': 0.0, 'parent': 'Mandal Koot Road , Cheyyar'}
+{'name': 'SRI GANAPATHY SPARES', 'opening_balance': 0.0, 'parent': 'Pudhukotai'}
+{'name': 'Sri Ganapathy Traders  PTKT', 'opening_balance': -22255.0, 'parent': 'Pattukottai'}
+{'name': 'Sri Ganesh Electrical  Kandanchavdi', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SRI GANESH ELECTRICALS     ALANDUR', 'opening_balance': 0.0, 'parent': 'Alandur'}
+{'name': 'SRI GANESH ELECTRICALS & H/W      ELAVUR', 'opening_balance': 0.0, 'parent': 'Elavur'}
+{'name': 'Sri Ganesh Electronics & Electricals Hardware Kolpa', 'opening_balance': 0.0, 'parent': 'Kalpakkam'}
+{'name': 'Sri Ganesh Give & Take Corporation', 'opening_balance': 0.0, 'parent': 'Thiruvarur'}
+{'name': 'SRI GANESH PIPE TRADERS       GUDUR', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'SRI GOKUL ENTERPRISES    NEW TOWN', 'opening_balance': 0.0, 'parent': 'MANALI NEW TOWN'}
+{'name': 'Sri Gopi Traders , Arcot//balaji', 'opening_balance': 0.0, 'parent': 'Arcot'}
+{'name': 'Sri Gowri Electricals and Hardwares    Devikapuram', 'opening_balance': 0.0, 'parent': 'DEVIKAPURAM'}
+{'name': 'Sri India Electricals    Amit', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Sri Jayam Electricals & Pipe    Peravarani', 'opening_balance': 0.0, 'parent': 'Peravurani'}
+{'name': 'Sri Joyti Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'SRI Kailash Electricals     Mangadu', 'opening_balance': 0.0, 'parent': 'Mangadu'}
+{'name': 'Sri Kalayani Trading Co.', 'opening_balance': -12465.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'Sri Kalikambal Traders   Thirukkalukundram', 'opening_balance': 0.0, 'parent': 'Thirukkalukundram'}
+{'name': 'SRI KAMATCHI ELECTRICALS  KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Sri Kanagadurga Electrical     Kallakurichi', 'opening_balance': 0.0, 'parent': 'Kallakurichi'}
+{'name': 'Sri Kanakaduruga Industrtis', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri K.B.Electricals', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'Sri Krishana Enterprises', 'opening_balance': -7780.0, 'parent': 'Mannargudi'}
+{'name': 'Sri Krishan Electricals', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'SRI KRISHNA ELECTRICAL & HARDWARES   KOILPATHAGAI', 'opening_balance': 0.0, 'parent': 'AVADI'}
+{'name': 'SRI KRISHNA ELECTRICALS & HARDWARE   ENNORE', 'opening_balance': 0.0, 'parent': 'Ennore'}
+{'name': 'SRI KRISHNA Electricals & Hardware  TADA', 'opening_balance': 0.0, 'parent': 'Tada'}
+{'name': 'Sri Krishna Electricals & Industrials', 'opening_balance': -22410.0, 'parent': 'Sriperumbadur'}
+{'name': 'Sri Krishna Hardwares Electricals & Electronics', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'SRI KRISHNA TRADING COMPANY    KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'SRI LAKSHMI ELECTRICAL & HARDWARES  NEW/GPD', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'SRI LAKSHMI ELEC TRICAL& HARDWARES         UTRMR', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'SRI LAKSHMI ELECTRICAL & H/W', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SRI LAKSHMI ELECTRICALS & ELECTRONICS   THANIPADI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Lakshmi Electricals & Hardwars    Mtkm', 'opening_balance': 0.0, 'parent': 'Madhuranthakam'}
+{'name': 'Sri Lakshmi Electricals    MADIPAKKAM', 'opening_balance': 0.0, 'parent': 'MADIPAKKAM'}
+{'name': 'Sri Lakshmi Engg', 'opening_balance': -256.5, 'parent': 'Customer'}
+{'name': 'Sri Lakshmi Hardwares & Electricals', 'opening_balance': -6290.0, 'parent': 'Sriperumbadur'}
+{'name': 'SRI LAKSHMI HARDWARES & ELECTRICALS   GRANDLINE', 'opening_balance': 0.0, 'parent': 'REDHILLS'}
+{'name': 'Sri  Lakshmi Pipes & Motors      MAYILDUTHURAI', 'opening_balance': 0.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'Sri Lakshmi Srinivasa Electrical & Plumbing', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Sri Lakshmi Traders         Arani', 'opening_balance': 0.0, 'parent': 'Arani'}
+{'name': 'Sri Lakshmi Tube Corporation', 'opening_balance': 0.0, 'parent': 'Thanjavur'}
+{'name': 'Sri Laxmi Hardware & Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Sri Mahalakshmi Company- Maduravoyal', 'opening_balance': 0.0, 'parent': 'MADURAVOYAL'}
+{'name': 'Sri Mahalakshmi Electrical & Hardwares (Kpm)', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Sri Maheshwari Electricals & Hardware  /kumananchav', 'opening_balance': 0.0, 'parent': 'Mangadu'}
+{'name': 'Sri Manonmani Tools &H/w', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'Sri Maruthi Agencies', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'SRI MATHAJI ELECTRICALS & HARDWARES    UTTKOTTAI', 'opening_balance': 0.0, 'parent': 'UTHOKOTTAI'}
+{'name': 'SRI MATHAJI Hardwar &  Electricals  Borwall', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri Mathji Electrical & Hardwares  TIRTHANI', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri Meenakshi Traders', 'opening_balance': 0.0, 'parent': 'Mannargudi'}
+{'name': 'SRI MURUGA HARDWARES & Electricals        Velachery', 'opening_balance': 0.0, 'parent': 'VELACHERY'}
+{'name': 'Sri Murugan Electricals', 'opening_balance': -17335.0, 'parent': 'Arcot'}
+{'name': 'Sri Murugan Electricals & Agencies', 'opening_balance': 0.0, 'parent': 'Perambalur'}
+{'name': 'Sri Murugan Electricals Villipuram', 'opening_balance': 0.0, 'parent': 'B] Villupuram'}
+{'name': 'SRI MURUGAN HARDWARS KEERAPPAKKAM', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'Sri Murugan H/w ARUMBAKKAM', 'opening_balance': 0.0, 'parent': 'ARUMBAKKAM'}
+{'name': 'Sri Nagaraja Enggineerings', 'opening_balance': -10758.0, 'parent': 'A P Route'}
+{'name': 'Sri Neelam Electrical', 'opening_balance': -4540.0, 'parent': 'Customer'}
+{'name': 'SRINIVASA ENTERPRIES  PONNERI', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'Srinivasa Traders', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri Om Sakthi Electricals  Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Sri Pachaiamman Electricals', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'SRI PACHIYAMMAN TRADERS    TIMIRI', 'opening_balance': 0.0, 'parent': 'TIMIRI'}
+{'name': 'Sri Prakash Electricals', 'opening_balance': 0.0, 'parent': 'B] Mayiladuthurai'}
+{'name': 'Sri Rajalakshmi Electricals ARNI', 'opening_balance': 0.0, 'parent': 'Arani'}
+{'name': 'SRI RAJAN ELECTRICAL ASHOK NAGAR', 'opening_balance': 0.0, 'parent': 'K K / ASHOK -- NAGAR'}
+{'name': 'Sri Ramchandra Agencies & Electricals', 'opening_balance': -4500.0, 'parent': 'Ulundurpet'}
+{'name': 'Sri Ramchandra Hardwar &Electricals', 'opening_balance': -30245.0, 'parent': 'Ulundurpet'}
+{'name': 'Sri Ramdev Hardwares & Electricals   Ulagaram', 'opening_balance': 0.0, 'parent': 'ULAGARAM'}
+{'name': 'Sri Ram Electicals Avaurpet', 'opening_balance': 0.0, 'parent': 'Avalurpet'}
+{'name': 'SRI RAM ELECTRICAL & HARDWARES', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'Sri Ram Electricals & Hardwares', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri Ram Traders  Kpm', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'SRI RANA ELECTRICALS    TV MALAI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Rathna Agency Adambakkam', 'opening_balance': 0.0, 'parent': 'ADAMBAKKAM'}
+{'name': 'Sri Sai Krishna Electrical    Kavli', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri Sakthi Murugan Corpation', 'opening_balance': -472.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Sakthivel Electricals  Vettavalam', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Santhi Electricals', 'opening_balance': -4064.0, 'parent': 'Arcot'}
+{'name': 'SRI SANTHOSH ELECTRICALS  PALLAVARAM', 'opening_balance': 0.0, 'parent': 'PALLAVARAM'}
+{'name': 'Sri Saravana & C0           Vinayagapuram', 'opening_balance': 0.0, 'parent': 'KOLATHUR'}
+{'name': 'Sri Saravana Electricals', 'opening_balance': 0.0, 'parent': '1 CHE OUT BAZZAR'}
+{'name': 'SRI SELVA GANAPATHY ENGINEERING', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'Sri Selvam Electricals', 'opening_balance': -18516.0, 'parent': 'Customer'}
+{'name': 'SRI SELVAVINAYAGA AGENCIES    PONNRERI', 'opening_balance': 0.0, 'parent': 'PONNERI'}
+{'name': 'Sri Senthil Andavar', 'opening_balance': -19053.0, 'parent': 'Ulundurpet'}
+{'name': 'Sri Shanmuga Electricals', 'opening_balance': -16781.0, 'parent': 'Perambalur'}
+{'name': 'Sri Shirdi Sai Agencies', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Sri Shiv Shakti /// Tv Malai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'SRI SINGHVI ENTERPRISES   KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Sri Sivagami Electricals', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SRI SIVAKAMI AGENCIES', 'opening_balance': 0.0, 'parent': 'Chengalpattu'}
+{'name': 'Sri Sivam Traders    Tiruvannamalai', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'SRI SIVASAKTHI ELECTRICALS AND H/W     KOOVA THUR', 'opening_balance': 0.0, 'parent': 'Koovathur'}
+{'name': 'SRI SRINIVASA AGENCIES', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri Srinivasa Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'SRI SRINIVASA ELECTRICALS     BUCHI', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Sri Sundha Lights', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Sri Thayaar Pipes Corp.', 'opening_balance': -11490.0, 'parent': 'Mannargudi'}
+{'name': 'Sri Thirumala Enterprises', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sri Thirumurugan Traders  Thirupporur', 'opening_balance': 0.0, 'parent': 'Thirupporur'}
+{'name': 'Sri Varalakshmi Electricals', 'opening_balance': -1400.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Sri Velmurgan Enterprise', 'opening_balance': -2666.0, 'parent': 'B] Villupuram'}
+{'name': 'SRI VEL TRADERS  MANGALAM', 'opening_balance': 0.0, 'parent': 'Mangalam'}
+{'name': 'Sri VENKATESHWARAA ELECTRICALS & HARDWARES', 'opening_balance': 0.0, 'parent': 'AYAPAKKAM'}
+{'name': 'SRI VENKATESWARA AGENCIES', 'opening_balance': 0.0, 'parent': 'C] Virudhachalam'}
+{'name': "Sri Venkateswara Elec's &  H/w, Civil Materials", 'opening_balance': 0.0, 'parent': 'Thirukkazhukundram'}
+{'name': 'Sri Venkateswara Electricals', 'opening_balance': -6505.0, 'parent': 'Sankarapuram'}
+{'name': 'Sri Venkateswara Enterprise', 'opening_balance': 0.0, 'parent': 'C] Virudhachalam'}
+{'name': 'Sri Vijaya Agencies              ARIYALUR', 'opening_balance': 0.0, 'parent': 'Ariyalur'}
+{'name': 'SRI VIJAYALAKSHMI ELECTRICALS KRISHNA KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'Sri Vinayaga Electric Spare& Tools', 'opening_balance': -10000.0, 'parent': 'Kallakurichi'}
+{'name': 'SRI VINAYAGA ENTERPRISES      EKKATTUTHANGAL', 'opening_balance': 0.0, 'parent': 'EKKATUTHANGAL'}
+{'name': 'SRI VINAYAK ELECTRICALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'SRI VISHNU ELECTRICALS & HARDWARES MELMALAYANUR', 'opening_balance': 0.0, 'parent': 'Melmalayanur'}
+{'name': 'Sri V.K.Agencies', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'S R M Builders     Manamelkudi', 'opening_balance': 0.0, 'parent': 'Manamelkudi'}
+{'name': 'S R M Electricals  Cheyyar', 'opening_balance': 0.0, 'parent': 'CHEYYAR'}
+{'name': 'SRM UNIVERSITY', 'opening_balance': 0.0, 'parent': 'Chengalpattu'}
+{'name': 'SRS CARGO LOGISTICS INDIA PVT. LTD', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'Srudeva Enterprises', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'SSA Enterprises', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'S.S.Electrical', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'SS ELECTRICALS & HARDWARES    MUTHAIYALPET', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'S S ELECTRICALS MANALI', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'S S Entreprices     Chirala', 'opening_balance': -24116.0, 'parent': 'A P Route'}
+{'name': 'S S Lites', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'S S TRADING COMPANY', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'STANDARD ELECTRICALS            ADYAR', 'opening_balance': 0.0, 'parent': 'Adyar'}
+{'name': 'STAR DIGITAL PRINT', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'STAR  ELECTRICAL', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Star Electricals    Ayyapakkam', 'opening_balance': 0.0, 'parent': 'AYAPAKKAM'}
+{'name': 'Sugana Sales Croporation', 'opening_balance': -19190.0, 'parent': 'A P Route'}
+{'name': 'Sugan Electricals', 'opening_balance': 0.0, 'parent': 'VELACHERY'}
+{'name': 'Suguna Sales Corporation  Gudur', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Sumit Electric Industries', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Sundaram Electrical & Plumbing AMBATTUR', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SUNDHA ELECTRICALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Sun Electrical', 'opening_balance': -5220.0, 'parent': 'G N St'}
+{'name': 'SUN ELECTRICALS & HARDWARE    Acherapakkam', 'opening_balance': 0.0, 'parent': 'ACHERAPAKKAM'}
+{'name': 'Sunil Electricals & HARDWARES     KELAMBAKKAM', 'opening_balance': 0.0, 'parent': 'Kelambakkam'}
+{'name': 'Sunil L.E.D. Advance Light', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'SUNIL SANITARY  KOLATHUR', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Sunlight Enterprises', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'SUPER ELECTRICALS  L.ENDATHUR', 'opening_balance': 0.0, 'parent': 'Uthiramerur'}
+{'name': 'Supreme Electricals & Appliances ASHOK NAGAR', 'opening_balance': 0.0, 'parent': 'K K / ASHOK -- NAGAR'}
+{'name': 'SURAJ ELECTRICALS   MYLAPORE', 'opening_balance': 0.0, 'parent': 'Mylapore'}
+{'name': 'Surana Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Surbhi Enterprise   NARESH', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Surekha Electricals', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Suresh Electricals & Hardwares', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'Suresh Electricals     Thindivanam', 'opening_balance': 0.0, 'parent': 'Tindivanam'}
+{'name': 'Suresh Electric Co   G N St.', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Suresh Pharmaceuticals  P V T , L T D', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'SURYA E;LECTCALS & H /W  KISHAN', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Surya Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Surya Electrical& Hardwares', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Surya Electricals & Hardwares Sothupakkam', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': 'Surya Electricals & Hardwares Thirukazhukundram', 'opening_balance': 0.0, 'parent': 'Thirukkalukundram'}
+{'name': 'Surya Engineering Croporation  Guntur', 'opening_balance': 0.0, 'parent': 'A P Route'}
+{'name': 'Surya Enterprises', 'opening_balance': 0.0, 'parent': 'Sriperumbadur'}
+{'name': 'SURYA TRADERS  SRIPERUMBUDUR', 'opening_balance': 0.0, 'parent': 'Sriperumbadur'}
+{'name': 'Sushil Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Svsk Electricals and Hardwares', 'opening_balance': 0.0, 'parent': 'Tindivanam'}
+{'name': 'TAMIL ELECTRICALS   AVALURPET', 'opening_balance': 0.0, 'parent': 'Avalurpet'}
+{'name': 'TAMILNADU AGENCY        G  N ST', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Tamilnadu Electricals & Automobiles', 'opening_balance': 0.0, 'parent': 'Gingee'}
+{'name': 'Tamilnadu Electric Palace', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Tarka Toys', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'T .D.SIVA PRASAD', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'TECWIN INDUSTRIES (Gummidipoondi)', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'THANGAM ELECRICALS & SANITARY WARS     TV MALAI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'THANGAM  ELECTRICALS     ATTUR', 'opening_balance': 0.0, 'parent': 'Attur'}
+{'name': 'Thenral Electricals & Pipe    Kallakurichi', 'opening_balance': 0.0, 'parent': 'Kallakurichi'}
+{'name': 'THE POWER HOUSE ELECTRICALS       ARIYALUR', 'opening_balance': 0.0, 'parent': 'Ariyalur'}
+{'name': 'The Singapore Electricals &Pipes', 'opening_balance': 0.0, 'parent': 'Pudhukotai'}
+{'name': 'Thialk Ramkumar Agencies   7867034261', 'opening_balance': 0.0, 'parent': 'THIRKOLIUR.'}
+{'name': 'Thillai Electricals Agencies', 'opening_balance': 0.0, 'parent': 'C] Virudhachalam'}
+{'name': 'Thirugnanam and Co', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Thirumalai Electricals & Engineering   TN MALAI', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'THIRUPATHI TRADERS MALMALAYANUR', 'opening_balance': 0.0, 'parent': 'Melmalayanur'}
+{'name': 'T S R Enterprise        Sharique Ahmed', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'T T M  Traders', 'opening_balance': 0.0, 'parent': 'C] Virudhachalam'}
+{'name': 'UMA ELECTRICALS  THANDRAMPET', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'UNIVERSAL ELECTRICALS   TADA', 'opening_balance': 0.0, 'parent': 'Tada'}
+{'name': 'Universal Pipes Electrical &Plumbing', 'opening_balance': -3820.0, 'parent': 'Pudhukotai'}
+{'name': 'Utham Electrical -- G.N.St', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'UTHAM ELECTRICAL - VADAPAYAM', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'Vaani Electricals  T Vmalai   Kandachipuram', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Vairam Hardwares KALOPAKKAM', 'opening_balance': 0.0, 'parent': 'Kalpakkam'}
+{'name': 'VALLI  ELECTRICAL &STEELS', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Vandana Electrical', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Vasanthi AGENCIES     THAMBU CHETTY', 'opening_balance': 0.0, 'parent': 'Brodway'}
+{'name': 'Vassavi Traders', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'VEENA ELECTRICALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'VEERA TRADERS      MADUKKUR', 'opening_balance': 0.0, 'parent': 'MADUKKUR'}
+{'name': 'Veer Electricals', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Velavan Agency      Kootroad Chengalpattu', 'opening_balance': 0.0, 'parent': 'Chengalpattu'}
+{'name': 'Venus Electricals & Hardware Arumbakkam', 'opening_balance': 0.0, 'parent': 'ARUMBAKKAM'}
+{'name': 'Venus Hardwares          Gummidipoondi', 'opening_balance': 0.0, 'parent': 'GUMDDIPOODI'}
+{'name': 'VIGNESH AGENCIES   KODUNGAIYAR', 'opening_balance': 0.0, 'parent': 'KODUNGAIYAR'}
+{'name': 'VIGNESH ELECTRICAL     KOTTAI', 'opening_balance': 0.0, 'parent': 'Kottai'}
+{'name': 'VIGNESH ELECTRICAL & PLUMBING', 'opening_balance': 0.0, 'parent': 'ADAMBAKKAM'}
+{'name': 'Vijaya Lakshmi Hardwares & Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'VIJAY ELECTRICALS', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'VIJAY SHANTI ENCLOSURES[INDIA]', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Vikaram Lites', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'Vimal Electrical & Hardwares   Adambakkam', 'opening_balance': 0.0, 'parent': 'ADAMBAKKAM'}
+{'name': 'Vimal Electricals                       Chengalpet', 'opening_balance': -12272.0, 'parent': 'Chengalpattu'}
+{'name': 'Vimal Sales Corpration', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'Vinayaga Depot', 'opening_balance': 0.0, 'parent': 'North Surya'}
+{'name': 'Vinayak Electricals & Hardwares  Ayyappakkam', 'opening_balance': 0.0, 'parent': 'AYAPAKKAM'}
+{'name': 'Vinod Electrical MYLAPORE', 'opening_balance': 0.0, 'parent': 'Mylapore'}
+{'name': 'Vinoth Electricals and Hardware  Mewlakottaiyur', 'opening_balance': 0.0, 'parent': '2 LAK-Friday // Saterday'}
+{'name': "VIRAT ELECTRIC'S", 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'VISHAL ELECTRICALS', 'opening_balance': 0.0, 'parent': 'G N St'}
+{'name': 'VISHNU ELECTRICALS KPM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'V N R LIGHT & ELECTRICALS    LITTELE KANCHIPURAM', 'opening_balance': 0.0, 'parent': 'Kanchipuram'}
+{'name': 'V S ENTERPRISE', 'opening_balance': 0.0, 'parent': 'S M M St'}
+{'name': 'V V ENTERPRISES', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'YAAZHINI PUMPS &SPARES', 'opening_balance': 0.0, 'parent': 'Pattukottai'}
+{'name': 'YASHIKA ELECTRICALS NALLAVAN PALALIYAM', 'opening_balance': 0.0, 'parent': 'Thiruvannamalai.'}
+{'name': 'Yuvaraj Electricals', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Zaigo Infotech Software Solutions', 'opening_balance': 0.0, 'parent': 'Customer'}
+{'name': 'ZEENATH ELECTRICALS', 'opening_balance': 0.0, 'parent': 'Route Old Chennai'}
+{'name': 'Zhankar Electricals', 'opening_balance': 0.0, 'parent': 'S M M St'}
+
+--- Testing Day Book Parser ---
+Sales found: 2
+{'type': 'Sales', 'party': 'C . N  Jagadeesan Traders   GANESH', 'date': '2026-06-11', 'number': '2627RTC0092', 'amount': 8980.0}
+{'type': 'Sales', 'party': 'AYYAN ELECTRICALS & TRADERS  Mq', 'date': '2026-06-11', 'number': '2627RTC0093', 'amount': 5840.0}
+Receipts found: 0

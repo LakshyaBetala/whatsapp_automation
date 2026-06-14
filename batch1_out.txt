@@ -1,0 +1,12 @@
+Reading and sanitizing raw_ledger_balances.xml...
+Total debtors found: 11
+{'name': 'Allied Enterprises', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'Kalyan Impex India', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'Kavi Sankar Pipe Corporation', 'closing_balance': '0', 'opening_balance': '-10800.00', 'parent': 'Sundry Debtors'}
+{'name': 'K. MOHAN RAJ', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'M K TRADERS', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'Rajkumar Gupta', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'Ram Textiles', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'RANKA TRADING CO', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'RPT Engineering Design & Consultancy Services', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}
+{'name': 'SRS CARGO LOGISTICS INDIA PVT. LTD', 'closing_balance': '0', 'opening_balance': '', 'parent': 'Sundry Debtors'}

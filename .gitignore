@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+*.env
+!.env.example
+
+# PyInstaller (agent build artifacts)
+tally_agent/build/
+tally_agent/dist/
+*.spec
+
+# WeasyPrint / generated
+*.pdf
+generated/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

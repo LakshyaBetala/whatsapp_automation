@@ -1,0 +1,19 @@
+﻿--- Testing Debtors Parser ---
+Found 11 debtors.
+{'name': 'Allied Enterprises', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'Kalyan Impex India', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'Kavi Sankar Pipe Corporation', 'opening_balance': -10800.0, 'parent': 'Sundry Debtors'}
+{'name': 'K. MOHAN RAJ', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'M K TRADERS', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'Rajkumar Gupta', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'Ram Textiles', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'RANKA TRADING CO', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'RPT Engineering Design & Consultancy Services', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'SRS CARGO LOGISTICS INDIA PVT. LTD', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+{'name': 'V V ENTERPRISES', 'opening_balance': 0.0, 'parent': 'Sundry Debtors'}
+
+--- Testing Day Book Parser ---
+Sales found: 2
+{'type': 'Sales', 'party': 'C . N  Jagadeesan Traders   GANESH', 'date': '2026-06-11', 'number': '2627RTC0092', 'amount': 8980.0}
+{'type': 'Sales', 'party': 'AYYAN ELECTRICALS & TRADERS  Mq', 'date': '2026-06-11', 'number': '2627RTC0093', 'amount': 5840.0}
+Receipts found: 0
