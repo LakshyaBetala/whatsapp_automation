@@ -25,3 +25,11 @@ generated/
 Thumbs.db
 .vscode/
 .idea/
+
+# Ignore large binary and output files
+build/
+dist/
+TallyAgentRelease/
+*.xml
+*.txt
+!requirements.txt
