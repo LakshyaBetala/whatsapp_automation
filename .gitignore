@@ -33,3 +33,9 @@ TallyAgentRelease/
 *.xml
 *.txt
 !requirements.txt
+
+# Scratch / debug scripts
+batch*.py
+dump_*.py
+analyze_*.py
+parse_*.py
