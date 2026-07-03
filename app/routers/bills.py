@@ -133,7 +133,7 @@ async def _generate_and_deliver(bill_id: str) -> None:
         invoice_num = bill.get("invoice_number") or bill_id[:8]
         amount_str = inr(Decimal(str(bill["amount"])))
 
-        tpl_name, _ = render(
+        tpl_name, body = render(
             "invoice", lang,
             client=client.get("name", "Customer"),
             business=biz.get("business_name", ""),
@@ -163,6 +163,7 @@ async def _generate_and_deliver(bill_id: str) -> None:
             language=lang,
             media_url=pdf_url,
             media_filename=f"Invoice_{invoice_num}.pdf",
+            message_text=body,
         )
     except Exception:
         log.exception("WhatsApp delivery failed for bill %s", bill_id)

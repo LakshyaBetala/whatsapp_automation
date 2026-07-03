@@ -1,9 +1,11 @@
-"""Central WhatsApp send service — every outbound message flows through here.
+"""Central WhatsApp send service — using the OpenWA Node microservice.
 
-AiSensy API v2 — verify campaign names match exactly what is approved in dashboard.
+The OpenWA service URL comes from settings (OPENWA_URL env var) so the
+backend can run on Railway while the WA service runs elsewhere.
 """
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Optional
 
@@ -15,17 +17,9 @@ from app.models import PLAN_LIMITS, Lang, MessageType, Plan
 
 log = logging.getLogger(__name__)
 
-# AiSensy campaign send endpoint (API v2)
-AISENSY_SEND_URL = f"{settings.aisensy_api_base}/campaign/t1/api/v2"
-
 
 async def _check_usage_and_increment(business_id: str, plan: Plan) -> bool:
-    """Atomically check plan limit and increment usage counter.
-
-    Uses the Postgres ``increment_usage_if_allowed`` function which locks the
-    row with ``FOR UPDATE`` — two concurrent sends at the boundary cannot both
-    pass.  Returns ``True`` if the send is allowed.
-    """
+    """Atomically check plan limit and increment usage counter."""
     db = require_db()
     limit = PLAN_LIMITS[plan]["messages"]
     result = db.rpc("increment_usage_if_allowed", {
@@ -38,11 +32,101 @@ async def _check_usage_and_increment(business_id: str, plan: Plan) -> bool:
         return False
 
     data = result.data
-    # supabase-py may return a list with one element or a dict directly
     if isinstance(data, list):
         data = data[0] if data else {}
     return bool(data.get("allowed", False))
 
+
+async def send_message(
+    *,
+    business_id: str,
+    to_number: str,
+    message_text: str,
+    plan: Plan = Plan.starter,
+    message_type: MessageType = MessageType.invoice,
+    reminder_day: Optional[int] = None,
+    client_id: Optional[str] = None,
+    bill_id: Optional[str] = None,
+    language: Lang = Lang.hi,
+    pdf_base64: Optional[str] = None,
+    pdf_filename: Optional[str] = None,
+    template_name: str = "openwa_custom",
+) -> dict:
+    """Send a WhatsApp message via OpenWA.
+
+    Handles:
+      1. Atomic plan-limit check (Postgres ``FOR UPDATE``)
+      2. OpenWA HTTP call
+      3. ``messages`` table insert (audit)
+    """
+    db = require_db()
+
+    # ── 1. Atomic plan-limit check ────────────────────────────────────
+    allowed = await _check_usage_and_increment(business_id, plan)
+    if not allowed:
+        log.warning("Plan limit reached for business %s — skipping send", business_id)
+        db.table("messages").insert({
+            "business_id": business_id,
+            "client_id": client_id,
+            "bill_id": bill_id,
+            "type": message_type.value,
+            "reminder_day": reminder_day,
+            "template_name": template_name,
+            "language": language.value,
+            "delivery_status": "limit_reached",
+            "cost": 0,
+        }).execute()
+        return {"sent": False, "reason": "limit_reached"}
+
+    # ── 2. OpenWA API call ───────────────────────────────────────────
+    payload = {
+        "phone": to_number,
+        "message": message_text,
+    }
+    if pdf_base64:
+        payload["pdf_base64"] = pdf_base64
+        payload["pdf_name"] = pdf_filename or "invoice.pdf"
+
+    openwa_message_id = None
+    delivery_status = "sent"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.post(f"{settings.openwa_url}/api/wa/send", json=payload)
+            resp.raise_for_status()
+            resp_data = resp.json()
+            if not resp_data.get("success", True):
+                raise RuntimeError(resp_data.get("error", "wa_service reported failure"))
+            openwa_message_id = resp_data.get("messageId", "openwa-sent")
+            log.info("WhatsApp sent to %s via OpenWA", to_number)
+    except Exception as exc:
+        log.error("OpenWA send failed for %s: %s", to_number, exc)
+        delivery_status = "failed"
+
+    # ── 3. Log to messages table ──────────────────────────────────────
+    msg_row = (
+        db.table("messages")
+        .insert({
+            "business_id": business_id,
+            "client_id": client_id,
+            "bill_id": bill_id,
+            "type": message_type.value,
+            "reminder_day": reminder_day,
+            "template_name": template_name,
+            "language": language.value,
+            "aisensy_message_id": openwa_message_id, # Re-using this column for message ID
+            "delivery_status": delivery_status,
+            "cost": 0, # OpenWA is free!
+        })
+        .execute()
+    )
+
+    return {
+        "sent": delivery_status == "sent",
+        "message_id": openwa_message_id,
+        "delivery_status": delivery_status,
+        "db_id": msg_row.data[0]["id"] if msg_row.data else None,
+    }
 
 async def send_template(
     *,
@@ -59,104 +143,45 @@ async def send_template(
     language: Lang = Lang.hi,
     media_url: Optional[str] = None,
     media_filename: Optional[str] = None,
+    message_text: Optional[str] = None,
 ) -> dict:
-    """Send a WhatsApp template message via AiSensy.
+    """Template-shaped send used by jobs and routers.
 
-    **All outbound WhatsApp messages MUST go through this function.**
-
-    Handles:
-      1. Atomic plan-limit check (Postgres ``FOR UPDATE``)
-      2. AiSensy HTTP call (or dry-run log when not configured)
-      3. ``messages`` table insert (audit + cost ledger)
+    Callers render the message body locally via ``templates.render`` and pass
+    it as ``message_text``; ``campaign_name``/``template_params`` are kept for
+    the audit trail (and for a future BSP that sends by template name).
+    If ``media_url`` points at a PDF, it is downloaded and attached; on any
+    download failure the URL is appended to the text instead so the message
+    still goes out.
     """
-    db = require_db()
+    text = message_text or "\n".join(str(p) for p in template_params)
 
-    # ── 1. Atomic plan-limit check ────────────────────────────────────
-    allowed = await _check_usage_and_increment(business_id, plan)
-    if not allowed:
-        log.warning("Plan limit reached for business %s — skipping send", business_id)
-        db.table("messages").insert({
-            "business_id": business_id,
-            "client_id": client_id,
-            "bill_id": bill_id,
-            "type": message_type.value,
-            "reminder_day": reminder_day,
-            "template_name": campaign_name,
-            "language": language.value,
-            "delivery_status": "limit_reached",
-            "cost": 0,
-        }).execute()
-        return {"sent": False, "reason": "limit_reached"}
-
-    # ── 2. AiSensy API call ───────────────────────────────────────────
-    payload = {
-        "apiKey": settings.aisensy_api_key,
-        "campaignName": campaign_name,
-        "destination": to_number,
-        "userName": business_name,
-        "templateParams": template_params,
-    }
+    pdf_base64: Optional[str] = None
     if media_url:
-        payload["media"] = {
-            "url": media_url,
-            "filename": media_filename or "document.pdf",
-        }
-
-    aisensy_message_id: str | None = None
-    delivery_status = "sent"
-
-    if settings.aisensy_configured:
         try:
             async with httpx.AsyncClient(timeout=30) as http:
-                resp = await http.post(AISENSY_SEND_URL, json=payload)
+                resp = await http.get(media_url)
                 resp.raise_for_status()
-                resp_data = resp.json()
-                aisensy_message_id = (
-                    resp_data.get("messageId")
-                    or resp_data.get("id")
-                    or resp_data.get("data", {}).get("messageId")
-                )
-                log.info(
-                    "WhatsApp sent to %s via AiSensy: %s",
-                    to_number,
-                    aisensy_message_id,
-                )
-        except httpx.HTTPError as exc:
-            log.error("AiSensy send failed for %s: %s", to_number, exc)
-            delivery_status = "failed"
-    else:
-        log.info(
-            "[DRY RUN] WhatsApp to %s | campaign=%s | params=%s",
-            to_number,
-            campaign_name,
-            template_params,
-        )
-        delivery_status = "dry_run"
+                pdf_base64 = base64.b64encode(resp.content).decode("ascii")
+        except Exception as exc:
+            log.warning("Could not fetch media %s (%s) — sending link instead", media_url, exc)
+            if media_url not in text:
+                text = f"{text}\n{media_url}"
 
-    # ── 3. Log to messages table ──────────────────────────────────────
-    msg_row = (
-        db.table("messages")
-        .insert({
-            "business_id": business_id,
-            "client_id": client_id,
-            "bill_id": bill_id,
-            "type": message_type.value,
-            "reminder_day": reminder_day,
-            "template_name": campaign_name,
-            "language": language.value,
-            "aisensy_message_id": aisensy_message_id,
-            "delivery_status": delivery_status,
-            "cost": 0.145 if delivery_status != "failed" else 0,
-        })
-        .execute()
+    return await send_message(
+        business_id=business_id,
+        to_number=to_number,
+        message_text=text,
+        plan=plan,
+        message_type=message_type,
+        reminder_day=reminder_day,
+        client_id=client_id,
+        bill_id=bill_id,
+        language=language,
+        pdf_base64=pdf_base64,
+        pdf_filename=media_filename,
+        template_name=campaign_name,
     )
-
-    return {
-        "sent": delivery_status in ("sent", "dry_run"),
-        "message_id": aisensy_message_id,
-        "delivery_status": delivery_status,
-        "db_id": msg_row.data[0]["id"] if msg_row.data else None,
-    }
 
 
 async def notify_owner(business_id: str, alert_text: str) -> dict:
@@ -164,7 +189,7 @@ async def notify_owner(business_id: str, alert_text: str) -> dict:
     db = require_db()
     biz = (
         db.table("businesses")
-        .select("whatsapp_number, business_name, plan")
+        .select("whatsapp_number, plan")
         .eq("id", business_id)
         .single()
         .execute()
@@ -173,12 +198,10 @@ async def notify_owner(business_id: str, alert_text: str) -> dict:
         log.error("Business %s not found for owner notification", business_id)
         return {"sent": False, "reason": "business_not_found"}
 
-    return await send_template(
+    return await send_message(
         business_id=business_id,
         to_number=biz.data["whatsapp_number"],
-        campaign_name="owner_alert_hi",
-        template_params=[biz.data.get("business_name", ""), alert_text],
-        business_name=biz.data.get("business_name", ""),
+        message_text=alert_text,
         plan=Plan(biz.data["plan"]),
         message_type=MessageType.owner_alert,
         language=Lang.hi,

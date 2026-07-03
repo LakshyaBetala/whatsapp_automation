@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
@@ -35,6 +35,13 @@ class TallySyncPayload(BaseModel):
     sync_date: str  # YYYY-MM-DD
     vouchers: list[TallyVoucher]
 
+def _fy_start(today: Optional[date] = None) -> date:
+    """April 1 of the current Indian financial year."""
+    d = today or date.today()
+    year = d.year if d.month >= 4 else d.year - 1
+    return date(year, 4, 1)
+
+
 def _verify_token(business_id: uuid.UUID, agent_token: str):
     db = require_db()
     resp = db.table("businesses").select("agent_token").eq("id", str(business_id)).execute()
@@ -53,53 +60,49 @@ async def import_outstanding(payload: TallyImportPayload):
     zero_balances = 0
     errors = []
 
-    # Start of financial year (hardcoded to 2026-04-01 as per spec, or dynamic based on current date)
-    # The spec explicitly mentions: "2026-04-01 for FY2026-27"
-    fy_start = date(2026, 4, 1)
+    # Start of the current Indian financial year (Apr 1)
+    fy_start = _fy_start()
 
     for debtor in payload.debtors:
         try:
             # 1. Upsert Client
             # Check if client exists
             client_resp = db.table("clients").select("id").eq("business_id", str(payload.business_id)).eq("tally_ledger_name", debtor.name).execute()
-            
+
             client_id = None
-            notes = ""
             if debtor.opening_balance < 0:
                 credit_balances += 1
-                notes = f"Credit balance: {abs(debtor.opening_balance)}"
             elif debtor.opening_balance == 0:
                 zero_balances += 1
 
             if not client_resp.data:
-                # Insert client
+                # Insert client (clients.name is NOT NULL — mirror the ledger name)
                 new_client = db.table("clients").insert({
                     "business_id": str(payload.business_id),
+                    "name": debtor.name,
                     "tally_ledger_name": debtor.name,
                     "tally_group": debtor.tally_group,
-                    "notes": notes
                 }).execute()
                 client_id = new_client.data[0]["id"]
                 clients_created += 1
             else:
                 client_id = client_resp.data[0]["id"]
-                if notes:
-                    db.table("clients").update({"notes": notes}).eq("id", client_id).execute()
 
             # 2. Insert opening balance bill if positive
             if debtor.opening_balance > 0:
                 v_num = f"OB-{debtor.name[:20]}"
-                # Check if OB bill already exists
-                bill_resp = db.table("bills").select("id").eq("business_id", str(payload.business_id)).eq("voucher_number", v_num).execute()
+                # Check if OB bill already exists (unique on business_id + tally_voucher_number)
+                bill_resp = db.table("bills").select("id").eq("business_id", str(payload.business_id)).eq("tally_voucher_number", v_num).execute()
                 if not bill_resp.data:
                     db.table("bills").insert({
                         "business_id": str(payload.business_id),
                         "client_id": client_id,
-                        "voucher_number": v_num,
+                        "invoice_number": v_num,
+                        "tally_voucher_number": v_num,
                         "amount": debtor.opening_balance,
                         "paid_amount": 0.0,
                         "invoice_date": fy_start.isoformat(),
-                        "due_date": fy_start.isoformat(), # default due_date
+                        "due_date": fy_start.isoformat(), # already outstanding — due immediately
                         "status": "pending",
                         "is_opening_balance": True
                     }).execute()
@@ -126,32 +129,32 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     for v in payload.vouchers:
         try:
             # Match party
-            client_resp = db.table("clients").select("id, whatsapp_number, default_credit_days").eq("business_id", str(payload.business_id)).eq("tally_ledger_name", v.party_name).execute()
+            client_resp = db.table("clients").select("id, whatsapp_number, credit_days").eq("business_id", str(payload.business_id)).eq("tally_ledger_name", v.party_name).execute()
             if not client_resp.data:
                 unmatched_parties.append(v.party_name)
                 continue
-                
+
             client = client_resp.data[0]
             client_id = client["id"]
 
             if v.voucher_type.lower() == "sales":
-                # Check if it already exists
-                bill_resp = db.table("bills").select("id").eq("business_id", str(payload.business_id)).eq("voucher_number", v.voucher_number).execute()
-                
+                # Check if it already exists (unique on business_id + tally_voucher_number)
+                bill_resp = db.table("bills").select("id").eq("business_id", str(payload.business_id)).eq("tally_voucher_number", v.voucher_number).execute()
+
                 if not bill_resp.data:
-                    # New bill insert
-                    credit_days = client.get("default_credit_days") or 15
-                    # Simple due date calc (using date + credit_days logic simplified here for time, though normally you'd parse ISO)
-                    # We will let the DB or background handle exact due_date if not specified here. For now we just insert invoice_date.
-                    # We import date as YYYY-MM-DD
+                    # New bill insert — due_date = invoice_date + client credit period
+                    credit_days = client.get("credit_days") or 30
+                    invoice_date = date.fromisoformat(v.date)
+                    due_date = invoice_date + timedelta(days=credit_days)
                     inserted_bill = db.table("bills").insert({
                         "business_id": str(payload.business_id),
                         "client_id": client_id,
-                        "voucher_number": v.voucher_number,
+                        "invoice_number": v.voucher_number,
+                        "tally_voucher_number": v.voucher_number,
                         "amount": v.amount,
                         "paid_amount": 0.0,
-                        "invoice_date": v.date,
-                        "due_date": v.date, # Simplified for now
+                        "invoice_date": invoice_date.isoformat(),
+                        "due_date": due_date.isoformat(),
                         "status": "pending",
                         "is_opening_balance": False
                     }).execute()

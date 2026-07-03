@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     aisensy_api_base: str = "https://backend.aisensy.com"
     aisensy_webhook_secret: str = ""
 
+    # --- OpenWA (WhatsApp Node microservice, wa_service/ — port 3001) ---
+    openwa_url: str = "http://localhost:3001"
+
     # --- App ---
     app_env: str = "development"
     timezone: str = "Asia/Kolkata"

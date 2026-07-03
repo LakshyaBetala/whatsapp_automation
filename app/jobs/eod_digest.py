@@ -258,6 +258,7 @@ async def run() -> None:
                 plan=Plan(biz["plan"]),
                 message_type=MessageType.eod_digest,
                 language=Lang.hi,
+                message_text=(rendered_body + stale_warning) if stale_warning else rendered_body,
             )
             sent += 1
 

@@ -20,7 +20,6 @@ def sanitize_xml(raw_bytes: bytes) -> str:
     return text
 
 def parse_tally_date(date_str: str) -> Optional[str]:
-    """Converts 'YYYYMMDD' to 'YYYY-MM-DD'."""
     if not date_str or len(date_str) != 8:
         return None
     try:
@@ -30,7 +29,6 @@ def parse_tally_date(date_str: str) -> Optional[str]:
         return None
 
 def extract_amount(element: ET.Element) -> float:
-    """Extracts absolute float amount from anywhere within the element."""
     amount = 0.0
     for entry in element.iter('AMOUNT'):
         amt_text = entry.text
@@ -43,77 +41,104 @@ def extract_amount(element: ET.Element) -> float:
                 pass
     return amount
 
-def build_all_masters_query() -> str:
-    """Query to fetch all masters to extract debtors."""
+def build_receivables_query() -> str:
+    """Queries the physical tally_saas.tdl report for Debtors."""
     return '''<ENVELOPE>
-<HEADER><TALLYREQUEST>Export Data</TALLYREQUEST></HEADER>
-<BODY><EXPORTDATA><REQUESTDESC>
-<REPORTNAME>List of Accounts</REPORTNAME>
-<STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES>
-</REQUESTDESC></EXPORTDATA></BODY>
-</ENVELOPE>'''
+    <HEADER>
+      <VERSION>1</VERSION>
+      <TALLYREQUEST>EXPORT</TALLYREQUEST>
+      <TYPE>DATA</TYPE>
+      <ID>SAAS Debtors</ID>
+    </HEADER>
+    <BODY>
+      <DESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        </STATICVARIABLES>
+      </DESC>
+    </BODY>
+  </ENVELOPE>'''
 
-def build_daybook_query() -> str:
-    """
-    Query to fetch Day Book. 
-    Note: Tally ignores SVFROMDATE/SVTODATE over HTTP without custom TDL.
-    This will return the active period in the Tally UI.
-    """
+def build_payables_query() -> str:
     return '''<ENVELOPE>
-<HEADER><TALLYREQUEST>Export Data</TALLYREQUEST></HEADER>
-<BODY><EXPORTDATA><REQUESTDESC>
-<REPORTNAME>Day Book</REPORTNAME>
-<STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES>
-</REQUESTDESC></EXPORTDATA></BODY>
-</ENVELOPE>'''
+    <HEADER>
+      <VERSION>1</VERSION>
+      <TALLYREQUEST>EXPORT</TALLYREQUEST>
+      <TYPE>DATA</TYPE>
+      <ID>SAAS Creditors</ID>
+    </HEADER>
+    <BODY>
+      <DESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        </STATICVARIABLES>
+      </DESC>
+    </BODY>
+  </ENVELOPE>'''
+
+def build_daybook_query(from_date="20230401", to_date="20260331") -> str:
+    """Queries the physical tally_saas.tdl report for Daybook/Vouchers."""
+    return f'''<ENVELOPE>
+    <HEADER>
+      <VERSION>1</VERSION>
+      <TALLYREQUEST>EXPORT</TALLYREQUEST>
+      <TYPE>DATA</TYPE>
+      <ID>SAAS Daybook</ID>
+    </HEADER>
+    <BODY>
+      <DESC>
+        <STATICVARIABLES>
+          <SVFROMDATE>{from_date}</SVFROMDATE>
+          <SVTODATE>{to_date}</SVTODATE>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        </STATICVARIABLES>
+      </DESC>
+    </BODY>
+  </ENVELOPE>'''
 
 def parse_debtors(xml_text: str) -> List[Dict[str, Any]]:
-    """Parses All Masters XML to extract Sundry Debtors and Opening Balances using full group hierarchy."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return []
 
-    # 1. Build Group Hierarchy
-    group_parents = {}
-    for group in root.iter('GROUP'):
-        name = group.get('NAME', group.findtext('NAME', ''))
-        parent = group.findtext('PARENT', '')
-        if name:
-            group_parents[name] = parent
-
-    def is_debtor(group_name: str) -> bool:
-        if not group_name: 
-            return False
-        if 'sundry debtor' in group_name.lower(): 
-            return True
-        parent = group_parents.get(group_name)
-        if parent:
-            return is_debtor(parent)
-        return False
-
-    # 2. Extract Ledgers
     debtors = []
-    for ledger in root.iter('LEDGER'):
-        parent = ledger.findtext('PARENT', '')
-        if is_debtor(parent):
-            name = ledger.get('NAME', ledger.findtext('NAME', ''))
-            opening_str = ledger.findtext('OPENINGBALANCE', '0')
+    
+    # SAAS Debtors Line is the repetitive node in our TDL
+    for line in root.iter('SAASDEBTORSLINE'):
+        name = line.findtext('PARTYNAME', '')
+        opening_str = line.findtext('CLOSINGBALANCE', '0')
+        try:
+            closing_balance = float(opening_str.replace('-', '').strip())
+        except ValueError:
+            closing_balance = 0.0
             
+        bills = []
+        for bill_alloc in line.iter('SAASBILLALLOCLINE'):
+            bill_name = bill_alloc.findtext('BILLNAME', '')
+            bill_date = bill_alloc.findtext('BILLDATE', '')
+            bill_amount_str = bill_alloc.findtext('BILLAMOUNT', '0')
             try:
-                opening_balance = float(opening_str.strip())
+                bill_amount = abs(float(bill_amount_str.replace('-', '').strip()))
             except ValueError:
-                opening_balance = 0.0
+                bill_amount = 0.0
                 
-            debtors.append({
-                'name': name,
-                'opening_balance': opening_balance,
-                'parent': parent
-            })
+            if bill_name and bill_amount > 0:
+                bills.append({
+                    'bill_name': bill_name,
+                    'bill_date': bill_date,
+                    'amount': bill_amount
+                })
+
+        debtors.append({
+            'name': name,
+            'closing_balance': closing_balance,
+            'bills': bills
+        })
+        
     return debtors
 
 def parse_daybook(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Parses Day Book XML to extract Sales and Receipt vouchers."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
@@ -122,11 +147,12 @@ def parse_daybook(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:
     sales = []
     receipts = []
 
-    for voucher in root.iter('VOUCHER'):
-        vtype = voucher.attrib.get('VCHTYPE', voucher.findtext('VOUCHERTYPENAME', ''))
-        party = voucher.findtext('PARTYLEDGERNAME', '')
-        raw_date = voucher.findtext('DATE', '')
-        number = voucher.findtext('VOUCHERNUMBER', '')
+    for line in root.iter('SAASDAYBOOKLINE'):
+        vtype = line.findtext('VOUCHERTYPENAME', '')
+        party = line.findtext('PARTYLEDGERNAME', '')
+        raw_date = line.findtext('DATE', '')
+        number = line.findtext('VOUCHERNUMBER', '')
+        amount_str = line.findtext('AMOUNT', '0')
         
         if not party or not raw_date:
             continue
@@ -135,14 +161,28 @@ def parse_daybook(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:
         if not formatted_date:
             continue
             
-        amount = extract_amount(voucher)
+        try:
+            amount = abs(float(amount_str.replace('-', '').strip()))
+        except ValueError:
+            amount = 0.0
         
+        # Extract deep inventory details
+        items = []
+        for inv_line in line.iter('SAASVCHINVLINE'):
+            items.append({
+                'item_name': inv_line.findtext('STOCKITEMNAME', ''),
+                'qty': inv_line.findtext('BILLEDQTY', ''),
+                'rate': inv_line.findtext('RATE', ''),
+                'amount': inv_line.findtext('ITEMAMOUNT', '0')
+            })
+
         record = {
             'type': vtype,
             'party': party,
             'date': formatted_date,
             'number': number,
-            'amount': amount
+            'amount': amount,
+            'items': items
         }
         
         if 'Sales' in vtype:

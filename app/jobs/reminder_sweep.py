@@ -191,6 +191,7 @@ async def run() -> None:
                 client_id=bill["client_id"],
                 bill_id=bill["id"],
                 language=Lang.hi,
+                message_text=f"{biz.get('business_name', '')}: {alert_text}",
             )
             log.info(
                 "Day 45 escalation → OWNER for bill %s (%s)",
@@ -207,7 +208,7 @@ async def run() -> None:
                 )
                 continue
 
-            tpl_name, _ = render(
+            tpl_name, body = render(
                 "reminder",
                 client_lang,
                 client=client_name,
@@ -236,6 +237,7 @@ async def run() -> None:
                 client_id=bill["client_id"],
                 bill_id=bill["id"],
                 language=client_lang,
+                message_text=body,
             )
 
         sent += 1

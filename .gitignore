@@ -5,27 +5,22 @@ __pycache__/
 .venv/
 venv/
 env/
-
 # Secrets
 .env
 *.env
 !.env.example
-
 # PyInstaller (agent build artifacts)
 tally_agent/build/
 tally_agent/dist/
 *.spec
-
 # WeasyPrint / generated
 *.pdf
 generated/
-
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-
 # Ignore large binary and output files
 build/
 dist/
@@ -33,9 +28,24 @@ TallyAgentRelease/
 *.xml
 *.txt
 !requirements.txt
-
 # Scratch / debug scripts
 batch*.py
 dump_*.py
 analyze_*.py
 parse_*.py
+
+# Agent config holds the live agent_token — never commit
+tally_agent/config.json
+
+# Node
+node_modules/
+
+# Pilot artifacts
+pilot_saas.db
+agent.log
+
+# managed
+**.data.json
+**.node-persist**
+**_IGNORE_**
+# end managed

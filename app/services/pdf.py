@@ -11,7 +11,6 @@ from decimal import Decimal
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
-from weasyprint import HTML
 
 from app.config import settings
 from app.db import require_db
@@ -102,7 +101,17 @@ async def generate_invoice_pdf(
         description=description,
     )
 
-    # WeasyPrint HTML → PDF (synchronous — runs in thread if needed)
+    # WeasyPrint HTML → PDF (synchronous — runs in thread if needed).
+    # Imported lazily: WeasyPrint dlopens GTK/Pango/Cairo at import time,
+    # which fails on a bare Windows box. Railway's buildpack ships them.
+    try:
+        from weasyprint import HTML
+    except OSError as exc:
+        raise RuntimeError(
+            "WeasyPrint native libraries (GTK3/Pango/Cairo) are not installed "
+            "on this machine — PDF generation unavailable. On Windows install "
+            "the GTK3 runtime; on Railway this works out of the box."
+        ) from exc
     pdf_bytes: bytes = HTML(string=html_str).write_pdf()
 
     # Upload to Supabase Storage

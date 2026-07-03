@@ -157,3 +157,24 @@ async def get_usage(business_id: str):
         percent_used=percent,
         period_month=period_month.isoformat(),
     )
+
+
+@router.get("/{business_id}/qr")
+async def get_whatsapp_qr(business_id: str):
+    """Fetch the OpenWA login QR / connection status for the owner to scan.
+
+    Proxies wa_service's /api/wa/status, which returns
+    {"ready": bool, "qr": data-url-or-null}.
+    """
+    import httpx
+
+    from app.config import settings
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as http:
+            resp = await http.get(f"{settings.openwa_url}/api/wa/status")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        log.error("Failed to fetch QR from OpenWA: %s", e)
+        raise HTTPException(status_code=503, detail="WhatsApp service is currently unavailable.")

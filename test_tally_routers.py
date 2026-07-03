@@ -120,15 +120,15 @@ def test_import_outstanding(fake_db):
     assert len(bill_inserts) == 1
     assert bill_inserts[0]["amount"] == 1000.0
     assert bill_inserts[0]["is_opening_balance"] == True
-    assert bill_inserts[0]["voucher_number"] == "OB-Positive Debtor"
+    assert bill_inserts[0]["tally_voucher_number"] == "OB-Positive Debtor"
 
 def test_sync_duplicate_voucher(fake_db):
     biz_id = str(uuid.uuid4())
     fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
     # Setup client exists
-    fake_db.storage["clients"] = [{"id": "client_1", "business_id": biz_id, "whatsapp_number": "123", "default_credit_days": 15, "tally_ledger_name": "Test Party"}]
+    fake_db.storage["clients"] = [{"id": "client_1", "business_id": biz_id, "whatsapp_number": "123", "credit_days": 30, "tally_ledger_name": "Test Party"}]
     # Setup bill already exists
-    fake_db.storage["bills"] = [{"id": "bill_1", "business_id": biz_id, "voucher_number": "V-123", "amount": 100}]
+    fake_db.storage["bills"] = [{"id": "bill_1", "business_id": biz_id, "tally_voucher_number": "V-123", "amount": 100}]
 
     payload = {
         "business_id": biz_id,

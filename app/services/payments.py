@@ -139,7 +139,7 @@ async def apply_payment(
             Decimal(str(r["outstanding"])) for r in (remaining_resp.data or [])
         )
 
-        tpl_name, _ = render(
+        tpl_name, body = render(
             "payment_confirmation", lang,
             client=client["name"],
             paid_amount=inr(amount),
@@ -160,6 +160,7 @@ async def apply_payment(
             message_type=MessageType.payment_confirmation,
             client_id=client_id,
             language=lang,
+            message_text=body,
         )
 
     # ── Notify owner ──────────────────────────────────────────────────
