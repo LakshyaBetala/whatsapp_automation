@@ -50,7 +50,8 @@ def load_config() -> dict:
 
     if 'your-railway-url' in str(config.get('backend_url', '')):
         print("ERROR: 'backend_url' in config.json is still the placeholder.")
-        print("Set it to your real Railway URL, e.g. https://myapp.up.railway.app")
+        print("Set it to your backend server, e.g. http://192.168.1.50:8000")
+        print("(the IP of the laptop running the WhatsApp Tally backend)")
         input("Press Enter to exit...")
         sys.exit(1)
 

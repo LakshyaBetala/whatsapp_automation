@@ -3,17 +3,17 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@open-wa/wa-automate": "^4.76.0",
     "cors": "^2.8.6",
     "express": "^4.22.2",
     "qrcode": "^1.5.4",
     "whatsapp-web.js": "^1.34.7"
   },
-  "description": ""
+  "description": "WhatsApp send/receive microservice for whatsapp-tally-saas"
 }

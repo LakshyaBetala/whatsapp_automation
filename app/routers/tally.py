@@ -201,16 +201,15 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
         except Exception as e:
             errors.append(f"Error processing {v.voucher_type} {v.voucher_number}: {str(e)}")
 
-    # Log to tally_syncs
+    # Log to tally_syncs (schema: sync_type enum, records_synced, success, error)
     try:
         error_list = list(set(unmatched_parties + errors))
         db.table("tally_syncs").insert({
             "business_id": str(payload.business_id),
-            "sync_type": "daybook",
-            "vouchers_received": len(payload.vouchers),
-            "bills_created": sales_processed,
-            "payments_applied": receipts_processed,
-            "errors": error_list
+            "sync_type": "poll",
+            "records_synced": sales_processed + receipts_processed,
+            "success": len(error_list) == 0,
+            "error": "; ".join(error_list)[:2000] if error_list else None,
         }).execute()
     except Exception as e:
         log.error(f"Failed to write to tally_syncs: {e}")

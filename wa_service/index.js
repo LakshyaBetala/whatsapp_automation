@@ -3,6 +3,11 @@ const qrcode = require('qrcode');
 const express = require('express');
 const cors = require('cors');
 
+// Where the FastAPI backend lives — inbound messages are forwarded there
+// so bot commands (LIST / STOP <name> / PAID) work.
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
+const PORT = process.env.PORT || 3001;
+
 const app = express();
 app.use(cors());
 // 10mb: invoice PDFs arrive base64-encoded in the JSON body
@@ -47,6 +52,41 @@ client.on('disconnected', (reason) => {
     clientReady = false;
 });
 
+// ── Inbound: forward customer/owner replies to the backend bot ──────
+// The backend's /webhooks/aisensy _extract() understands
+// {data: {sender, message, messageId}} and dedups on messageId.
+client.on('message', async (msg) => {
+    try {
+        // Ignore groups, broadcasts/status, and non-text messages
+        if (!msg.from.endsWith('@c.us')) return;
+        if (msg.isStatus) return;
+        const text = (msg.body || '').trim();
+        if (!text) return;
+
+        const sender = msg.from.replace('@c.us', '');
+        const resp = await fetch(`${BACKEND_URL}/webhooks/aisensy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                data: {
+                    sender: sender,
+                    message: text,
+                    messageId: msg.id ? msg.id._serialized : undefined,
+                },
+            }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        console.log(`Inbound from ${sender}: "${text.slice(0, 40)}" -> backend ${resp.status}`);
+
+        // If the bot produced a reply, send it back on the same chat
+        if (data && typeof data.reply === 'string' && data.reply.length > 0) {
+            await client.sendMessage(msg.from, data.reply);
+        }
+    } catch (err) {
+        console.error('Failed to forward inbound message:', err.message);
+    }
+});
+
 client.initialize();
 
 // --- Express API --- //
@@ -56,6 +96,19 @@ app.get('/api/wa/status', (req, res) => {
         ready: clientReady,
         qr: qrCodeData
     });
+});
+
+// Human-friendly QR page for first-time linking: open http://localhost:3001/qr
+app.get('/qr', (req, res) => {
+    if (clientReady) {
+        return res.send('<h2>✅ WhatsApp is connected.</h2>');
+    }
+    if (!qrCodeData) {
+        return res.send('<h2>⏳ Starting up… refresh in a few seconds.</h2><script>setTimeout(()=>location.reload(),3000)</script>');
+    }
+    res.send(`<h2>Scan with the business WhatsApp (Linked devices):</h2>
+        <img src="${qrCodeData}" width="300" height="300">
+        <script>setTimeout(()=>location.reload(),10000)</script>`);
 });
 
 app.post('/api/wa/send', async (req, res) => {
@@ -87,7 +140,7 @@ app.post('/api/wa/send', async (req, res) => {
     }
 });
 
-const PORT = 3001;
 app.listen(PORT, () => {
     console.log(`WhatsApp Background Service running on port ${PORT}`);
+    console.log(`Forwarding inbound messages to ${BACKEND_URL}/webhooks/aisensy`);
 });

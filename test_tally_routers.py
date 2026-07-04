@@ -178,10 +178,12 @@ def test_sync_unmatched_party(fake_db):
     assert data["sales_processed"] == 0
     assert "Ghost Party" in data["unmatched_parties"]
     
-    # Check that it logged to tally_syncs with errors
+    # Check that it logged to tally_syncs with errors (schema: error text, success bool)
     syncs_inserts = [i[1] for i in fake_db.inserts if i[0] == "tally_syncs"]
     assert len(syncs_inserts) == 1
-    assert "Ghost Party" in syncs_inserts[0]["errors"]
+    assert "Ghost Party" in syncs_inserts[0]["error"]
+    assert syncs_inserts[0]["success"] is False
+    assert syncs_inserts[0]["sync_type"] == "poll"
 
 def test_agent_token_mismatch(fake_db):
     biz_id = str(uuid.uuid4())
