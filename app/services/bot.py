@@ -16,10 +16,12 @@ import logging
 import re
 from decimal import Decimal
 
+from datetime import date
+
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
 from app.services import payments as payments_service
-from app.services import whatsapp
+from app.services import upi, whatsapp
 from app.services.templates import inr
 
 log = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ async def handle(from_number: str, text: str) -> str:
     # ── Identify sender: owner or customer? ───────────────────────────
     biz_resp = (
         db.table("businesses")
-        .select("id, business_name, plan, whatsapp_number")
+        .select("id, business_name, plan, whatsapp_number, upi_vpa")
         .eq("whatsapp_number", from_number)
         .limit(1)
         .execute()
@@ -81,11 +83,22 @@ async def handle(from_number: str, text: str) -> str:
         if check_match:
             return await _handle_check(business_id, check_match.group(1).strip())
 
+        # ── REMIND — owner decides who gets reminded, right now ──────
+        #    REMIND <naam>      one party (consolidated bills + QR)
+        #    REMIND TOP [n]     n biggest outstanding parties
+        #    REMIND OLDEST [n]  n longest-pending parties
+        remind_match = re.match(r"REMIND\s+(.+)", upper)
+        if remind_match:
+            return await _handle_remind(business, remind_match.group(1).strip())
+
         # ── Unrecognised ──────────────────────────────────────────────
         return (
             "Command samajh nahi aaya. Try:\n"
             "LIST — outstanding list\n"
             "CHECK [naam] — ek party ka balance\n"
+            "REMIND [naam] — abhi reminder bhejo\n"
+            "REMIND TOP 5 — sabse bade 5 baaki walon ko\n"
+            "REMIND OLDEST 5 — sabse purane 5 ko\n"
             "STOP [naam] — reminders band\n"
             "START [naam] — reminders chalu\n"
             "PAID [naam] — payment mark"
@@ -286,6 +299,139 @@ async def _handle_check(business_id: str, client_name: str) -> str:
     if sync_resp.data:
         lines.append(f"Tally se milaya: {str(sync_resp.data[0]['synced_at'])[:16]}")
     return "\n".join(lines)
+
+
+async def _open_bills_by_client(business_id: str) -> dict[str, dict]:
+    """Aggregate open bills per client: {client_id: {client, bills, total, oldest_days}}."""
+    db = require_db()
+    resp = (
+        db.table("bills")
+        .select("id, invoice_number, outstanding, invoice_date, due_date, "
+                "client_id, clients(id, name, whatsapp_number, reminders_enabled, language)")
+        .eq("business_id", business_id)
+        .in_("status", ["pending", "partial", "overdue"])
+        .order("invoice_date")
+        .execute()
+    )
+    agg: dict[str, dict] = {}
+    today = date.today()
+    for b in resp.data or []:
+        cid = b["client_id"]
+        entry = agg.setdefault(cid, {
+            "client": b.get("clients") or {},
+            "bills": [],
+            "total": Decimal(0),
+            "oldest_days": 0,
+        })
+        entry["bills"].append(b)
+        entry["total"] += Decimal(str(b["outstanding"]))
+        inv_date = date.fromisoformat(str(b["invoice_date"]))
+        entry["oldest_days"] = max(entry["oldest_days"], (today - inv_date).days)
+    return agg
+
+
+async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool, str]:
+    """One reminder covering ALL of a party's open bills (single bill →
+    bill number shown; multiple → itemised up to 4 + total). Returns
+    (sent, summary-line-for-owner)."""
+    client = entry["client"]
+    name = client.get("name", "Customer")
+    phone = client.get("whatsapp_number")
+    if not phone:
+        return False, f"{name} — ❌ number nahi hai"
+
+    total = entry["total"]
+    bills = entry["bills"]
+    today = date.today()
+    biz_name = business.get("business_name", "")
+
+    lines = [f"Namaste {name}! {biz_name} se payment yaad dilana.", ""]
+    if len(bills) == 1:
+        b = bills[0]
+        days = (today - date.fromisoformat(str(b["invoice_date"]))).days
+        lines.append(f"Bill {b.get('invoice_number') or '—'}: {inr(total)} ({days} din)")
+    else:
+        lines.append(f"Bills baaki ({len(bills)}):")
+        for b in bills[:4]:
+            days = (today - date.fromisoformat(str(b['invoice_date']))).days
+            lines.append(f"• {b.get('invoice_number') or '—'}: {inr(Decimal(str(b['outstanding'])))} ({days} din)")
+        if len(bills) > 4:
+            lines.append(f"• ...aur {len(bills) - 4} bills")
+        lines.append(f"Total baaki: {inr(total)}")
+
+    vpa = business.get("upi_vpa")
+    qr_b64 = None
+    if vpa:
+        link = upi.upi_link(vpa, biz_name, total, f"{len(bills)} bills")
+        qr_b64 = upi.qr_png_base64(link)
+        lines += ["", f"Payment: {link}"]
+    lines += ["", "Payment ho gaya ho to PAID reply karein."]
+
+    result = await whatsapp.send_template(
+        business_id=business["id"],
+        to_number=phone,
+        campaign_name="manual_remind_hi",
+        template_params=[name, biz_name, inr(total)],
+        business_name=biz_name,
+        plan=Plan(business["plan"]),
+        message_type=MessageType.reminder,
+        client_id=client.get("id"),
+        bill_id=bills[0]["id"],
+        language=Lang(client.get("language", "hi")),
+        message_text="\n".join(lines),
+        image_base64=qr_b64,
+        image_filename="payment_qr.png",
+    )
+    if result.get("sent"):
+        return True, f"{name} — {inr(total)} ({len(bills)} bill{'s' if len(bills) > 1 else ''}) ✅"
+    return False, f"{name} — ❌ bheja nahi gaya ({result.get('reason') or result.get('delivery_status')})"
+
+
+async def _handle_remind(business: dict, arg: str) -> str:
+    """REMIND <naam> | REMIND TOP [n] | REMIND OLDEST [n] — the owner
+    chooses exactly who gets nudged and in which order."""
+    business_id = business["id"]
+    agg = await _open_bills_by_client(business_id)
+    if not agg:
+        return "Koi outstanding bill nahi hai. Sab clear! 🎉"
+
+    bulk = re.match(r"(TOP|OLDEST|OLD)\s*(\d+)?$", arg)
+    if bulk:
+        n = min(int(bulk.group(2) or 5), 20)
+        entries = list(agg.values())
+        if bulk.group(1) == "TOP":
+            entries.sort(key=lambda e: e["total"], reverse=True)  # biggest first
+            header = f"Top {n} outstanding walon ko reminder:"
+        else:
+            entries.sort(key=lambda e: e["oldest_days"], reverse=True)  # oldest first
+            header = f"Sabse purane {n} ko reminder:"
+
+        results = []
+        sent_count = 0
+        for entry in entries:
+            if sent_count >= n:
+                break
+            if not entry["client"].get("reminders_enabled", True):
+                continue
+            if not entry["client"].get("whatsapp_number"):
+                continue
+            ok, line = await _send_consolidated_reminder(business, entry)
+            results.append(line)
+            if ok:
+                sent_count += 1
+        if not results:
+            return "Kisi ke paas WhatsApp number nahi hai ya reminders band hain."
+        return header + "\n" + "\n".join(results)
+
+    # Single party by name
+    matches = [e for e in agg.values() if arg.lower() in (e["client"].get("name") or "").lower()]
+    if not matches:
+        return f"'{arg}' ka koi outstanding nahi mila. CHECK {arg} se dekh sakte hain."
+    if len(matches) > 1:
+        names = ", ".join(e["client"].get("name", "?") for e in matches[:5])
+        return f"'{arg}' se kai clients mile: {names}. Poora naam likhein."
+    ok, line = await _send_consolidated_reminder(business, matches[0])
+    return ("Reminder bhej diya:\n" if ok else "") + line
 
 
 async def _handle_paid_owner(
