@@ -23,6 +23,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan, PLAN_LIMITS
 from app.services import upi, whatsapp
@@ -151,10 +152,17 @@ async def run() -> None:
 
     sent = 0
     skipped = 0
+    # Daily cap per business: a fresh backlog (e.g. 200 overdue bills on
+    # day one) drips out over days instead of blasting in one sweep.
+    sent_per_biz: dict[str, int] = {}
+    cap = settings.daily_reminder_cap
 
     for bill in open_bills:
         biz = businesses.get(bill["business_id"])
         if not biz:
+            continue
+        if cap > 0 and sent_per_biz.get(bill["business_id"], 0) >= cap:
+            skipped += 1
             continue
         client = bill.get("clients") or {}
 
@@ -297,5 +305,6 @@ async def run() -> None:
             )
 
         sent += 1
+        sent_per_biz[bill["business_id"]] = sent_per_biz.get(bill["business_id"], 0) + 1
 
     log.info("Reminder sweep complete — sent=%d, skipped=%d", sent, skipped)

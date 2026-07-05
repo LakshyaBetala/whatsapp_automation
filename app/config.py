@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
     public_base_url: str = "http://localhost:8000"
 
+    # --- Sending safety ---
+    # Max customer reminders per business per day. Backlog drips out over
+    # following days — protects a fresh WhatsApp session from bulk-send
+    # ban patterns and customers from a day-1 blast.
+    daily_reminder_cap: int = 25
+
     # --- Scheduling ---
     eod_digest_hour: int = 21
     eod_digest_minute: int = 0

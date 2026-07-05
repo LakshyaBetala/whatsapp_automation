@@ -200,8 +200,12 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     sales_processed += 1
                     new_bills += 1
 
-                    # Trigger background PDF/WhatsApp if client has whatsapp number
-                    if client.get("whatsapp_number"):
+                    # Instant PDF+WhatsApp delivery ONLY for fresh bills.
+                    # The first sync replays the whole FY — blasting
+                    # months-old invoices at onboarding would be a
+                    # disaster. Old unpaid bills enter the reminder
+                    # cadence instead (drip-fed by the daily sweep).
+                    if client.get("whatsapp_number") and invoice_date >= date.today() - timedelta(days=1):
                         background_tasks.add_task(_generate_and_deliver, bill_id)
                 else:
                     # Upsert (update amount/date just in case)
