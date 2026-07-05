@@ -214,18 +214,24 @@ async def run() -> None:
 
     biz_resp = (
         db.table("businesses")
-        .select("id, business_name, whatsapp_number, plan, eod_enabled")
+        .select("id, business_name, whatsapp_number, plan, eod_enabled, plan_expires_on")
         .eq("eod_enabled", True)
         .execute()
     )
     businesses = biz_resp.data or []
     log.info("EOD digest — processing %d businesses", len(businesses))
 
+    from app.services import subscription as subs
+
     sent = 0
     skipped = 0
 
     for biz in businesses:
         try:
+            sub_status = subs.effective_status(biz.get("plan_expires_on"))
+            if sub_status == "suspended":
+                skipped += 1
+                continue
             params = await _build_digest(biz["id"], biz)
             if params is None:
                 skipped += 1
@@ -276,6 +282,14 @@ async def run() -> None:
             except Exception:
                 log.exception("Action list build failed — digest continues")
 
+            renewal_note = ""
+            if sub_status == "grace":
+                left = subs.GRACE_DAYS + (subs.days_left(biz.get("plan_expires_on")) or 0)
+                renewal_note = (
+                    f"\n\n⚠️ Subscription khatam ho gaya hai. {left} din mein renew "
+                    f"nahi kiya to reminders band ho jayenge."
+                )
+
             await whatsapp.send_template(
                 business_id=biz["id"],
                 to_number=biz["whatsapp_number"],
@@ -285,7 +299,8 @@ async def run() -> None:
                 plan=Plan(biz["plan"]),
                 message_type=MessageType.eod_digest,
                 language=Lang.hi,
-                message_text=rendered_body + (stale_warning or "") + action_lines,
+                message_text=rendered_body + (stale_warning or "") + action_lines + renewal_note,
+                channel="platform",
             )
             sent += 1
 

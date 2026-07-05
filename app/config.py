@@ -21,6 +21,10 @@ class Settings(BaseSettings):
 
     # --- OpenWA (WhatsApp Node microservice, wa_service/ — port 3001) ---
     openwa_url: str = "http://localhost:3001"
+    # Optional SECOND wa_service session (our company/platform number) used
+    # for owner-facing messages: digest, alerts, renewal notices. Empty =
+    # everything goes through the shop's own number.
+    platform_wa_url: str = ""
 
     # --- App ---
     app_env: str = "development"

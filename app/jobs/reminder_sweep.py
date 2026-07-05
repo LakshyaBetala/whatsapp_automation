@@ -120,12 +120,16 @@ async def run() -> None:
         .select(
             "id, business_name, whatsapp_number, plan, blackout_dates, "
             "reminders_enabled, upi_vpa, reminder_cadence, "
-            "overdue_repeat_days, overdue_max_repeats"
+            "overdue_repeat_days, overdue_max_repeats, plan_expires_on"
         )
         .eq("reminders_enabled", True)
         .execute()
     )
-    businesses = {b["id"]: b for b in (biz_resp.data or [])}
+    from app.services import subscription as subs
+    businesses = {
+        b["id"]: b for b in (biz_resp.data or [])
+        if subs.effective_status(b.get("plan_expires_on")) != "suspended"
+    }
     if not businesses:
         log.info("Reminder sweep — no businesses with reminders enabled")
         return
@@ -250,6 +254,7 @@ async def run() -> None:
                 bill_id=bill["id"],
                 language=Lang.hi,
                 message_text=f"{biz_name}: {alert_text}",
+                channel="platform",
             )
             log.info("Escalation → OWNER for bill %s (%s)", invoice_num, client_name)
         else:

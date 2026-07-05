@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.jobs import eod_digest, keepalive, reminder_sweep
+from app.jobs import eod_digest, keepalive, reminder_sweep, subscription_check
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +41,15 @@ def start() -> AsyncIOScheduler:
             hour=settings.reminder_sweep_hour, minute=settings.reminder_sweep_minute
         ),
         id="reminder_sweep",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    # Subscription lifecycle: warn before expiry, flip to grace/suspended.
+    sched.add_job(
+        subscription_check.run,
+        CronTrigger(hour=9, minute=0),
+        id="subscription_check",
         replace_existing=True,
         misfire_grace_time=3600,
     )

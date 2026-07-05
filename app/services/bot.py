@@ -76,10 +76,16 @@ async def handle(from_number: str, text: str) -> str:
                 business_id, client_name, Plan(business["plan"])
             )
 
+        # ── CHECK <name> — live balance, matches Tally to the rupee ──
+        check_match = re.match(r"CHECK\s+(.+)", upper)
+        if check_match:
+            return await _handle_check(business_id, check_match.group(1).strip())
+
         # ── Unrecognised ──────────────────────────────────────────────
         return (
             "Command samajh nahi aaya. Try:\n"
             "LIST — outstanding list\n"
+            "CHECK [naam] — ek party ka balance\n"
             "STOP [naam] — reminders band\n"
             "START [naam] — reminders chalu\n"
             "PAID [naam] — payment mark"
@@ -209,6 +215,77 @@ async def _handle_start(business_id: str, client_name: str) -> str:
     ).execute()
 
     return f"{client['name']} ke reminders chalu kar diye. ✅"
+
+
+async def _handle_check(business_id: str, client_name: str) -> str:
+    """Instant per-party statement — the anti-'sync is broken' command.
+
+    Answers with open bills + total + last sync time so the owner can
+    verify against Tally to the rupee, any time, in 5 seconds.
+    """
+    db = require_db()
+    clients_resp = (
+        db.table("clients")
+        .select("id, name, whatsapp_number, reminders_enabled")
+        .eq("business_id", business_id)
+        .ilike("name", f"%{client_name}%")
+        .execute()
+    )
+    if not clients_resp.data:
+        return f"'{client_name}' naam ka koi client nahi mila. Exact naam likhein."
+    if len(clients_resp.data) > 1:
+        names = ", ".join(c["name"] for c in clients_resp.data[:5])
+        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+
+    client = clients_resp.data[0]
+    bills_resp = (
+        db.table("bills")
+        .select("invoice_number, outstanding, due_date, status")
+        .eq("business_id", business_id)
+        .eq("client_id", client["id"])
+        .in_("status", ["pending", "partial", "overdue"])
+        .order("due_date")
+        .execute()
+    )
+    open_bills = bills_resp.data or []
+
+    from datetime import date as _date
+    lines = [f"{client['name']}"]
+    if not open_bills:
+        lines.append("Koi outstanding nahi — sab clear ✅")
+    else:
+        total = Decimal(0)
+        for b in open_bills[:8]:
+            amt = Decimal(str(b["outstanding"]))
+            total += amt
+            overdue = ""
+            if b.get("due_date"):
+                days = (_date.today() - _date.fromisoformat(str(b["due_date"]))).days
+                if days > 0:
+                    overdue = f" ({days} din overdue)"
+            lines.append(f"• {b.get('invoice_number') or '—'}: {inr(amt)}{overdue}")
+        if len(open_bills) > 8:
+            rest = sum(Decimal(str(b["outstanding"])) for b in open_bills[8:])
+            total += rest
+            lines.append(f"• ...aur {len(open_bills) - 8} bills: {inr(rest)}")
+        lines.append(f"Total baaki: {inr(total)}")
+
+    phone = client.get("whatsapp_number")
+    lines.append(f"WhatsApp: {phone if phone else '❌ number nahi hai'}")
+    lines.append(f"Reminders: {'chalu' if client.get('reminders_enabled', True) else 'band'}")
+
+    # Last sync time — proof of freshness
+    sync_resp = (
+        db.table("tally_syncs")
+        .select("synced_at")
+        .eq("business_id", business_id)
+        .order("synced_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if sync_resp.data:
+        lines.append(f"Tally se milaya: {str(sync_resp.data[0]['synced_at'])[:16]}")
+    return "\n".join(lines)
 
 
 async def _handle_paid_owner(

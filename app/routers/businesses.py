@@ -82,7 +82,8 @@ async def register_business(payload: BusinessRegister):
     # Generate agent token
     agent_token = secrets.token_urlsafe(32)
 
-    # Create business
+    # Create business — 30-day subscription clock starts now
+    from datetime import timedelta
     biz_resp = (
         db.table("businesses")
         .insert({
@@ -92,6 +93,8 @@ async def register_business(payload: BusinessRegister):
             "plan": payload.plan.value,
             "tally_company_name": payload.tally_company_name,
             "agent_token": agent_token,
+            "subscription_status": "trial",
+            "plan_expires_on": (date.today() + timedelta(days=30)).isoformat(),
         })
         .execute()
     )

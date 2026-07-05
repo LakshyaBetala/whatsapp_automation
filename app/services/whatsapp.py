@@ -53,15 +53,47 @@ async def send_message(
     image_base64: Optional[str] = None,
     image_filename: Optional[str] = None,
     template_name: str = "openwa_custom",
+    channel: str = "shop",
 ) -> dict:
     """Send a WhatsApp message via OpenWA.
 
+    channel: "shop" = the business's own number (customer-facing);
+    "platform" = our company number (owner-facing: digest/alerts) —
+    falls back to the shop session when PLATFORM_WA_URL is not set.
+
     Handles:
-      1. Atomic plan-limit check (Postgres ``FOR UPDATE``)
-      2. OpenWA HTTP call
-      3. ``messages`` table insert (audit)
+      1. Subscription gate (suspended businesses: only owner alerts)
+      2. Atomic plan-limit check (Postgres ``FOR UPDATE``)
+      3. OpenWA HTTP call
+      4. ``messages`` table insert (audit)
     """
     db = require_db()
+
+    # ── 0. Subscription gate — the server-side "license check" ────────
+    from app.services import subscription as subs
+    biz_row = (
+        db.table("businesses")
+        .select("plan_expires_on")
+        .eq("id", business_id)
+        .limit(1)
+        .execute()
+    )
+    if biz_row.data:
+        status = subs.effective_status(biz_row.data[0].get("plan_expires_on"))
+        if status == "suspended" and message_type != MessageType.owner_alert:
+            log.warning("Business %s suspended — send blocked", business_id)
+            db.table("messages").insert({
+                "business_id": business_id,
+                "client_id": client_id,
+                "bill_id": bill_id,
+                "type": message_type.value,
+                "reminder_day": reminder_day,
+                "template_name": template_name,
+                "language": language.value,
+                "delivery_status": "suspended",
+                "cost": 0,
+            }).execute()
+            return {"sent": False, "reason": "subscription_suspended"}
 
     # ── 1. Atomic plan-limit check ────────────────────────────────────
     allowed = await _check_usage_and_increment(business_id, plan)
@@ -96,9 +128,13 @@ async def send_message(
     openwa_message_id = None
     delivery_status = "sent"
 
+    base_url = settings.openwa_url
+    if channel == "platform" and settings.platform_wa_url:
+        base_url = settings.platform_wa_url
+
     try:
         async with httpx.AsyncClient(timeout=30) as http:
-            resp = await http.post(f"{settings.openwa_url}/api/wa/send", json=payload)
+            resp = await http.post(f"{base_url}/api/wa/send", json=payload)
             resp.raise_for_status()
             resp_data = resp.json()
             if not resp_data.get("success", True):
@@ -152,6 +188,7 @@ async def send_template(
     message_text: Optional[str] = None,
     image_base64: Optional[str] = None,
     image_filename: Optional[str] = None,
+    channel: str = "shop",
 ) -> dict:
     """Template-shaped send used by jobs and routers.
 
@@ -191,6 +228,7 @@ async def send_template(
         image_base64=image_base64,
         image_filename=image_filename,
         template_name=campaign_name,
+        channel=channel,
     )
 
 
@@ -215,4 +253,5 @@ async def notify_owner(business_id: str, alert_text: str) -> dict:
         plan=Plan(biz.data["plan"]),
         message_type=MessageType.owner_alert,
         language=Lang.hi,
+        channel="platform",  # owner-facing → company number when configured
     )

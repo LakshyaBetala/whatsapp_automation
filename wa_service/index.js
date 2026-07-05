@@ -7,6 +7,9 @@ const cors = require('cors');
 // so bot commands (LIST / STOP <name> / PAID) work.
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
 const PORT = process.env.PORT || 3001;
+// SESSION_ID lets multiple instances run side by side with separate
+// WhatsApp logins (e.g. shop number on 3001, platform number on 3002).
+const SESSION_ID = process.env.SESSION_ID || 'default';
 
 const app = express();
 app.use(cors());
@@ -14,7 +17,7 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({ clientId: SESSION_ID }),
     puppeteer: {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
