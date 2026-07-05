@@ -165,19 +165,49 @@ def build_groups_query(company: str = "") -> str:
 
 
 def build_masters_query(company: str = "") -> str:
-    """All ledgers with balance + contact + credit-period fields in one shot."""
+    """All ledgers with balances + contact + credit-period fields in one shot."""
     return _collection_query('Ledger', [
-        'Name', 'Parent', 'ClosingBalance',
+        'Name', 'Parent', 'OpeningBalance', 'ClosingBalance',
         'LedgerPhone', 'LedgerMobile', 'LedgerContact', 'Address',
         'BillCreditPeriod',
     ], company)
 
 
 def build_vouchers_query(company: str = "") -> str:
-    """All vouchers of the active FY (Tally ignores date filters over HTTP)."""
+    """All vouchers of the CURRENT-DATE window (collection queries ignore
+    date filters). Kept for diagnostics — sync uses the Voucher Register."""
     return _collection_query('Voucher', [
         'Date', 'VoucherTypeName', 'VoucherNumber', 'PartyLedgerName', 'Amount',
     ], company)
+
+
+def build_voucher_register_query(company: str, from_date: str, to_date: str) -> str:
+    """Voucher Register report WITH working date filters.
+
+    Unlike collections and Day Book, this report honours SVFROMDATE/
+    SVTODATE (the TYPE="Date" attribute matters) — verified against
+    archived-FY companies whose books are far from today's date.
+    Dates are 'YYYYMMDD'.
+    """
+    sv_company = f'<SVCURRENTCOMPANY>{escape(company)}</SVCURRENTCOMPANY>' if company else ''
+    return f'''<ENVELOPE>
+    <HEADER>
+      <VERSION>1</VERSION>
+      <TALLYREQUEST>EXPORT</TALLYREQUEST>
+      <TYPE>DATA</TYPE>
+      <ID>Voucher Register</ID>
+    </HEADER>
+    <BODY>
+      <DESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+          {sv_company}
+          <SVFROMDATE TYPE="Date">{from_date}</SVFROMDATE>
+          <SVTODATE TYPE="Date">{to_date}</SVTODATE>
+        </STATICVARIABLES>
+      </DESC>
+    </BODY>
+  </ENVELOPE>'''
 
 
 def build_company_list_query() -> str:
@@ -229,10 +259,15 @@ def debtor_group_names(group_parent: Dict[str, str]) -> Set[str]:
 
 
 def parse_masters(xml_text: str, debtor_groups: Set[str]) -> List[Dict[str, Any]]:
-    """Debtor ledgers with balance, group and phone.
+    """Debtor ledgers with balances, group and phone.
 
-    opening_balance sign convention OUT of here: positive = customer owes
-    (Tally stores debit balances as negative, so we flip).
+    Sign convention OUT of here: positive = customer owes (Tally stores
+    debit balances as negative, so we flip).
+
+    opening_balance is the FY-START balance (Tally OpeningBalance), NOT
+    today's closing — the sync replays this FY's vouchers on top of it,
+    so using the closing balance would double-count this year's sales.
+    current_outstanding (today's closing) is informational.
     Zero-balance clients are kept — they get bills later and we want their
     phone numbers on file.
     """
@@ -248,11 +283,13 @@ def parse_masters(xml_text: str, debtor_groups: Set[str]) -> List[Dict[str, Any]
         parent = (led.findtext('PARENT', '') or '').strip()
         if not name or parent.strip().lower() not in lowered:
             continue
+        opening = _to_float(led.findtext('OPENINGBALANCE', '0'))
         closing = _to_float(led.findtext('CLOSINGBALANCE', '0'))
         debtors.append({
             'name': name,
             'tally_group': parent,
-            'opening_balance': -closing,  # negative closing = owes -> positive
+            'opening_balance': -opening,      # FY-start balance, owes -> positive
+            'current_outstanding': -closing,  # today's balance (informational)
             'whatsapp_number': _phone_from_ledger(led),
             'credit_days': parse_credit_days(led.findtext('BILLCREDITPERIOD', '')),
         })
@@ -294,7 +331,30 @@ def parse_vouchers(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:
         party = (v.findtext('PARTYLEDGERNAME', '') or '').strip()
         formatted_date = parse_tally_date((v.findtext('DATE', '') or '').strip())
         number = (v.findtext('VOUCHERNUMBER', '') or '').strip()
+
+        if (v.findtext('ISCANCELLED', '') or '').strip().lower() == 'yes':
+            continue
+        if (v.findtext('ISOPTIONAL', '') or '').strip().lower() == 'yes':
+            continue
+
+        # Collection exports put the total in AMOUNT; the Voucher Register
+        # report leaves it empty and carries amounts in ledger-entry lists —
+        # the party's own entry is the invoice/receipt total.
         amount = abs(_to_float(v.findtext('AMOUNT', '0')))
+        if amount == 0:
+            best = 0.0
+            for tag in ('ALLLEDGERENTRIES.LIST', 'LEDGERENTRIES.LIST'):
+                for le in v.iter(tag):
+                    lname = (le.findtext('LEDGERNAME', '') or '').strip()
+                    lamt = abs(_to_float(le.findtext('AMOUNT', '0')))
+                    if lname == party and lamt:
+                        amount = lamt
+                        break
+                    best = max(best, lamt)
+                if amount:
+                    break
+            if amount == 0:
+                amount = best  # fallback: largest entry (party name mismatch)
 
         if not party or not formatted_date or amount == 0:
             continue

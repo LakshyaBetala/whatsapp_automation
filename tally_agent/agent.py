@@ -1,9 +1,10 @@
 import argparse
 import asyncio
+import calendar
 import sys
 import httpx
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from config import load_config
 import tally_xml
 
@@ -83,8 +84,12 @@ async def run_import(config: dict):
 
     with_phone = sum(1 for d in debtors if d['whatsapp_number'])
     with_terms = sum(1 for d in debtors if d.get('credit_days'))
-    owing = sum(1 for d in debtors if d['opening_balance'] > 0)
-    log_and_print(f"Extracted {len(debtors)} customers ({owing} with outstanding, {with_phone} with WhatsApp numbers, {with_terms} with credit terms).")
+    owing_now = sum(1 for d in debtors if d.get('current_outstanding', 0) > 0)
+    ob = sum(1 for d in debtors if d['opening_balance'] > 0)
+    log_and_print(
+        f"Extracted {len(debtors)} customers ({ob} with FY-opening balance, "
+        f"{owing_now} owing today, {with_phone} with WhatsApp numbers, {with_terms} with credit terms).")
+    log_and_print("Note: run --sync after import to bring in this FY's bills and payments.")
 
     if not debtors:
         log_and_print("No debtors found — is the right company open in Tally?", is_error=True)
@@ -103,17 +108,53 @@ async def run_import(config: dict):
     except Exception as e:
         log_and_print(f"Failed to push to backend: {e}", is_error=True)
 
+def _fy_start(today: date) -> date:
+    """April 1 of the current Indian financial year."""
+    year = today.year if today.month >= 4 else today.year - 1
+    return date(year, 4, 1)
+
+
 async def run_sync(config: dict):
-    log_and_print("Starting Day Book Sync (full financial year, idempotent)...")
     company = config['company_name']
-
-    vouchers_xml = await fetch_and_parse(config, tally_xml.build_vouchers_query(company))
-    results = tally_xml.parse_vouchers(vouchers_xml)
-    sales = results['sales']
-    receipts = results['receipts']
-    log_and_print(f"Extracted {len(sales)} Sales and {len(receipts)} Receipts from the active FY.")
-
     today = date.today()
+
+    # Sync window: FY start .. today by default. 'sync_from_date'
+    # (YYYY-MM-DD) in config.json overrides — needed for companies whose
+    # books belong to an earlier financial year.
+    from_cfg = str(config.get('sync_from_date', '') or '').replace('-', '')
+    from_str = from_cfg if len(from_cfg) == 8 else _fy_start(today).strftime('%Y%m%d')
+    start = datetime.strptime(from_str, '%Y%m%d').date()
+    log_and_print(f"Starting sync via Voucher Register ({from_str}..{today:%Y%m%d}, idempotent)...")
+
+    # Fetch month-by-month: big wholesalers book thousands of vouchers a
+    # month and a full-FY export times Tally out.
+    sales, receipts = [], []
+    chunk_start = start
+    while chunk_start <= today:
+        last_day = calendar.monthrange(chunk_start.year, chunk_start.month)[1]
+        chunk_end = min(date(chunk_start.year, chunk_start.month, last_day), today)
+        try:
+            xml = await fetch_and_parse(
+                config,
+                tally_xml.build_voucher_register_query(
+                    company, chunk_start.strftime('%Y%m%d'), chunk_end.strftime('%Y%m%d')))
+            r = tally_xml.parse_vouchers(xml)
+            sales.extend(r['sales'])
+            receipts.extend(r['receipts'])
+            log_and_print(f"  {chunk_start:%b %Y}: {len(r['sales'])} sales, {len(r['receipts'])} receipts")
+        except Exception as e:
+            log_and_print(f"  {chunk_start:%b %Y}: fetch failed ({e}) — continuing", is_error=True)
+        chunk_start = chunk_end + timedelta(days=1)
+
+    log_and_print(f"Extracted {len(sales)} Sales and {len(receipts)} Receipts total.")
+
+    if not sales and not receipts:
+        log_and_print(
+            "0 vouchers in this window. If this company's books are from an "
+            "earlier FY, set \"sync_from_date\": \"YYYY-MM-DD\" in config.json.",
+            is_error=True)
+        return
+
     vouchers = []
     for vtype, records in (("Sales", sales), ("Receipt", receipts)):
         for r in records:
