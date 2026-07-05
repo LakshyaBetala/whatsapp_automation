@@ -62,6 +62,10 @@ class FakeTable:
 
     def order(self, *args, **kwargs):
         return self
+
+    def range(self, start, end):
+        # Fake ignores paging; real tables are paged by _fetch_all
+        return self
     
     def execute(self):
         results = self.db.storage.get(self.table, [])
@@ -214,11 +218,12 @@ def test_sync_unmatched_party(fake_db):
     assert data["sales_processed"] == 0
     assert "Ghost Party" in data["unmatched_parties"]
     
-    # Check that it logged to tally_syncs with errors (schema: error text, success bool)
+    # Check that it logged to tally_syncs. Unmatched parties (CASH etc.)
+    # are informational — they must NOT mark the sync as failed.
     syncs_inserts = [i[1] for i in fake_db.inserts if i[0] == "tally_syncs"]
     assert len(syncs_inserts) == 1
     assert "Ghost Party" in syncs_inserts[0]["error"]
-    assert syncs_inserts[0]["success"] is False
+    assert syncs_inserts[0]["success"] is True
     assert syncs_inserts[0]["sync_type"] == "poll"
 
 def test_receipt_applied_exactly_once(fake_db):

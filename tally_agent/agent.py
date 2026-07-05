@@ -40,7 +40,7 @@ async def send_to_backend(url: str, endpoint: str, token: str, payload: dict):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(full_url, json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()
