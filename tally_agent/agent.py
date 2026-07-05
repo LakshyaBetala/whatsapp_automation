@@ -155,6 +155,25 @@ async def run_sync(config: dict):
             is_error=True)
         return
 
+    vouchers = _vouchers_payload(sales, receipts)
+
+    payload = {
+        "business_id": config['business_id'],
+        "agent_token": config['agent_token'],
+        "company_name": company,
+        "sync_date": today.isoformat(),
+        "vouchers": vouchers,
+    }
+
+    try:
+        result = await send_to_backend(config['backend_url'], '/tally/sync', config['agent_token'], payload)
+        log_and_print(f"Backend result: {result}")
+    except Exception as e:
+        log_and_print(f"Failed to push daily sync to backend: {e}", is_error=True)
+
+
+def _vouchers_payload(sales: list, receipts: list) -> list:
+    """Map parsed vouchers to the backend's TallySyncPayload shape."""
     vouchers = []
     for vtype, records in (("Sales", sales), ("Receipt", receipts)):
         for r in records:
@@ -172,20 +191,54 @@ async def run_sync(config: dict):
                 "amount": r['amount'],
                 "date": r['date'],
             })
+    return vouchers
 
-    payload = {
-        "business_id": config['business_id'],
-        "agent_token": config['agent_token'],
-        "company_name": company,
-        "sync_date": today.isoformat(),
-        "vouchers": vouchers,
-    }
 
-    try:
-        result = await send_to_backend(config['backend_url'], '/tally/sync', config['agent_token'], payload)
-        log_and_print(f"Backend result: {result}")
-    except Exception as e:
-        log_and_print(f"Failed to push daily sync to backend: {e}", is_error=True)
+async def run_watch(config: dict):
+    """Live mode: poll Tally every watch_interval_seconds and push new
+    vouchers immediately — a bill made in Tally reaches the customer's
+    WhatsApp (PDF + message) within ~2 minutes.
+
+    Each cycle fetches only the last 3 days (light on Tally); the backend
+    is idempotent, so repeats are harmless. The nightly --sync still runs
+    the full FY to catch backdated entries.
+    """
+    interval = int(config.get('watch_interval_seconds', 120) or 120)
+    company = config['company_name']
+    log_and_print(f"WATCH MODE: checking Tally every {interval}s for new bills/payments. Ctrl+C to stop.")
+
+    failures = 0
+    while True:
+        today = date.today()
+        frm = (today - timedelta(days=2)).strftime('%Y%m%d')
+        try:
+            xml = await fetch_and_parse(
+                config, tally_xml.build_voucher_register_query(company, frm, today.strftime('%Y%m%d')))
+            r = tally_xml.parse_vouchers(xml)
+            vouchers = _vouchers_payload(r['sales'], r['receipts'])
+            if vouchers:
+                payload = {
+                    "business_id": config['business_id'],
+                    "agent_token": config['agent_token'],
+                    "company_name": company,
+                    "sync_date": today.isoformat(),
+                    "vouchers": vouchers,
+                }
+                result = await send_to_backend(config['backend_url'], '/tally/sync', config['agent_token'], payload)
+                if result.get('new_bills') or result.get('receipts_processed'):
+                    log_and_print(
+                        f"NEW: {result.get('new_bills', 0)} bill(s) sent to WhatsApp, "
+                        f"{result.get('receipts_processed', 0)} payment(s) applied.")
+            failures = 0
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            failures += 1
+            log_and_print(f"Watch cycle failed ({e}) — retrying in {interval}s", is_error=True)
+            if failures in (5, 50):  # don't spam; nudge at 10min and ~2h of failures
+                log_and_print("Tally or backend unreachable for a while — check they are running.", is_error=True)
+        await asyncio.sleep(interval)
+
 
 async def auto_discover_tally(config: dict) -> tuple[str, int]:
     """Attempts to auto-detect a running Tally instance.
@@ -221,11 +274,12 @@ def main():
     parser = argparse.ArgumentParser(description="Tally Sync Agent")
     parser.add_argument('--import-masters', action='store_true', help='Run one-time import of all debtors')
     parser.add_argument('--sync', action='store_true', help='Run daily sync of Day Book')
+    parser.add_argument('--watch', action='store_true', help='Live mode: push new bills to WhatsApp within ~2 minutes')
 
     args = parser.parse_args()
 
-    if not args.import_masters and not args.sync:
-        print("Please specify --import-masters or --sync")
+    if not args.import_masters and not args.sync and not args.watch:
+        print("Please specify --import-masters, --sync or --watch")
         sys.exit(1)
 
     config = load_config()
@@ -245,6 +299,11 @@ def main():
         asyncio.run(run_import(config))
     if args.sync:
         asyncio.run(run_sync(config))
+    if args.watch:
+        try:
+            asyncio.run(run_watch(config))
+        except KeyboardInterrupt:
+            log_and_print("Watch stopped.")
 
 if __name__ == "__main__":
     main()

@@ -159,6 +159,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     db = _verify_token(payload.business_id, payload.agent_token)
     
     sales_processed = 0
+    new_bills = 0
     receipts_processed = 0
     unmatched_parties = []
     errors = []
@@ -197,6 +198,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     }).execute()
                     bill_id = inserted_bill.data[0]["id"]
                     sales_processed += 1
+                    new_bills += 1
 
                     # Trigger background PDF/WhatsApp if client has whatsapp number
                     if client.get("whatsapp_number"):
@@ -266,6 +268,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
 
     return {
         "sales_processed": sales_processed,
+        "new_bills": new_bills,
         "receipts_processed": receipts_processed,
         "unmatched_parties": unmatched_parties,
         "errors": errors
