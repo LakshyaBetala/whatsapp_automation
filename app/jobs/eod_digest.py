@@ -249,6 +249,33 @@ async def run() -> None:
                 oldest_days=params["oldest_days"],
             )
 
+            # ── "Kal kya karna hai" action list: top overdue parties ──
+            action_lines = ""
+            try:
+                top_resp = (
+                    db.table("bills")
+                    .select("outstanding, due_date, clients(name, whatsapp_number)")
+                    .eq("business_id", biz["id"])
+                    .eq("status", "overdue")
+                    .order("outstanding", desc=True)
+                    .limit(3)
+                    .execute()
+                )
+                if top_resp.data:
+                    from app.services.templates import inr as _inr
+                    from datetime import date as _date
+                    lines = ["\n\n📞 Kal inko call karein:"]
+                    for i, b in enumerate(top_resp.data, 1):
+                        nm = (b.get("clients") or {}).get("name", "—")
+                        amt = _inr(b["outstanding"])
+                        days = ""
+                        if b.get("due_date"):
+                            days = f" ({( _date.today() - _date.fromisoformat(str(b['due_date'])) ).days} din)"
+                        lines.append(f"{i}. {nm} — {amt}{days}")
+                    action_lines = "\n".join(lines)
+            except Exception:
+                log.exception("Action list build failed — digest continues")
+
             await whatsapp.send_template(
                 business_id=biz["id"],
                 to_number=biz["whatsapp_number"],
@@ -258,7 +285,7 @@ async def run() -> None:
                 plan=Plan(biz["plan"]),
                 message_type=MessageType.eod_digest,
                 language=Lang.hi,
-                message_text=(rendered_body + stale_warning) if stale_warning else rendered_body,
+                message_text=rendered_body + (stale_warning or "") + action_lines,
             )
             sent += 1
 

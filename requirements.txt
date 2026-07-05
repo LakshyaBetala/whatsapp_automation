@@ -12,3 +12,6 @@ python-dateutil==2.9.0.post0
 # PDF generation. WeasyPrint needs native libs (GTK/Pango/Cairo).
 # On Windows install the GTK3 runtime; on Railway the buildpack includes them.
 weasyprint==63.1
+
+# UPI QR codes attached to reminders
+qrcode[pil]==8.0

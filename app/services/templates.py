@@ -116,6 +116,17 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
             "Payment zhaala asel tar PAID reply kara."
         ),
     },
+    # --- Overdue (stronger tone, after due date) -------------------------
+    ("overdue", Lang.hi): {
+        "aisensy_name": "overdue_hi",
+        "body": (
+            "⚠️ {client}, {business} ka bill OVERDUE hai.\n\n"
+            "Bill no {invoice_number} — {outstanding} baaki\n"
+            "({days_overdue} din ho gaye)\n\n"
+            "Aaj hi payment karein: {upi_link}\n"
+            "Payment ho gaya ho to PAID reply karein."
+        ),
+    },
     # --- Payment confirmation ------------------------------------------
     ("payment_confirmation", Lang.hi): {
         "aisensy_name": "payment_confirmation_hi",

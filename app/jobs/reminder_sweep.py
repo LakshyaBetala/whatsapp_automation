@@ -1,17 +1,21 @@
-"""Reminder sweep — checks open bills daily and sends reminders.
+"""Reminder sweep — the collection cadence engine. Runs at 10 AM IST daily.
 
-Runs at 10 AM IST daily.  Fetches ALL open bills in one query, then applies
-skip checks in this exact, non-negotiable order (fastest first):
+Cadence (per business, configurable via businesses.reminder_cadence):
 
-  1. Bill status == paid         → skip (no join)
-  2. Client reminders toggle     → skip (one column)
-  3. Due date not reached        → skip (Instruction 3 — CRITICAL)
-  4. No applicable reminder day  → skip (arithmetic)
-  5. Already sent this (bill, day) pair → skip (dedup query)
-  6. Business blackout date      → skip (array lookup)
-  7. Plan limit exceeded         → skip (Postgres RPC)
+  Regular trade (client credit_days <= 30):
+      invoice day +3, +7, +15, +21, +30 — gentle "please pay" nudges
+      (points past the due date automatically use the overdue tone)
+  Credit-terms clients (credit_days > 30, e.g. 45/60/90-day companies):
+      one courtesy heads-up 3 days BEFORE due — no early nagging
+  Everyone, once past due:
+      overdue message every `overdue_repeat_days` (default 7),
+      `overdue_max_repeats` times (default 3)
+  Finally:
+      one escalation to the OWNER — "call them yourself"
 
-Day 45 is special: message goes to the OWNER (escalation), not the customer.
+Every message carries the UPI link + QR image when the business has a
+upi_vpa. Dedup is per (bill, cadence-day) via the messages table, so a
+bill never gets the same reminder twice. Skip checks run cheapest-first.
 """
 from __future__ import annotations
 
@@ -20,25 +24,57 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.db import require_db
-from app.models import Lang, MessageType, Plan, PLAN_LIMITS, REMINDER_DAYS
-from app.services import whatsapp
+from app.models import Lang, MessageType, Plan, PLAN_LIMITS
+from app.services import upi, whatsapp
 from app.services.templates import inr, render
 
 log = logging.getLogger(__name__)
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+DEFAULT_CADENCE = [3, 7, 15, 21, 30]
+_KIND_RANK = {"nudge": 0, "predue": 1, "overdue": 2, "escalate": 3}
+
 
 def _today_ist() -> date:
     return datetime.now(IST).date()
 
 
-async def _already_sent(bill_id: str, reminder_day: int) -> bool:
-    """Check if this (bill_id, reminder_day) pair was already sent.
+def cadence_points(
+    cadence: list[int],
+    repeat_days: int,
+    max_repeats: int,
+    credit_days: int,
+    due_offset: int,
+) -> list[tuple[int, str]]:
+    """All reminder points for one bill as (days_since_invoice, kind).
 
-    Dedup key is the PAIR, not just bill_id — a bill legitimately gets
-    Day 7, Day 15, etc.  Only one message per (bill, day).
+    kind: nudge | predue | overdue | escalate. Pure function — unit tested.
+    due_offset = due_date - invoice_date in days.
     """
+    points: list[tuple[int, str]] = []
+    if credit_days <= 30:
+        for d in cadence:
+            points.append((d, "overdue" if d > due_offset else "nudge"))
+    else:
+        # Long credit terms: no early nagging, one heads-up before due
+        if due_offset - 3 > 0:
+            points.append((due_offset - 3, "predue"))
+
+    for k in range(1, max_repeats + 1):
+        points.append((due_offset + repeat_days * k, "overdue"))
+    points.append((due_offset + repeat_days * (max_repeats + 1), "escalate"))
+
+    # Collapse same-day collisions, strongest kind wins
+    best: dict[int, str] = {}
+    for day, kind in points:
+        if day not in best or _KIND_RANK[kind] > _KIND_RANK[best[day]]:
+            best[day] = kind
+    return sorted(best.items())
+
+
+async def _already_sent(bill_id: str, reminder_day: int) -> bool:
+    """One message per (bill, cadence-day) — the pair is the dedup key."""
     db = require_db()
     resp = (
         db.table("messages")
@@ -82,8 +118,9 @@ async def run() -> None:
     biz_resp = (
         db.table("businesses")
         .select(
-            "id, business_name, whatsapp_number, plan, "
-            "blackout_dates, reminders_enabled"
+            "id, business_name, whatsapp_number, plan, blackout_dates, "
+            "reminders_enabled, upi_vpa, reminder_cadence, "
+            "overdue_repeat_days, overdue_max_repeats"
         )
         .eq("reminders_enabled", True)
         .execute()
@@ -99,7 +136,7 @@ async def run() -> None:
         .select(
             "id, invoice_number, amount, outstanding, status, due_date, "
             "invoice_date, business_id, client_id, "
-            "clients(id, name, whatsapp_number, language, reminders_enabled)"
+            "clients(id, name, whatsapp_number, language, reminders_enabled, credit_days)"
         )
         .in_("status", ["pending", "partial", "overdue"])
         .in_("business_id", list(businesses.keys()))
@@ -127,44 +164,43 @@ async def run() -> None:
             skipped += 1
             continue
 
-        # ── SKIP 3: due date not reached (CRITICAL — Instruction 3) ──
-        #    Reminders count from due_date, NOT invoice_date.
-        #    A farmer with 180-day credit must NOT get Day 7 reminder
-        #    at day 7 from invoice — only after the credit period expires.
-        due_date_str = bill.get("due_date")
-        if not due_date_str:
+        # ── SKIP 3: work out where this bill sits in the cadence ─────
+        try:
+            invoice_date = date.fromisoformat(str(bill["invoice_date"]))
+        except (TypeError, ValueError):
             skipped += 1
             continue
-        due_date = date.fromisoformat(str(due_date_str))
-        days_since_due = (today - due_date).days
-        if days_since_due < 0:
-            # Not due yet — never send early
-            continue
+        due_str = bill.get("due_date")
+        due_date = date.fromisoformat(str(due_str)) if due_str else invoice_date
+        days_since_invoice = (today - invoice_date).days
+        due_offset = (due_date - invoice_date).days
 
-        # ── SKIP 4: find applicable reminder day ──────────────────────
-        #    Walk REMINDER_DAYS ascending; keep the highest day <= days_since_due.
-        #    e.g. 32 days overdue → applicable_day = 30
-        applicable_day = None
-        for day in REMINDER_DAYS:
-            if days_since_due >= day:
-                applicable_day = day
-        if applicable_day is None:
-            # Less than 7 days overdue — no reminder yet
+        points = cadence_points(
+            cadence=biz.get("reminder_cadence") or DEFAULT_CADENCE,
+            repeat_days=biz.get("overdue_repeat_days") or 7,
+            max_repeats=biz.get("overdue_max_repeats") or 3,
+            credit_days=client.get("credit_days") or 30,
+            due_offset=due_offset,
+        )
+        applicable = None
+        for day, kind in points:  # points are sorted — keep the latest reached
+            if days_since_invoice >= day:
+                applicable = (day, kind)
+        if applicable is None:
             continue
+        applicable_day, kind = applicable
 
-        # ── SKIP 5: dedup — already sent this (bill, day) pair? ───────
+        # ── SKIP 4: dedup — already sent this (bill, day) pair? ───────
         if await _already_sent(bill["id"], applicable_day):
             continue
 
-        # ── SKIP 6: blackout dates ────────────────────────────────────
-        blackout = biz.get("blackout_dates") or []
-        # blackout_dates can be date[] from Postgres — compare as strings
-        blackout_strs = [str(d) for d in blackout]
+        # ── SKIP 5: blackout dates ────────────────────────────────────
+        blackout_strs = [str(d) for d in (biz.get("blackout_dates") or [])]
         if today.isoformat() in blackout_strs:
             skipped += 1
             continue
 
-        # ── SKIP 7: plan limit (most expensive — last check) ─────────
+        # ── SKIP 6: plan limit (most expensive — last check) ─────────
         plan = Plan(biz["plan"])
         plan_limit = PLAN_LIMITS[plan]["messages"]
         limit_resp = db.rpc("increment_usage_if_allowed", {
@@ -175,69 +211,64 @@ async def run() -> None:
         if isinstance(limit_data, list):
             limit_data = limit_data[0] if limit_data else {}
         if not limit_data.get("allowed", False):
-            log.warning(
-                "Plan limit reached for %s during reminder sweep",
-                bill["business_id"],
-            )
+            log.warning("Plan limit reached for %s during reminder sweep", bill["business_id"])
             continue
 
         # ══════════════════════════════════════════════════════════════
-        # SEND REMINDER
+        # SEND
         # ══════════════════════════════════════════════════════════════
-
         client_lang = Lang(client.get("language", "hi"))
-        outstanding_fmt = inr(Decimal(str(bill["outstanding"])))
+        outstanding = Decimal(str(bill["outstanding"]))
+        outstanding_fmt = inr(outstanding)
         invoice_num = bill.get("invoice_number") or "—"
         client_name = client.get("name", "Customer")
+        days_since_due = max((today - due_date).days, 0)
+        biz_name = biz.get("business_name", "")
 
-        if applicable_day == 45:
-            # ── DAY 45: ESCALATION → goes to OWNER, not customer ──────
+        # UPI link + QR (attached to customer messages when VPA is set)
+        vpa = biz.get("upi_vpa")
+        pay_link = upi.upi_link(vpa, biz_name, outstanding, invoice_num) if vpa else ""
+        qr_b64 = upi.qr_png_base64(pay_link) if (vpa and kind != "escalate") else None
+
+        if kind == "escalate":
+            # ── ESCALATION → goes to OWNER, not customer ──────────────
             alert_text = (
                 f"{client_name} ka {outstanding_fmt} abhi bhi baaki hai "
-                f"({days_since_due} din overdue). Bill: {invoice_num}. "
-                f"Seedha baat karein."
+                f"({days_since_due} din overdue, sab reminders bhej diye). "
+                f"Bill: {invoice_num}. Ab seedha baat karein."
             )
             await whatsapp.send_template(
                 business_id=bill["business_id"],
                 to_number=biz["whatsapp_number"],  # OWNER number
                 campaign_name="owner_alert_hi",
-                template_params=[
-                    biz.get("business_name", ""),
-                    alert_text,
-                ],
-                business_name=biz.get("business_name", ""),
+                template_params=[biz_name, alert_text],
+                business_name=biz_name,
                 plan=plan,
                 message_type=MessageType.reminder,
                 reminder_day=applicable_day,
                 client_id=bill["client_id"],
                 bill_id=bill["id"],
                 language=Lang.hi,
-                message_text=f"{biz.get('business_name', '')}: {alert_text}",
+                message_text=f"{biz_name}: {alert_text}",
             )
-            log.info(
-                "Day 45 escalation → OWNER for bill %s (%s)",
-                invoice_num,
-                client_name,
-            )
+            log.info("Escalation → OWNER for bill %s (%s)", invoice_num, client_name)
         else:
-            # ── STANDARD REMINDER → goes to customer ──────────────────
+            # ── NUDGE / PRE-DUE / OVERDUE → goes to customer ──────────
             client_phone = client.get("whatsapp_number")
             if not client_phone:
-                log.info(
-                    "Skipping reminder for %s — no WhatsApp number",
-                    client_name,
-                )
+                log.info("Skipping reminder for %s — no WhatsApp number", client_name)
                 continue
 
+            template_key = "overdue" if kind == "overdue" else "reminder"
             tpl_name, body = render(
-                "reminder",
+                template_key,
                 client_lang,
                 client=client_name,
-                business=biz.get("business_name", ""),
+                business=biz_name,
                 invoice_number=invoice_num,
                 outstanding=outstanding_fmt,
                 days_overdue=str(days_since_due),
-                upi_link="",  # populated in PR 4 when bill has upi_link
+                upi_link=pay_link or "owner se UPI details maangein",
             )
 
             await whatsapp.send_template(
@@ -245,13 +276,10 @@ async def run() -> None:
                 to_number=client_phone,
                 campaign_name=tpl_name,
                 template_params=[
-                    client_name,
-                    biz.get("business_name", ""),
-                    invoice_num,
-                    outstanding_fmt,
-                    str(days_since_due),
+                    client_name, biz_name, invoice_num,
+                    outstanding_fmt, str(days_since_due),
                 ],
-                business_name=biz.get("business_name", ""),
+                business_name=biz_name,
                 plan=plan,
                 message_type=MessageType.reminder,
                 reminder_day=applicable_day,
@@ -259,6 +287,8 @@ async def run() -> None:
                 bill_id=bill["id"],
                 language=client_lang,
                 message_text=body,
+                image_base64=qr_b64,
+                image_filename=f"pay_{invoice_num}.png",
             )
 
         sent += 1

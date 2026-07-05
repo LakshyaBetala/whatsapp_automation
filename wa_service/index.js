@@ -116,7 +116,7 @@ app.post('/api/wa/send', async (req, res) => {
         return res.status(503).json({ success: false, error: "WhatsApp client is not ready" });
     }
 
-    const { phone, message, pdf_base64, pdf_name } = req.body;
+    const { phone, message, pdf_base64, pdf_name, media_base64, media_type, media_name } = req.body;
 
     if (!phone || !message) {
         return res.status(400).json({ success: false, error: "Missing phone or message" });
@@ -129,6 +129,10 @@ app.post('/api/wa/send', async (req, res) => {
         if (pdf_base64) {
             // Send the PDF as an attachment with the text as caption
             const media = new MessageMedia('application/pdf', pdf_base64, pdf_name || 'invoice.pdf');
+            await client.sendMessage(formattedNumber, media, { caption: message });
+        } else if (media_base64) {
+            // Generic media (e.g. UPI QR image) with the text as caption
+            const media = new MessageMedia(media_type || 'image/png', media_base64, media_name || 'media');
             await client.sendMessage(formattedNumber, media, { caption: message });
         } else {
             await client.sendMessage(formattedNumber, message);

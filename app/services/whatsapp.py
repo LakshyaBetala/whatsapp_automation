@@ -50,6 +50,8 @@ async def send_message(
     language: Lang = Lang.hi,
     pdf_base64: Optional[str] = None,
     pdf_filename: Optional[str] = None,
+    image_base64: Optional[str] = None,
+    image_filename: Optional[str] = None,
     template_name: str = "openwa_custom",
 ) -> dict:
     """Send a WhatsApp message via OpenWA.
@@ -86,6 +88,10 @@ async def send_message(
     if pdf_base64:
         payload["pdf_base64"] = pdf_base64
         payload["pdf_name"] = pdf_filename or "invoice.pdf"
+    elif image_base64:
+        payload["media_base64"] = image_base64
+        payload["media_type"] = "image/png"
+        payload["media_name"] = image_filename or "qr.png"
 
     openwa_message_id = None
     delivery_status = "sent"
@@ -144,6 +150,8 @@ async def send_template(
     media_url: Optional[str] = None,
     media_filename: Optional[str] = None,
     message_text: Optional[str] = None,
+    image_base64: Optional[str] = None,
+    image_filename: Optional[str] = None,
 ) -> dict:
     """Template-shaped send used by jobs and routers.
 
@@ -180,6 +188,8 @@ async def send_template(
         language=language,
         pdf_base64=pdf_base64,
         pdf_filename=media_filename,
+        image_base64=image_base64,
+        image_filename=image_filename,
         template_name=campaign_name,
     )
 
