@@ -52,10 +52,31 @@ async def _already_sent(bill_id: str, reminder_day: int) -> bool:
     return bool(resp.data)
 
 
+def _mark_overdue(db, today: date) -> None:
+    """Flip past-due 'pending' bills to 'overdue' so LIST/dashboards report
+    correctly. 'partial' stays partial — it carries payment information."""
+    try:
+        resp = (
+            db.table("bills")
+            .update({"status": "overdue"})
+            .eq("status", "pending")
+            .lt("due_date", today.isoformat())
+            .execute()
+        )
+        flipped = len(resp.data or [])
+        if flipped:
+            log.info("Marked %d bills overdue", flipped)
+    except Exception:
+        log.exception("Overdue flip failed — sweep continues")
+
+
 async def run() -> None:
     """Scheduled at 10 AM IST daily. Sweep all open bills and send reminders."""
     db = require_db()
     today = _today_ist()
+
+    # ── Flip past-due pending bills to overdue first ──────────────────
+    _mark_overdue(db, today)
 
     # ── Fetch all businesses with reminders enabled ───────────────────
     biz_resp = (

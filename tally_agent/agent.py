@@ -61,6 +61,16 @@ async def run_import(config: dict):
     debtors = tally_xml.parse_debtors(sanitized)
     log_and_print(f"Extracted {len(debtors)} Debtors from Tally.")
 
+    # Fetch WhatsApp numbers from ledger masters (phone fields + address lines)
+    contacts = {}
+    try:
+        contacts_query = tally_xml.build_ledger_contacts_query()
+        raw_contacts = await post_to_tally(config['tally_host'], config['tally_port'], contacts_query)
+        contacts = tally_xml.parse_ledger_contacts(tally_xml.sanitize_xml(raw_contacts))
+        log_and_print(f"Found phone numbers for {len(contacts)} ledgers in Tally.")
+    except Exception as e:
+        log_and_print(f"Could not fetch contact numbers from Tally (continuing without): {e}", is_error=True)
+
     # Shape must match the backend's TallyImportPayload (app/routers/tally.py)
     payload = {
         "business_id": config['business_id'],
@@ -71,6 +81,7 @@ async def run_import(config: dict):
                 "name": d['name'],
                 "opening_balance": d['closing_balance'],
                 "tally_group": d.get('tally_group', ''),
+                "whatsapp_number": contacts.get(d['name']),
             }
             for d in debtors
         ],

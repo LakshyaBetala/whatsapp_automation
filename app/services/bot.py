@@ -62,6 +62,12 @@ async def handle(from_number: str, text: str) -> str:
             client_name = stop_match.group(1).strip()
             return await _handle_stop(business_id, client_name)
 
+        # ── START <name> ─────────────────────────────────────────────
+        start_match = re.match(r"START\s+(.+)", upper)
+        if start_match:
+            client_name = start_match.group(1).strip()
+            return await _handle_start(business_id, client_name)
+
         # ── PAID <name> ──────────────────────────────────────────────
         paid_match = re.match(r"PAID\s+(.+)", upper)
         if paid_match:
@@ -75,6 +81,7 @@ async def handle(from_number: str, text: str) -> str:
             "Command samajh nahi aaya. Try:\n"
             "LIST — outstanding list\n"
             "STOP [naam] — reminders band\n"
+            "START [naam] — reminders chalu\n"
             "PAID [naam] — payment mark"
         )
 
@@ -173,6 +180,35 @@ async def _handle_stop(business_id: str, client_name: str) -> str:
     ).execute()
 
     return f"{client['name']} ke reminders band kar diye. Chalu karne ke liye START {client['name']} bhejein."
+
+
+async def _handle_start(business_id: str, client_name: str) -> str:
+    """Resume reminders for a client by fuzzy name match."""
+    db = require_db()
+    clients_resp = (
+        db.table("clients")
+        .select("id, name, reminders_enabled")
+        .eq("business_id", business_id)
+        .ilike("name", f"%{client_name}%")
+        .execute()
+    )
+
+    if not clients_resp.data:
+        return f"'{client_name}' naam ka koi client nahi mila. Exact naam likhein."
+
+    if len(clients_resp.data) > 1:
+        names = ", ".join(c["name"] for c in clients_resp.data[:5])
+        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+
+    client = clients_resp.data[0]
+    if client["reminders_enabled"]:
+        return f"{client['name']} ke reminders pehle se chalu hain."
+
+    db.table("clients").update({"reminders_enabled": True}).eq(
+        "id", client["id"]
+    ).execute()
+
+    return f"{client['name']} ke reminders chalu kar diye. ✅"
 
 
 async def _handle_paid_owner(

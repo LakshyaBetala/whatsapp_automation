@@ -14,6 +14,19 @@ class TallyDebtor(BaseModel):
     name: str
     opening_balance: float
     tally_group: str = ""
+    whatsapp_number: Optional[str] = None  # agent extracts from Tally ledger/address
+
+
+def _normalize_phone(raw: Optional[str]) -> Optional[str]:
+    """Normalise to '91XXXXXXXXXX' or None if not a valid Indian mobile."""
+    if not raw:
+        return None
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if len(digits) == 10 and digits[0] in "6789":
+        return "91" + digits
+    if len(digits) == 12 and digits.startswith("91") and digits[2] in "6789":
+        return digits
+    return None
 
 class TallyImportPayload(BaseModel):
     business_id: uuid.UUID
@@ -58,6 +71,7 @@ async def import_outstanding(payload: TallyImportPayload):
     clients_created = 0
     credit_balances = 0
     zero_balances = 0
+    phones_added = 0
     errors = []
 
     # Start of the current Indian financial year (Apr 1)
@@ -67,9 +81,10 @@ async def import_outstanding(payload: TallyImportPayload):
         try:
             # 1. Upsert Client
             # Check if client exists
-            client_resp = db.table("clients").select("id").eq("business_id", str(payload.business_id)).eq("tally_ledger_name", debtor.name).execute()
+            client_resp = db.table("clients").select("id, whatsapp_number").eq("business_id", str(payload.business_id)).eq("tally_ledger_name", debtor.name).execute()
 
             client_id = None
+            phone = _normalize_phone(debtor.whatsapp_number)
             if debtor.opening_balance < 0:
                 credit_balances += 1
             elif debtor.opening_balance == 0:
@@ -82,11 +97,19 @@ async def import_outstanding(payload: TallyImportPayload):
                     "name": debtor.name,
                     "tally_ledger_name": debtor.name,
                     "tally_group": debtor.tally_group,
+                    "whatsapp_number": phone,
                 }).execute()
                 client_id = new_client.data[0]["id"]
                 clients_created += 1
+                if phone:
+                    phones_added += 1
             else:
                 client_id = client_resp.data[0]["id"]
+                # Backfill phone if Tally has one and we don't (never overwrite
+                # a manually-set number)
+                if phone and not client_resp.data[0].get("whatsapp_number"):
+                    db.table("clients").update({"whatsapp_number": phone}).eq("id", client_id).execute()
+                    phones_added += 1
 
             # 2. Insert opening balance bill if positive
             if debtor.opening_balance > 0:
@@ -114,6 +137,7 @@ async def import_outstanding(payload: TallyImportPayload):
         "clients_created": clients_created,
         "credit_balances": credit_balances,
         "zero_balances": zero_balances,
+        "phones_added": phones_added,
         "errors": errors
     }
 

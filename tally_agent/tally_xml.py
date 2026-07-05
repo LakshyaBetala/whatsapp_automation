@@ -96,6 +96,95 @@ def build_daybook_query(from_date="20230401", to_date="20260331") -> str:
     </BODY>
   </ENVELOPE>'''
 
+def build_ledger_contacts_query() -> str:
+    """Inline TDL collection: every ledger's contact fields + address lines.
+
+    Works over plain HTTP — no .tdl file needs to be loaded in Tally.
+    Phone numbers usually live in LedgerMobile/LedgerPhone, but many shops
+    only type them into an address line, so we fetch Address too.
+    """
+    return '''<ENVELOPE>
+    <HEADER>
+      <VERSION>1</VERSION>
+      <TALLYREQUEST>Export</TALLYREQUEST>
+      <TYPE>COLLECTION</TYPE>
+      <ID>SaaSLedgerContacts</ID>
+    </HEADER>
+    <BODY>
+      <DESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        </STATICVARIABLES>
+        <TDL>
+          <TDLMESSAGE>
+            <COLLECTION NAME="SaaSLedgerContacts" ISMODIFY="No">
+              <TYPE>Ledger</TYPE>
+              <NATIVEMETHOD>Name</NATIVEMETHOD>
+              <NATIVEMETHOD>Parent</NATIVEMETHOD>
+              <NATIVEMETHOD>LedgerPhone</NATIVEMETHOD>
+              <NATIVEMETHOD>LedgerMobile</NATIVEMETHOD>
+              <NATIVEMETHOD>LedgerContact</NATIVEMETHOD>
+              <NATIVEMETHOD>Address</NATIVEMETHOD>
+            </COLLECTION>
+          </TDLMESSAGE>
+        </TDL>
+      </DESC>
+    </BODY>
+  </ENVELOPE>'''
+
+
+def extract_indian_mobile(text: str) -> Optional[str]:
+    """Pull the first Indian mobile number out of free text.
+
+    Handles '98765 43210', '+91-9876543210', '09876543210', numbers buried
+    in an address line, etc. Returns normalised '91XXXXXXXXXX' or None.
+    Mobile numbers start 6-9; 6-digit pincodes and house numbers don't match.
+    """
+    if not text:
+        return None
+    cleaned = re.sub(r'[\s\-\(\)\.\/]', '', text)
+    m = re.search(r'(?:\+?91|0)?([6-9]\d{9})(?!\d)', cleaned)
+    if not m:
+        return None
+    return '91' + m.group(1)
+
+
+def parse_ledger_contacts(xml_text: str) -> Dict[str, str]:
+    """Map ledger name -> '91XXXXXXXXXX' from the contacts collection.
+
+    Checks dedicated phone fields first, then falls back to scanning the
+    address lines (many shops type the mobile into the address).
+    """
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return {}
+
+    contacts: Dict[str, str] = {}
+    for ledger in root.iter('LEDGER'):
+        name = ledger.attrib.get('NAME', '') or ledger.findtext('NAME', '')
+        if not name:
+            continue
+
+        candidates = [
+            ledger.findtext('LEDGERMOBILE', ''),
+            ledger.findtext('LEDGERPHONE', ''),
+            ledger.findtext('LEDGERCONTACT', ''),
+        ]
+        # Address lines: <ADDRESS.LIST><ADDRESS>..</ADDRESS>...</ADDRESS.LIST>
+        for addr in ledger.iter('ADDRESS'):
+            if addr.text:
+                candidates.append(addr.text)
+
+        for candidate in candidates:
+            phone = extract_indian_mobile(candidate)
+            if phone:
+                contacts[name] = phone
+                break
+
+    return contacts
+
+
 def parse_debtors(xml_text: str) -> List[Dict[str, Any]]:
     try:
         root = ET.fromstring(xml_text)

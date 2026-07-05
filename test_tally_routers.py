@@ -122,6 +122,41 @@ def test_import_outstanding(fake_db):
     assert bill_inserts[0]["is_opening_balance"] == True
     assert bill_inserts[0]["tally_voucher_number"] == "OB-Positive Debtor"
 
+def test_import_with_phone_numbers(fake_db):
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
+    # Existing client without a phone — import should backfill it
+    fake_db.storage["clients"] = [{
+        "id": "existing_1", "business_id": biz_id,
+        "tally_ledger_name": "Old Client", "whatsapp_number": None,
+    }]
+    payload = {
+        "business_id": biz_id,
+        "agent_token": "valid_token",
+        "company_name": "TEST",
+        "debtors": [
+            {"name": "New With Phone", "opening_balance": 100.0, "whatsapp_number": "919876543210"},
+            {"name": "Old Client", "opening_balance": 0.0, "whatsapp_number": "9822011223"},
+            {"name": "Bad Phone", "opening_balance": 0.0, "whatsapp_number": "12345"},
+        ]
+    }
+
+    resp = client.post("/tally/import", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["errors"] == []
+    assert data["phones_added"] == 2  # new client + backfilled; bad phone dropped
+
+    client_inserts = [i[1] for i in fake_db.inserts if i[0] == "clients"]
+    new_client = next(c for c in client_inserts if c["name"] == "New With Phone")
+    assert new_client["whatsapp_number"] == "919876543210"
+    bad = next(c for c in client_inserts if c["name"] == "Bad Phone")
+    assert bad["whatsapp_number"] is None
+    # Backfill normalises 10-digit to 91-prefixed
+    client_updates = [u[1] for u in fake_db.updates if u[0] == "clients"]
+    assert {"whatsapp_number": "919822011223"} in client_updates
+
+
 def test_sync_duplicate_voucher(fake_db):
     biz_id = str(uuid.uuid4())
     fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
