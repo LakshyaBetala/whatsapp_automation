@@ -15,6 +15,7 @@ class TallyDebtor(BaseModel):
     opening_balance: float
     tally_group: str = ""
     whatsapp_number: Optional[str] = None  # agent extracts from Tally ledger/address
+    credit_days: Optional[int] = None      # Tally BillCreditPeriod or shop default
 
 
 def _normalize_phone(raw: Optional[str]) -> Optional[str]:
@@ -81,10 +82,11 @@ async def import_outstanding(payload: TallyImportPayload):
         try:
             # 1. Upsert Client
             # Check if client exists
-            client_resp = db.table("clients").select("id, whatsapp_number").eq("business_id", str(payload.business_id)).eq("tally_ledger_name", debtor.name).execute()
+            client_resp = db.table("clients").select("id, whatsapp_number, credit_days").eq("business_id", str(payload.business_id)).eq("tally_ledger_name", debtor.name).execute()
 
             client_id = None
             phone = _normalize_phone(debtor.whatsapp_number)
+            credit_days = debtor.credit_days if debtor.credit_days and 1 <= debtor.credit_days <= 365 else None
             if debtor.opening_balance < 0:
                 credit_balances += 1
             elif debtor.opening_balance == 0:
@@ -92,24 +94,35 @@ async def import_outstanding(payload: TallyImportPayload):
 
             if not client_resp.data:
                 # Insert client (clients.name is NOT NULL — mirror the ledger name)
-                new_client = db.table("clients").insert({
+                row = {
                     "business_id": str(payload.business_id),
                     "name": debtor.name,
                     "tally_ledger_name": debtor.name,
                     "tally_group": debtor.tally_group,
                     "whatsapp_number": phone,
-                }).execute()
+                }
+                if credit_days:
+                    row["credit_days"] = credit_days
+                new_client = db.table("clients").insert(row).execute()
                 client_id = new_client.data[0]["id"]
                 clients_created += 1
                 if phone:
                     phones_added += 1
             else:
-                client_id = client_resp.data[0]["id"]
+                existing = client_resp.data[0]
+                client_id = existing["id"]
+                updates = {}
                 # Backfill phone if Tally has one and we don't (never overwrite
                 # a manually-set number)
-                if phone and not client_resp.data[0].get("whatsapp_number"):
-                    db.table("clients").update({"whatsapp_number": phone}).eq("id", client_id).execute()
+                if phone and not existing.get("whatsapp_number"):
+                    updates["whatsapp_number"] = phone
                     phones_added += 1
+                # Adopt Tally credit terms only while the client still has the
+                # untouched default (30) — manual edits win over re-imports
+                if credit_days and existing.get("credit_days", 30) == 30 and credit_days != 30:
+                    updates["credit_days"] = credit_days
+                if updates:
+                    db.table("clients").update(updates).eq("id", client_id).execute()
 
             # 2. Insert opening balance bill if positive
             if debtor.opening_balance > 0:

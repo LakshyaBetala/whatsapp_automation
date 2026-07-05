@@ -71,9 +71,20 @@ async def run_import(config: dict):
     # 2. All ledgers -> debtors with balances + phone numbers
     masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
+
+    # Credit terms: Tally's per-ledger BillCreditPeriod wins; else the
+    # shop-wide default from config.json (e.g. a 45-days trade), else the
+    # backend default (30).
+    shop_default = config.get('default_credit_days')
+    if shop_default:
+        for d in debtors:
+            if d.get('credit_days') is None:
+                d['credit_days'] = int(shop_default)
+
     with_phone = sum(1 for d in debtors if d['whatsapp_number'])
+    with_terms = sum(1 for d in debtors if d.get('credit_days'))
     owing = sum(1 for d in debtors if d['opening_balance'] > 0)
-    log_and_print(f"Extracted {len(debtors)} customers ({owing} with outstanding, {with_phone} with WhatsApp numbers).")
+    log_and_print(f"Extracted {len(debtors)} customers ({owing} with outstanding, {with_phone} with WhatsApp numbers, {with_terms} with credit terms).")
 
     if not debtors:
         log_and_print("No debtors found — is the right company open in Tally?", is_error=True)

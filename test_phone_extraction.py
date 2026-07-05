@@ -1,5 +1,21 @@
-"""Unit tests for pulling WhatsApp numbers out of Tally ledger data."""
-from tally_agent.tally_xml import extract_indian_mobile, parse_ledger_contacts
+"""Unit tests for pulling WhatsApp numbers + credit terms out of Tally ledger data."""
+from tally_agent.tally_xml import extract_indian_mobile, parse_ledger_contacts, parse_credit_days
+
+
+def test_credit_days_formats():
+    assert parse_credit_days("45 Days") == 45
+    assert parse_credit_days("1 Days") == 1
+    assert parse_credit_days("90 days") == 90
+    assert parse_credit_days("75") == 75
+
+
+def test_credit_days_junk_rejected():
+    # Real Tally data contains garbage like a date typed into the field
+    assert parse_credit_days("13-Jan-2021") is None
+    assert parse_credit_days("") is None
+    assert parse_credit_days(None) is None
+    assert parse_credit_days("0 Days") is None
+    assert parse_credit_days("500 Days") is None
 
 
 def test_plain_mobile():

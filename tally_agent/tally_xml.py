@@ -98,6 +98,17 @@ def extract_indian_mobile(text: Optional[str]) -> Optional[str]:
     return '91' + m.group(1)
 
 
+def parse_credit_days(raw: Optional[str]) -> Optional[int]:
+    """'45 Days' / '45' -> 45. Tolerates junk ('13-Jan-2021' etc.) -> None."""
+    if not raw:
+        return None
+    m = re.fullmatch(r'\s*(\d{1,3})\s*(?:Days?)?\s*', raw, re.IGNORECASE)
+    if not m:
+        return None
+    days = int(m.group(1))
+    return days if 0 < days <= 365 else None
+
+
 def _phone_from_ledger(ledger: ET.Element) -> Optional[str]:
     """Best mobile for a LEDGER element: dedicated fields first, then
     address lines (many shops type the mobile into the address)."""
@@ -154,10 +165,11 @@ def build_groups_query(company: str = "") -> str:
 
 
 def build_masters_query(company: str = "") -> str:
-    """All ledgers with balance + contact fields in one shot."""
+    """All ledgers with balance + contact + credit-period fields in one shot."""
     return _collection_query('Ledger', [
         'Name', 'Parent', 'ClosingBalance',
         'LedgerPhone', 'LedgerMobile', 'LedgerContact', 'Address',
+        'BillCreditPeriod',
     ], company)
 
 
@@ -242,6 +254,7 @@ def parse_masters(xml_text: str, debtor_groups: Set[str]) -> List[Dict[str, Any]
             'tally_group': parent,
             'opening_balance': -closing,  # negative closing = owes -> positive
             'whatsapp_number': _phone_from_ledger(led),
+            'credit_days': parse_credit_days(led.findtext('BILLCREDITPERIOD', '')),
         })
     return debtors
 

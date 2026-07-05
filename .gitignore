@@ -36,6 +36,8 @@ parse_*.py
 
 # Agent config holds the live agent_token — never commit
 tally_agent/config.json
+# Per-customer agent bundles (contain live tokens)
+agents/
 
 # Node
 node_modules/
