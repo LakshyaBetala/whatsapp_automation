@@ -197,9 +197,22 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     sales_processed += 1
 
             elif v.voucher_type.lower() == "receipt":
+                # Idempotency: every sync sends the full FY (Tally ignores
+                # date filters over HTTP) — apply each receipt exactly once.
+                seen = db.table("tally_receipts").select("id").eq("business_id", str(payload.business_id)).eq("tally_voucher_number", v.voucher_number).eq("receipt_date", v.date).execute()
+                if seen.data:
+                    continue
+                db.table("tally_receipts").insert({
+                    "business_id": str(payload.business_id),
+                    "tally_voucher_number": v.voucher_number,
+                    "party_name": v.party_name,
+                    "amount": v.amount,
+                    "receipt_date": v.date,
+                }).execute()
+
                 # Find oldest open bills
                 open_bills_resp = db.table("bills").select("id, amount, paid_amount, status").eq("client_id", client_id).in_("status", ["pending", "partial", "overdue"]).order("invoice_date").execute()
-                
+
                 remaining_payment = v.amount
                 for b in open_bills_resp.data:
                     if remaining_payment <= 0:

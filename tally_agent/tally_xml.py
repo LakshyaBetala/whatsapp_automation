@@ -1,25 +1,69 @@
+"""Tally XML queries and parsers — no TDL files required.
+
+Everything works over plain HTTP against a stock TallyPrime acting as
+server (F1 > Settings > Connectivity). Verified live against
+TallyPrime with multiple companies loaded:
+
+  - Collections are scoped per company via SVCURRENTCOMPANY (mandatory
+    when >1 company is open — otherwise Tally answers for whichever
+    company happens to be active).
+  - Ledger ClosingBalance sign: NEGATIVE = customer owes (debit).
+  - Voucher collections IGNORE SVFROMDATE/SVTODATE over HTTP and return
+    the company's active financial year. Sync therefore sends the whole
+    FY and relies on backend idempotency (sales dedup by voucher number,
+    receipts dedup by the tally_receipts table).
+  - Sales voucher Amount is negative, Receipt positive — use abs().
+  - Responses arrive in UTF-16 (BOM) or UTF-8 depending on query type.
+"""
 import xml.etree.ElementTree as ET
 import re
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
+from xml.sax.saxutils import escape
+
+
+# ── Decoding / cleanup ────────────────────────────────────────────────
 
 def sanitize_xml(raw_bytes: bytes) -> str:
-    """Safely decodes and sanitizes Tally XML to remove invalid control characters."""
-    for encoding in ['utf-16', 'windows-1252', 'utf-8']:
+    """Safely decode and sanitize Tally XML.
+
+    Tally mixes encodings per query type: UTF-16 (with BOM) for some
+    reports, UTF-8/ASCII for collection exports. Decoding UTF-8 bytes as
+    UTF-16 "succeeds" with garbage, so the BOM / leading '<' must decide.
+    """
+    if raw_bytes[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        text = raw_bytes.decode('utf-16', errors='ignore')
+    elif raw_bytes[:3] == b'\xef\xbb\xbf':
+        text = raw_bytes.decode('utf-8-sig', errors='ignore')
+    elif raw_bytes[:1] == b'<' or raw_bytes[:64].lstrip()[:1] == b'<':
+        # Plain XML with no BOM — UTF-8 first, cp1252 fallback
         try:
-            text = raw_bytes.decode(encoding)
-            break
-        except Exception:
-            continue
+            text = raw_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            text = raw_bytes.decode('windows-1252', errors='ignore')
     else:
-        text = raw_bytes.decode('utf-8', errors='ignore')
-    
+        for encoding in ('utf-16', 'utf-8', 'windows-1252'):
+            try:
+                text = raw_bytes.decode(encoding)
+                break
+            except Exception:
+                continue
+        else:
+            text = raw_bytes.decode('utf-8', errors='ignore')
+
+    # Drop anything before the first '<' (stray BOM remnants / whitespace)
+    lt = text.find('<')
+    if lt > 0:
+        text = text[lt:]
+
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
     text = re.sub(r'&#x[0-9A-Fa-f]+;', '', text)
     text = re.sub(r'&#\d+;', '', text)
     return text
 
+
 def parse_tally_date(date_str: str) -> Optional[str]:
+    """'YYYYMMDD' -> 'YYYY-MM-DD' (Tally's voucher DATE format)."""
     if not date_str or len(date_str) != 8:
         return None
     try:
@@ -28,112 +72,17 @@ def parse_tally_date(date_str: str) -> Optional[str]:
     except ValueError:
         return None
 
-def extract_amount(element: ET.Element) -> float:
-    amount = 0.0
-    for entry in element.iter('AMOUNT'):
-        amt_text = entry.text
-        if amt_text:
-            try:
-                val = abs(float(amt_text.replace('-', '').strip()))
-                if val > amount:
-                    amount = val
-            except ValueError:
-                pass
-    return amount
 
-def build_receivables_query() -> str:
-    """Queries the physical tally_saas.tdl report for Debtors."""
-    return '''<ENVELOPE>
-    <HEADER>
-      <VERSION>1</VERSION>
-      <TALLYREQUEST>EXPORT</TALLYREQUEST>
-      <TYPE>DATA</TYPE>
-      <ID>SAAS Debtors</ID>
-    </HEADER>
-    <BODY>
-      <DESC>
-        <STATICVARIABLES>
-          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-        </STATICVARIABLES>
-      </DESC>
-    </BODY>
-  </ENVELOPE>'''
-
-def build_payables_query() -> str:
-    return '''<ENVELOPE>
-    <HEADER>
-      <VERSION>1</VERSION>
-      <TALLYREQUEST>EXPORT</TALLYREQUEST>
-      <TYPE>DATA</TYPE>
-      <ID>SAAS Creditors</ID>
-    </HEADER>
-    <BODY>
-      <DESC>
-        <STATICVARIABLES>
-          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-        </STATICVARIABLES>
-      </DESC>
-    </BODY>
-  </ENVELOPE>'''
-
-def build_daybook_query(from_date="20230401", to_date="20260331") -> str:
-    """Queries the physical tally_saas.tdl report for Daybook/Vouchers."""
-    return f'''<ENVELOPE>
-    <HEADER>
-      <VERSION>1</VERSION>
-      <TALLYREQUEST>EXPORT</TALLYREQUEST>
-      <TYPE>DATA</TYPE>
-      <ID>SAAS Daybook</ID>
-    </HEADER>
-    <BODY>
-      <DESC>
-        <STATICVARIABLES>
-          <SVFROMDATE>{from_date}</SVFROMDATE>
-          <SVTODATE>{to_date}</SVTODATE>
-          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-        </STATICVARIABLES>
-      </DESC>
-    </BODY>
-  </ENVELOPE>'''
-
-def build_ledger_contacts_query() -> str:
-    """Inline TDL collection: every ledger's contact fields + address lines.
-
-    Works over plain HTTP — no .tdl file needs to be loaded in Tally.
-    Phone numbers usually live in LedgerMobile/LedgerPhone, but many shops
-    only type them into an address line, so we fetch Address too.
-    """
-    return '''<ENVELOPE>
-    <HEADER>
-      <VERSION>1</VERSION>
-      <TALLYREQUEST>Export</TALLYREQUEST>
-      <TYPE>COLLECTION</TYPE>
-      <ID>SaaSLedgerContacts</ID>
-    </HEADER>
-    <BODY>
-      <DESC>
-        <STATICVARIABLES>
-          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-        </STATICVARIABLES>
-        <TDL>
-          <TDLMESSAGE>
-            <COLLECTION NAME="SaaSLedgerContacts" ISMODIFY="No">
-              <TYPE>Ledger</TYPE>
-              <NATIVEMETHOD>Name</NATIVEMETHOD>
-              <NATIVEMETHOD>Parent</NATIVEMETHOD>
-              <NATIVEMETHOD>LedgerPhone</NATIVEMETHOD>
-              <NATIVEMETHOD>LedgerMobile</NATIVEMETHOD>
-              <NATIVEMETHOD>LedgerContact</NATIVEMETHOD>
-              <NATIVEMETHOD>Address</NATIVEMETHOD>
-            </COLLECTION>
-          </TDLMESSAGE>
-        </TDL>
-      </DESC>
-    </BODY>
-  </ENVELOPE>'''
+def _to_float(raw: Optional[str]) -> float:
+    try:
+        return float((raw or '0').replace(',', '').strip() or 0)
+    except ValueError:
+        return 0.0
 
 
-def extract_indian_mobile(text: str) -> Optional[str]:
+# ── Phone extraction ──────────────────────────────────────────────────
+
+def extract_indian_mobile(text: Optional[str]) -> Optional[str]:
     """Pull the first Indian mobile number out of free text.
 
     Handles '98765 43210', '+91-9876543210', '09876543210', numbers buried
@@ -149,137 +98,204 @@ def extract_indian_mobile(text: str) -> Optional[str]:
     return '91' + m.group(1)
 
 
-def parse_ledger_contacts(xml_text: str) -> Dict[str, str]:
-    """Map ledger name -> '91XXXXXXXXXX' from the contacts collection.
+def _phone_from_ledger(ledger: ET.Element) -> Optional[str]:
+    """Best mobile for a LEDGER element: dedicated fields first, then
+    address lines (many shops type the mobile into the address)."""
+    candidates = [
+        ledger.findtext('LEDGERMOBILE', ''),
+        ledger.findtext('LEDGERPHONE', ''),
+        ledger.findtext('LEDGERCONTACT', ''),
+    ]
+    for addr in ledger.iter('ADDRESS'):
+        if addr.text:
+            candidates.append(addr.text)
+    for candidate in candidates:
+        phone = extract_indian_mobile(candidate)
+        if phone:
+            return phone
+    return None
 
-    Checks dedicated phone fields first, then falls back to scanning the
-    address lines (many shops type the mobile into the address).
-    """
+
+# ── Query builders (inline TDL collections — no .tdl files needed) ────
+
+def _collection_query(objtype: str, methods: List[str], company: str = "") -> str:
+    sv_company = f'<SVCURRENTCOMPANY>{escape(company)}</SVCURRENTCOMPANY>' if company else ''
+    native = ''.join(f'<NATIVEMETHOD>{m}</NATIVEMETHOD>' for m in methods)
+    return f'''<ENVELOPE>
+    <HEADER>
+      <VERSION>1</VERSION>
+      <TALLYREQUEST>Export</TALLYREQUEST>
+      <TYPE>COLLECTION</TYPE>
+      <ID>SaaS{objtype}s</ID>
+    </HEADER>
+    <BODY>
+      <DESC>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+          {sv_company}
+        </STATICVARIABLES>
+        <TDL>
+          <TDLMESSAGE>
+            <COLLECTION NAME="SaaS{objtype}s" ISMODIFY="No">
+              <TYPE>{objtype}</TYPE>
+              {native}
+            </COLLECTION>
+          </TDLMESSAGE>
+        </TDL>
+      </DESC>
+    </BODY>
+  </ENVELOPE>'''
+
+
+def build_groups_query(company: str = "") -> str:
+    """All account groups (name + parent) — used to find every subgroup
+    under Sundry Debtors (shops group customers by street/route)."""
+    return _collection_query('Group', ['Name', 'Parent'], company)
+
+
+def build_masters_query(company: str = "") -> str:
+    """All ledgers with balance + contact fields in one shot."""
+    return _collection_query('Ledger', [
+        'Name', 'Parent', 'ClosingBalance',
+        'LedgerPhone', 'LedgerMobile', 'LedgerContact', 'Address',
+    ], company)
+
+
+def build_vouchers_query(company: str = "") -> str:
+    """All vouchers of the active FY (Tally ignores date filters over HTTP)."""
+    return _collection_query('Voucher', [
+        'Date', 'VoucherTypeName', 'VoucherNumber', 'PartyLedgerName', 'Amount',
+    ], company)
+
+
+def build_company_list_query() -> str:
+    return _collection_query('Company', ['Name'])
+
+
+# ── Parsers ───────────────────────────────────────────────────────────
+
+def _elem_name(elem: ET.Element) -> str:
+    return (elem.attrib.get('NAME', '') or elem.findtext('NAME', '') or '').strip()
+
+
+def parse_companies(xml_text: str) -> List[str]:
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    return [n for n in (_elem_name(c) for c in root.iter('COMPANY')) if n]
+
+
+def parse_groups(xml_text: str) -> Dict[str, str]:
+    """Group name -> parent group name."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return {}
-
-    contacts: Dict[str, str] = {}
-    for ledger in root.iter('LEDGER'):
-        name = ledger.attrib.get('NAME', '') or ledger.findtext('NAME', '')
-        if not name:
-            continue
-
-        candidates = [
-            ledger.findtext('LEDGERMOBILE', ''),
-            ledger.findtext('LEDGERPHONE', ''),
-            ledger.findtext('LEDGERCONTACT', ''),
-        ]
-        # Address lines: <ADDRESS.LIST><ADDRESS>..</ADDRESS>...</ADDRESS.LIST>
-        for addr in ledger.iter('ADDRESS'):
-            if addr.text:
-                candidates.append(addr.text)
-
-        for candidate in candidates:
-            phone = extract_indian_mobile(candidate)
-            if phone:
-                contacts[name] = phone
-                break
-
-    return contacts
+    out: Dict[str, str] = {}
+    for g in root.iter('GROUP'):
+        name = _elem_name(g)
+        if name:
+            out[name] = (g.findtext('PARENT', '') or '').strip()
+    return out
 
 
-def parse_debtors(xml_text: str) -> List[Dict[str, Any]]:
+def debtor_group_names(group_parent: Dict[str, str]) -> Set[str]:
+    """Every group that descends from 'Sundry Debtors' (plus the root)."""
+    def under(g: str) -> bool:
+        seen = set()
+        while g and g not in seen:
+            if g.strip().lower() == 'sundry debtors':
+                return True
+            seen.add(g)
+            g = group_parent.get(g, '')
+        return False
+
+    result = {g for g in group_parent if under(g)}
+    result.add('Sundry Debtors')
+    return result
+
+
+def parse_masters(xml_text: str, debtor_groups: Set[str]) -> List[Dict[str, Any]]:
+    """Debtor ledgers with balance, group and phone.
+
+    opening_balance sign convention OUT of here: positive = customer owes
+    (Tally stores debit balances as negative, so we flip).
+    Zero-balance clients are kept — they get bills later and we want their
+    phone numbers on file.
+    """
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return []
 
-    debtors = []
-    
-    # SAAS Debtors Line is the repetitive node in our TDL
-    for line in root.iter('SAASDEBTORSLINE'):
-        name = line.findtext('PARTYNAME', '')
-        opening_str = line.findtext('CLOSINGBALANCE', '0')
-        try:
-            closing_balance = float(opening_str.replace('-', '').strip())
-        except ValueError:
-            closing_balance = 0.0
-            
-        bills = []
-        for bill_alloc in line.iter('SAASBILLALLOCLINE'):
-            bill_name = bill_alloc.findtext('BILLNAME', '')
-            bill_date = bill_alloc.findtext('BILLDATE', '')
-            bill_amount_str = bill_alloc.findtext('BILLAMOUNT', '0')
-            try:
-                bill_amount = abs(float(bill_amount_str.replace('-', '').strip()))
-            except ValueError:
-                bill_amount = 0.0
-                
-            if bill_name and bill_amount > 0:
-                bills.append({
-                    'bill_name': bill_name,
-                    'bill_date': bill_date,
-                    'amount': bill_amount
-                })
-
+    lowered = {g.strip().lower() for g in debtor_groups}
+    debtors: List[Dict[str, Any]] = []
+    for led in root.iter('LEDGER'):
+        name = _elem_name(led)
+        parent = (led.findtext('PARENT', '') or '').strip()
+        if not name or parent.strip().lower() not in lowered:
+            continue
+        closing = _to_float(led.findtext('CLOSINGBALANCE', '0'))
         debtors.append({
             'name': name,
-            'closing_balance': closing_balance,
-            'bills': bills
+            'tally_group': parent,
+            'opening_balance': -closing,  # negative closing = owes -> positive
+            'whatsapp_number': _phone_from_ledger(led),
         })
-        
     return debtors
 
-def parse_daybook(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:
+
+def parse_ledger_contacts(xml_text: str) -> Dict[str, str]:
+    """Map ledger name -> '91XXXXXXXXXX' (kept for tests/diagnostics)."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return {}
+    contacts: Dict[str, str] = {}
+    for ledger in root.iter('LEDGER'):
+        name = _elem_name(ledger)
+        if not name:
+            continue
+        phone = _phone_from_ledger(ledger)
+        if phone:
+            contacts[name] = phone
+    return contacts
+
+
+def parse_vouchers(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Split the FY voucher dump into sales and receipts.
+
+    Matches by containment ('GST Sales' etc. count as sales); Purchase,
+    Payment, Contra, Journal and cheque-return types are ignored.
+    """
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return {'sales': [], 'receipts': []}
 
-    sales = []
-    receipts = []
+    sales: List[Dict[str, Any]] = []
+    receipts: List[Dict[str, Any]] = []
+    for v in root.iter('VOUCHER'):
+        vtype = (v.findtext('VOUCHERTYPENAME', '') or '').strip()
+        party = (v.findtext('PARTYLEDGERNAME', '') or '').strip()
+        formatted_date = parse_tally_date((v.findtext('DATE', '') or '').strip())
+        number = (v.findtext('VOUCHERNUMBER', '') or '').strip()
+        amount = abs(_to_float(v.findtext('AMOUNT', '0')))
 
-    for line in root.iter('SAASDAYBOOKLINE'):
-        vtype = line.findtext('VOUCHERTYPENAME', '')
-        party = line.findtext('PARTYLEDGERNAME', '')
-        raw_date = line.findtext('DATE', '')
-        number = line.findtext('VOUCHERNUMBER', '')
-        amount_str = line.findtext('AMOUNT', '0')
-        
-        if not party or not raw_date:
+        if not party or not formatted_date or amount == 0:
             continue
-            
-        formatted_date = parse_tally_date(raw_date)
-        if not formatted_date:
-            continue
-            
-        try:
-            amount = abs(float(amount_str.replace('-', '').strip()))
-        except ValueError:
-            amount = 0.0
-        
-        # Extract deep inventory details
-        items = []
-        for inv_line in line.iter('SAASVCHINVLINE'):
-            items.append({
-                'item_name': inv_line.findtext('STOCKITEMNAME', ''),
-                'qty': inv_line.findtext('BILLEDQTY', ''),
-                'rate': inv_line.findtext('RATE', ''),
-                'amount': inv_line.findtext('ITEMAMOUNT', '0')
-            })
 
         record = {
-            'type': vtype,
+            'number': number,
             'party': party,
             'date': formatted_date,
-            'number': number,
             'amount': amount,
-            'items': items
         }
-        
-        if 'Sales' in vtype:
+        lower = vtype.lower()
+        if 'sales' in lower:
             sales.append(record)
-        elif 'Receipt' in vtype:
+        elif 'receipt' in lower:
             receipts.append(record)
 
-    return {
-        'sales': sales,
-        'receipts': receipts
-    }
+    return {'sales': sales, 'receipts': receipts}

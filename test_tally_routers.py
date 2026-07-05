@@ -79,7 +79,8 @@ class FakeDB:
             "businesses": [{"id": "some_id", "agent_token": "valid_token"}],
             "clients": [],
             "bills": [],
-            "tally_syncs": []
+            "tally_syncs": [],
+            "tally_receipts": []
         }
         self.inserts = []
         self.updates = []
@@ -219,6 +220,44 @@ def test_sync_unmatched_party(fake_db):
     assert "Ghost Party" in syncs_inserts[0]["error"]
     assert syncs_inserts[0]["success"] is False
     assert syncs_inserts[0]["sync_type"] == "poll"
+
+def test_receipt_applied_exactly_once(fake_db):
+    """Re-syncing the same FY dump must not double-apply payments."""
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
+    fake_db.storage["clients"] = [{"id": "client_1", "business_id": biz_id, "whatsapp_number": None, "credit_days": 30, "tally_ledger_name": "Test Party"}]
+    fake_db.storage["bills"] = [{
+        "id": "bill_1", "business_id": biz_id, "client_id": "client_1",
+        "tally_voucher_number": "S-1", "amount": 1000.0, "paid_amount": 0.0,
+        "status": "pending", "invoice_date": "2026-06-01",
+    }]
+
+    payload = {
+        "business_id": biz_id,
+        "agent_token": "valid_token",
+        "company_name": "TEST",
+        "sync_date": "2026-07-05",
+        "vouchers": [
+            {"voucher_number": "R-9", "voucher_type": "Receipt", "party_name": "Test Party", "amount": 400.0, "date": "2026-07-01"}
+        ]
+    }
+
+    resp1 = client.post("/tally/sync", json=payload)
+    assert resp1.status_code == 200
+    assert resp1.json()["receipts_processed"] == 1
+    bill_updates = [u[1] for u in fake_db.updates if u[0] == "bills"]
+    assert len(bill_updates) == 1
+    assert bill_updates[0]["paid_amount"] == 400.0
+    assert bill_updates[0]["status"] == "partial"
+
+    # Same payload again (next day's full-FY sync) — receipt must be skipped
+    resp2 = client.post("/tally/sync", json=payload)
+    assert resp2.status_code == 200
+    bill_updates_after = [u[1] for u in fake_db.updates if u[0] == "bills"]
+    assert len(bill_updates_after) == 1  # no second application
+    receipt_rows = [i[1] for i in fake_db.inserts if i[0] == "tally_receipts"]
+    assert len(receipt_rows) == 1
+
 
 def test_agent_token_mismatch(fake_db):
     biz_id = str(uuid.uuid4())
