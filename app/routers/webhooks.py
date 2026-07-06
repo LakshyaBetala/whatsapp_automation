@@ -108,9 +108,12 @@ async def aisensy_inbound(request: Request):
 
         body = await request.json()
         sender, text, message_id = _extract(body)
+        data = body.get("data") or body
+        media_b64 = data.get("media_base64")
+        media_type = data.get("media_type") or "image/jpeg"
 
-        if not sender or not text:
-            log.info("Ignoring webhook with no actionable message: %s", body)
+        if not sender or (not text and not media_b64):
+            log.info("Ignoring webhook with no actionable message")
             return {"ok": True, "ignored": True}
 
         # ── Dedup: skip if we've already processed this messageId ─────
@@ -127,7 +130,10 @@ async def aisensy_inbound(request: Request):
                 log.info("Duplicate webhook messageId=%s — skipping", message_id)
                 return {"ok": True, "duplicate": True}
 
-        reply = await bot.handle(sender.strip(), text.strip())
+        reply = await bot.handle(
+            sender.strip(), (text or "").strip(),
+            media_b64=media_b64, media_type=media_type,
+        )
         return {"ok": True, "reply": reply}
 
     except Exception:

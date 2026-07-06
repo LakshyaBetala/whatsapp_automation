@@ -1,7 +1,7 @@
 # Self-hosting on the spare laptop (i3 HP)
 
 The spare laptop runs **two processes**: the FastAPI backend (port 8000) and
-the WhatsApp Node service (port 3001). The Tally agent (`RishabTallyAgent.exe`)
+the WhatsApp Node service (port 3001). The Tally agent (`Asva.exe`)
 runs on the **Tally PC** and posts to this laptop over the LAN. The database
 stays on Supabase (cloud) — the laptop needs internet, but customers/agents
 only talk to the laptop.
@@ -64,7 +64,7 @@ DHCP reservation** in the router so it never changes.
 
 ## Running
 
-Double-click **`start_all.bat`** — opens two windows (WhatsApp service +
+Double-click **`START.bat`** — opens two windows (WhatsApp service +
 backend).
 
 **First run only:** open **`http://localhost:3001/qr`** in a browser and scan
@@ -79,20 +79,20 @@ Verify:
 ### Auto-start on boot (Task Scheduler)
 Task Scheduler → Create Task:
 - Trigger: **At log on** (and enable auto-login on the laptop, or use "At startup")
-- Action: Start a program → `C:\...\whatsapp_automation\start_all.bat`
+- Action: Start a program → `C:\...\whatsapp_automation\START.bat`
 - Settings: check "If the task fails, restart every 1 minute"
 
 ## On the Tally PC
 
-1. Copy the `TallyAgentRelease` folder (exe + `config.json`).
+1. Copy the `Asva` folder (exe + `config.json`).
 2. Edit `config.json`:
    ```json
    "backend_url": "http://192.168.1.50:8000"
    ```
    (the i3 laptop's IP — the agent refuses to run while the placeholder is set)
 3. In TallyPrime: F1 → Settings → Connectivity → act as server, port 9000.
-4. First run: `RishabTallyAgent.exe --import-masters` (pushes all debtors).
-5. Daily (or via Task Scheduler at e.g. 8pm): `RishabTallyAgent.exe --sync`.
+4. First run: `Asva.exe --import-masters` (pushes all debtors).
+5. Daily (or via Task Scheduler at e.g. 8pm): `Asva.exe --sync`.
 
 ## Operational notes
 

@@ -52,6 +52,7 @@ async def send_message(
     pdf_filename: Optional[str] = None,
     image_base64: Optional[str] = None,
     image_filename: Optional[str] = None,
+    image_media_type: Optional[str] = None,
     template_name: str = "openwa_custom",
     channel: str = "shop",
 ) -> dict:
@@ -122,8 +123,8 @@ async def send_message(
         payload["pdf_name"] = pdf_filename or "invoice.pdf"
     elif image_base64:
         payload["media_base64"] = image_base64
-        payload["media_type"] = "image/png"
-        payload["media_name"] = image_filename or "qr.png"
+        payload["media_type"] = image_media_type or "image/png"
+        payload["media_name"] = image_filename or "image.png"
 
     openwa_message_id = None
     delivery_status = "sent"

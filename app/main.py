@@ -24,7 +24,7 @@ log = logging.getLogger("app")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    log.info("Starting WhatsApp Tally SaaS (env=%s)", settings.app_env)
+    log.info("Starting ASVA (env=%s)", settings.app_env)
     if not settings.supabase_configured:
         log.warning("Supabase not configured — running in degraded/local mode.")
     if not settings.aisensy_configured:
@@ -38,7 +38,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="WhatsApp Tally SaaS",
+    title="ASVA",
     version="0.2.0",
     summary="Automatic WhatsApp bills, reminders and EOD digest from TallyPrime.",
     lifespan=lifespan,
@@ -58,7 +58,7 @@ app.include_router(admin.router)              # /admin tick-box page (LAN)
 @app.get("/")
 def root():
     return {
-        "service": "whatsapp-tally-saas",
+        "service": "asva",
         "version": app.version,
         "docs": "/docs",
         "health": "/health",

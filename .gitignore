@@ -25,6 +25,7 @@ Thumbs.db
 build/
 dist/
 TallyAgentRelease/
+Asva/
 *.xml
 *.txt
 !requirements.txt
@@ -51,3 +52,7 @@ agent.log
 **.node-persist**
 **_IGNORE_**
 # end managed
+
+# WhatsApp session data (Chromium profiles — machine-local, contains auth)
+wa_service/.wwebjs_auth/
+wa_service/.wwebjs_cache/

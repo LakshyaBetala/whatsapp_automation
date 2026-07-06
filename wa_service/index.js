@@ -64,9 +64,25 @@ client.on('message', async (msg) => {
         if (!msg.from.endsWith('@c.us')) return;
         if (msg.isStatus) return;
         const text = (msg.body || '').trim();
-        if (!text) return;
 
         const sender = msg.from.replace('@c.us', '');
+
+        // Bill photos: forward image media so the backend can run OCR
+        let media_base64, media_type;
+        if (msg.hasMedia) {
+            try {
+                const media = await msg.downloadMedia();
+                if (media && media.mimetype && media.mimetype.startsWith('image/')
+                    && media.data && media.data.length < 7_000_000) {
+                    media_base64 = media.data;
+                    media_type = media.mimetype;
+                }
+            } catch (e) {
+                console.error('Media download failed:', e.message);
+            }
+        }
+        if (!text && !media_base64) return;
+
         const resp = await fetch(`${BACKEND_URL}/webhooks/aisensy`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -75,6 +91,8 @@ client.on('message', async (msg) => {
                     sender: sender,
                     message: text,
                     messageId: msg.id ? msg.id._serialized : undefined,
+                    media_base64: media_base64,
+                    media_type: media_type,
                 },
             }),
         });

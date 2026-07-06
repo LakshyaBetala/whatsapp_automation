@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
-REM  WhatsApp Tally SaaS — daily start (double-click and forget)
-REM  Starts: backend + WhatsApp sender + Tally watcher
+REM  ASVA — daily start (double-click and forget)
+REM  Starts: backend + WhatsApp + company bot + Tally watcher
 REM ============================================================
 cd /d "%~dp0"
 
@@ -11,19 +11,19 @@ if not exist ".env" (
 )
 
 echo Starting backend (window 1)...
-start "Tally SaaS - Backend" cmd /k "cd /d "%~dp0" && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+start "ASVA - Backend" cmd /k "cd /d "%~dp0" && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 echo Starting WhatsApp service (window 2)...
-start "Tally SaaS - WhatsApp" cmd /k "cd /d "%~dp0wa_service" && node index.js"
+start "ASVA - WhatsApp" cmd /k "cd /d "%~dp0wa_service" && node index.js"
 
 echo Starting company-number bot (window 3)...
-start "Tally SaaS - Company Bot" cmd /k "cd /d "%~dp0wa_service" && set PORT=3002&& set SESSION_ID=platform&& node index.js"
+start "ASVA - Company Bot" cmd /k "cd /d "%~dp0wa_service" && set PORT=3002&& set SESSION_ID=platform&& node index.js"
 
 echo Waiting for services...
 timeout /t 12 /nobreak >nul
 
 echo Starting Tally watcher (window 4)...
-start "Tally SaaS - Watcher" cmd /k "cd /d "%~dp0TallyAgentRelease" && RishabTallyAgent.exe --watch"
+start "ASVA - Tally Watcher" cmd /k "cd /d "%~dp0Asva" && Asva.exe --watch"
 
 echo Opening QR pages (first time only)...
 echo   - localhost:3001/qr : scan with SHOP WhatsApp

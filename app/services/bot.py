@@ -27,7 +27,12 @@ from app.services.templates import inr
 log = logging.getLogger(__name__)
 
 
-async def handle(from_number: str, text: str) -> str:
+async def handle(
+    from_number: str,
+    text: str,
+    media_b64: str | None = None,
+    media_type: str = "image/jpeg",
+) -> str:
     """Route an inbound WhatsApp message to the right handler.
 
     Args:
@@ -53,6 +58,20 @@ async def handle(from_number: str, text: str) -> str:
 
     if is_owner:
         business_id = business["id"]
+
+        # ── Photo of a bill → OCR → confirm flow ─────────────────────
+        if media_b64:
+            return await _handle_photo_bill(business, media_b64, media_type)
+
+        # ── Photo-bill confirmation / correction commands ─────────────
+        if upper in ("YES", "HAAN", "HA", "OK", "CONFIRM"):
+            return await _confirm_photo_bill(business)
+        if upper == "CANCEL":
+            return await _cancel_photo_bill(business_id)
+        fix_match = re.match(r"(NAAM|PHONE|AMOUNT)\s+(.+)", upper)
+        if fix_match:
+            return await _correct_photo_bill(
+                business_id, fix_match.group(1), text.strip().split(None, 1)[1])
 
         # ── LIST ──────────────────────────────────────────────────────
         if upper == "LIST":
@@ -102,6 +121,7 @@ async def handle(from_number: str, text: str) -> str:
         return (
             prefix
             + "Aap yeh commands bhej sakte hain:\n\n"
+            "📸 Bill ki photo bhejo : naya bill banega (OCR)\n"
             "LIST : poori baaki list\n"
             "CHECK Ramesh : ek party ka hisaab\n"
             "REMIND Ramesh : usko abhi reminder bhejo\n"
@@ -150,6 +170,221 @@ async def handle(from_number: str, text: str) -> str:
 
     # Stay silent on everything else: a human will reply
     return ""
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Photo bills (OCR): photo → extract → owner confirms/corrects → bill
+# ══════════════════════════════════════════════════════════════════════
+
+def _normalize_phone(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if len(digits) == 10 and digits[0] in "6789":
+        return "91" + digits
+    if len(digits) == 12 and digits.startswith("91") and digits[2] in "6789":
+        return digits
+    return None
+
+
+def _photo_bill_summary(pb: dict) -> str:
+    amount = inr(Decimal(str(pb["amount"]))) if pb.get("amount") else "❓ nahi mila"
+    lines = [
+        "📸 Bill se yeh mila:",
+        "",
+        f"Party: {pb.get('party_name') or '❓ nahi mila'}",
+        f"Phone: {pb.get('phone') or '❓ nahi mila'}",
+        f"Amount: {amount}",
+    ]
+    if pb.get("bill_number"):
+        lines.append(f"Bill no: {pb['bill_number']}")
+    lines += [
+        "",
+        "Sahi hai? YES bhejein.",
+        "Galti hai? Aise sudhaarein:",
+        "NAAM Ramesh Traders",
+        "PHONE 9876543210",
+        "AMOUNT 12500",
+        "Ya CANCEL bhejein.",
+    ]
+    return "\n".join(lines)
+
+
+async def _latest_pending_photo_bill(business_id: str) -> dict | None:
+    db = require_db()
+    resp = (
+        db.table("photo_bills")
+        .select("*")
+        .eq("business_id", business_id)
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0] if resp.data else None
+
+
+async def _handle_photo_bill(business: dict, media_b64: str, media_type: str) -> str:
+    from app.services import ocr
+
+    if not ocr.is_configured():
+        return (
+            "Photo bill feature abhi setup nahi hua hai.\n"
+            "(GEMINI_API_KEY chahiye — free milta hai aistudio.google.com se.)"
+        )
+
+    extract = await ocr.extract_bill(media_b64, media_type)
+    if extract is None or not extract.readable:
+        return (
+            "Photo saaf nahi aayi, padh nahi paya. 🙏\n"
+            "Thodi roshni mein, seedha upar se photo lekar dobara bhejein."
+        )
+
+    db = require_db()
+    # One pending at a time: a new photo replaces the previous pending one
+    db.table("photo_bills").update({"status": "cancelled"}).eq(
+        "business_id", business["id"]).eq("status", "pending").execute()
+
+    row = {
+        "business_id": business["id"],
+        "party_name": extract.party_name,
+        "phone": _normalize_phone(extract.phone),
+        "amount": extract.amount,
+        "bill_number": extract.bill_number,
+        "bill_date": extract.bill_date,
+        "image_b64": media_b64,
+        "image_type": media_type,
+    }
+    inserted = db.table("photo_bills").insert(row).execute()
+    return _photo_bill_summary(inserted.data[0])
+
+
+async def _correct_photo_bill(business_id: str, field: str, value: str) -> str:
+    pb = await _latest_pending_photo_bill(business_id)
+    if not pb:
+        return "Koi photo bill pending nahi hai. Pehle bill ki photo bhejein."
+
+    db = require_db()
+    if field == "NAAM":
+        db.table("photo_bills").update({"party_name": value.strip()}).eq("id", pb["id"]).execute()
+        pb["party_name"] = value.strip()
+    elif field == "PHONE":
+        phone = _normalize_phone(value)
+        if not phone:
+            return "Phone number sahi nahi laga. 10 digit ka mobile number likhein, jaise: PHONE 9876543210"
+        db.table("photo_bills").update({"phone": phone}).eq("id", pb["id"]).execute()
+        pb["phone"] = phone
+    elif field == "AMOUNT":
+        try:
+            amt = float(value.replace(",", "").replace("₹", "").strip())
+            assert amt > 0
+        except (ValueError, AssertionError):
+            return "Amount samajh nahi aaya. Sirf number likhein, jaise: AMOUNT 12500"
+        db.table("photo_bills").update({"amount": amt}).eq("id", pb["id"]).execute()
+        pb["amount"] = amt
+
+    return "Update ho gaya. ✅\n\n" + _photo_bill_summary(pb)
+
+
+async def _cancel_photo_bill(business_id: str) -> str:
+    pb = await _latest_pending_photo_bill(business_id)
+    if not pb:
+        return "Koi photo bill pending nahi tha."
+    require_db().table("photo_bills").update({"status": "cancelled"}).eq("id", pb["id"]).execute()
+    return "Theek hai, woh bill cancel kar diya."
+
+
+async def _confirm_photo_bill(business: dict) -> str:
+    from datetime import timedelta
+
+    business_id = business["id"]
+    pb = await _latest_pending_photo_bill(business_id)
+    if not pb:
+        return "Koi photo bill pending nahi hai. Pehle bill ki photo bhejein."
+    if not pb.get("party_name"):
+        return "Party ka naam nahi hai. Pehle bhejein: NAAM Ramesh Traders"
+    if not pb.get("amount"):
+        return "Amount nahi hai. Pehle bhejein: AMOUNT 12500"
+
+    db = require_db()
+
+    # Find or create the client
+    client_resp = (
+        db.table("clients").select("id, name, whatsapp_number, credit_days")
+        .eq("business_id", business_id)
+        .ilike("name", f"%{pb['party_name']}%")
+        .execute()
+    )
+    if client_resp.data:
+        client = client_resp.data[0]
+        if pb.get("phone") and not client.get("whatsapp_number"):
+            db.table("clients").update({"whatsapp_number": pb["phone"]}).eq("id", client["id"]).execute()
+            client["whatsapp_number"] = pb["phone"]
+    else:
+        new_client = db.table("clients").insert({
+            "business_id": business_id,
+            "name": pb["party_name"],
+            "whatsapp_number": pb.get("phone"),
+        }).execute()
+        client = new_client.data[0]
+
+    # Create the bill (source=photo) — enters the reminder cadence like any bill
+    invoice_date = date.fromisoformat(str(pb["bill_date"])) if pb.get("bill_date") else date.today()
+    credit_days = client.get("credit_days") or 30
+    invoice_number = pb.get("bill_number") or f"PH-{pb['id'][:6].upper()}"
+    bill = db.table("bills").insert({
+        "business_id": business_id,
+        "client_id": client["id"],
+        "invoice_number": invoice_number,
+        "tally_voucher_number": f"PHOTO-{pb['id'][:12]}",
+        "amount": pb["amount"],
+        "paid_amount": 0.0,
+        "invoice_date": invoice_date.isoformat(),
+        "due_date": (invoice_date + timedelta(days=credit_days)).isoformat(),
+        "status": "pending",
+        "source": "photo",
+    }).execute()
+
+    db.table("photo_bills").update(
+        {"status": "confirmed", "bill_id": bill.data[0]["id"]}
+    ).eq("id", pb["id"]).execute()
+
+    # Send the bill (original photo attached) to the customer
+    sent_note = "⚠️ Phone number nahi hai, isliye customer ko message NAHI gaya."
+    phone = client.get("whatsapp_number")
+    if phone:
+        amount_fmt = inr(Decimal(str(pb["amount"])))
+        vpa = business.get("upi_vpa")
+        pay_link = upi.upi_link(vpa, business.get("business_name", ""), Decimal(str(pb["amount"])), invoice_number) if vpa else ""
+        body = (
+            f"Namaste {client['name']} ji! 🙏\n"
+            f"{business.get('business_name', '')} ki taraf se aapka bill.\n\n"
+            f"Bill number: {invoice_number}\n"
+            f"Amount: {amount_fmt}\n\n"
+            + (f"UPI se payment: {pay_link}\n\n" if pay_link else "")
+            + "Bill ki photo saath attach hai. Dhanyavaad!"
+        )
+        result = await whatsapp.send_message(
+            business_id=business_id,
+            to_number=phone,
+            message_text=body,
+            plan=Plan(business["plan"]),
+            message_type=MessageType.invoice,
+            client_id=client["id"],
+            bill_id=bill.data[0]["id"],
+            image_base64=pb.get("image_b64"),
+            image_filename=f"bill_{invoice_number}.jpg",
+            image_media_type=pb.get("image_type") or "image/jpeg",
+            template_name="photo_bill_hi",
+        )
+        sent_note = "Customer ko bill bhej diya ✅" if result.get("sent") else "⚠️ Bhejne mein dikkat aayi, baad mein reminder jayega."
+
+    return (
+        f"Bill ban gaya ✅\n"
+        f"{client['name']}: {inr(Decimal(str(pb['amount'])))} ({invoice_number})\n"
+        f"{sent_note}\n"
+        f"Reminders apne aap chalenge."
+    )
 
 
 async def _handle_list(business_id: str, business_name: str) -> str:

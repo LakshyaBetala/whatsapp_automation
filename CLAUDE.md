@@ -37,9 +37,9 @@ cd tally_agent
 python agent.py --import-masters    # one-time: push all debtors -> /tally/import
 python agent.py --sync              # daily: push day book -> /tally/sync
 # build the shipped exe:
-pyinstaller --onefile --noconsole --name RishabTallyAgent agent.py
+pyinstaller --onefile --name Asva agent.py
 ```
-The shipped build + its `config.json` live in `TallyAgentRelease/` (git-ignored).
+The shipped build + its `config.json` live in `Asva/` (git-ignored).
 
 Database migrations are **not run by the app**. Apply `migrations/*.sql` in order via the Supabase SQL editor, the Supabase MCP `apply_migration`, or `psql "$env:SUPABASE_DB_URL" -f migrations\NNN_*.sql`.
 
@@ -66,14 +66,16 @@ Deploy: push to `main`; Railway builds via `railway.json` (Nixpacks) / `Procfile
 ## Known divergences / gotchas (check before trusting)
 
 - **WhatsApp transport: OpenWA, not AiSensy.** Naming in config, `.env.example`, templates, and DB columns still says **AiSensy**, but sends actually go through the Node microservice in `wa_service/` (`POST {OPENWA_URL}/api/wa/send`, default `http://localhost:3001`, configurable via `OPENWA_URL`). The `aisensy_message_id` DB column stores the OpenWA message id. `wa_service` must be running and QR-authenticated (`http://localhost:3001/qr` for first-time linking) for real sends; failures are logged to `messages` with `delivery_status="failed"`. **Inbound** flows the same way: `wa_service` forwards received messages to the backend's `/webhooks/aisensy` (shape `{data:{sender,message,messageId}}`) and sends the bot's reply back on the same chat — so bot commands work without any Meta webhook.
-- **Deployment target is a local Windows laptop, not Railway** (for now). See `LOCAL_DEPLOY.md` for the runbook; `start_all.bat` / `start_backend.bat` / `start_wa_service.bat` launch everything. The backend MUST run with exactly 1 uvicorn worker — the APScheduler jobs run in-process and extra workers duplicate every send. `railway.json`/`Procfile` remain for a later cloud move.
-- **Agent ↔ backend contract lives in `app/routers/tally.py`.** The backend's `TallyImportPayload`/`TallySyncPayload` (token in the *body*, `debtors`/`vouchers` field names) is the source of truth; `tally_agent/agent.py` builds payloads to match. If you change one side, change the other and re-run `pytest test_tally_routers.py`. The shipped `.exe` in `TallyAgentRelease/` must be rebuilt (PyInstaller) after any `tally_agent/` change.
+- **Deployment target is a local Windows laptop, not Railway** (for now). See `LOCAL_DEPLOY.md` for the runbook; `SETUP.bat` (once) and `START.bat` (daily) launch everything. The backend MUST run with exactly 1 uvicorn worker — the APScheduler jobs run in-process and extra workers duplicate every send. `railway.json`/`Procfile` remain for a later cloud move.
+- **Agent ↔ backend contract lives in `app/routers/tally.py`.** The backend's `TallyImportPayload`/`TallySyncPayload` (token in the *body*, `debtors`/`vouchers` field names) is the source of truth; `tally_agent/agent.py` builds payloads to match. If you change one side, change the other and re-run `pytest test_tally_routers.py`. The shipped `Asva/Asva.exe` must be rebuilt (PyInstaller) after any `tally_agent/` change.
 - **Tally integration is TDL-free** (inline-TDL collection queries only; the `*.tdl` files in the repo root are dead). Hard-won facts encoded in `tally_agent/tally_xml.py`, all verified against a live TallyPrime with 3 companies (a 930-debtor electricals trader and a 1,966-debtor ₹28Cr chemicals firm): `SVCURRENTCOMPANY` is mandatory with >1 company open; ledger balances are **negative when the customer owes** (parse flips the sign); **`OpeningBalance` (FY start) — not `ClosingBalance` — seeds the OB bill**, because sync replays the FY's vouchers on top of it (closing would double-count); voucher **collections and Day Book ignore `SVFROMDATE`/`SVTODATE` over HTTP**, but the **`Voucher Register` report honours them** (the `TYPE="Date"` attribute matters) — sync fetches it month-by-month because a full-FY export of a big shop times Tally out, and Tally's single-threaded HTTP server can wedge for minutes after an aborted big request; Voucher Register leaves the top-level `AMOUNT` empty — the total is the party's own `LEDGERENTRIES.LIST` entry; the backend dedups replays (sales via `bills.tally_voucher_number`, receipts via `tally_receipts` from migration 005); responses arrive as UTF-16-BOM *or* UTF-8 depending on query type (`sanitize_xml` is BOM-aware — don't "simplify" it); debtors live in nested subgroups under Sundry Debtors (154 street/route groups in one shop, 2 in another), so the group tree must be walked; per-ledger `BillCreditPeriod` carries real terms (1–90 days observed, plus junk like a date string — `parse_credit_days` tolerates it).
 - **WeasyPrint needs native libs.** WeasyPrint `dlopen`s GTK/Pango/Cairo at import; `app/services/pdf.py` imports it lazily inside `generate_invoice_pdf` so the app boots on a bare Windows box. Railway's Nixpacks buildpack ships the libs, so PDF generation only works in production (or after installing the GTK3 runtime locally).
 - **Column names bite.** `bills` has `tally_voucher_number` (unique with `business_id`) and `invoice_number` — there is no `voucher_number`. `clients` has `credit_days` (not `default_credit_days`) and `name` is NOT NULL.
 
-## Untracked "pilot" layer (not committed, not the product path)
+## Product name
 
-The working tree contains an earlier standalone pilot that is **separate from the `app/` + `tally_agent/` architecture above** and is git-ignored: `run_pilot.py`/`run_api.py`/`automation.py` (a FastAPI + SQLite `pilot_saas.db` prototype), `server.js` (a Node/Express Tally→JSON connector), `dashboard/` (Vite/Convex web dashboard), `*.tdl` (Tally TDL definitions), and `mock_*.xml` fixtures. Treat these as experiments; the Railway-deployed product is `app/`. Don't wire pilot code into the backend without asking.
-
-**Exception:** `wa_service/` (Node + whatsapp-web.js) is NOT an experiment — it is the live WhatsApp transport the backend calls (see gotchas above). Run it with `node index.js` from `wa_service/` (port 3001), scan the QR on first run.
+The product is **ASVA**. The FastAPI app title, the agent exe (`Asva/Asva.exe`),
+and the bat scripts all use it. The old pilot layer (dashboard/, server.js,
+run_pilot.py, TDL files) was deleted in July 2026 — `wa_service/` is NOT part
+of that; it is the live WhatsApp transport. Photo-bill OCR uses Gemini
+(`GEMINI_API_KEY`, free tier) via `app/services/ocr.py`.

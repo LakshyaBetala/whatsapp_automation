@@ -74,9 +74,9 @@ def main() -> None:
         config["default_credit_days"] = args.credit_days
     (out_dir / 'config.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
 
-    exe = ROOT / 'TallyAgentRelease' / 'RishabTallyAgent.exe'
+    exe = ROOT / 'Asva' / 'Asva.exe'
     if exe.exists():
-        shutil.copy2(exe, out_dir / 'TallyAgent.exe')
+        shutil.copy2(exe, out_dir / 'Asva.exe')
 
     print(f"\n✅ {args.business} registered (plan: {args.plan})")
     print(f"   business_id: {biz['id']}")
@@ -84,8 +84,8 @@ def main() -> None:
     print("\nNext steps:")
     print(f"  1. Copy {out_dir.name}/ to the customer's Tally PC")
     print("  2. In Tally: F1 > Settings > Connectivity > act as server, port 9000")
-    print("  3. Run: TallyAgent.exe --import-masters")
-    print("  4. Schedule daily: TallyAgent.exe --sync  (Task Scheduler, ~8 PM)")
+    print("  3. Run: Asva.exe --import-masters")
+    print("  4. Schedule daily: Asva.exe --sync  (Task Scheduler, ~8 PM)")
 
 
 if __name__ == '__main__':
