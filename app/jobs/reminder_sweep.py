@@ -41,6 +41,9 @@ def _today_ist() -> date:
     return datetime.now(IST).date()
 
 
+CADENCE_BASE_DAYS = 30  # the cadence numbers are authored for a 30-day term
+
+
 def cadence_points(
     cadence: list[int],
     repeat_days: int,
@@ -50,21 +53,25 @@ def cadence_points(
 ) -> list[tuple[int, str]]:
     """All reminder points for one bill as (days_since_invoice, kind).
 
-    kind: nudge | predue | overdue | escalate. Pure function — unit tested.
-    due_offset = due_date - invoice_date in days.
+    The cadence SCALES with the party's credit period: [3,7,15,21,30]
+    means "10%, 25%, 50%, 70%, 100% of the term". A 90-day party is
+    nudged at days 9/21/45/63/90; a 7-day party at 1/2/4/5/7. After the
+    due date everyone gets the overdue track (every repeat_days,
+    max_repeats times) and finally one owner escalation.
+
+    kind: nudge | overdue | escalate. Pure function — unit tested.
+    due_offset = due_date - invoice_date in days (the credit period).
     """
     points: list[tuple[int, str]] = []
-    if credit_days <= 30:
-        for d in cadence:
-            points.append((d, "overdue" if d > due_offset else "nudge"))
-    else:
-        # Long credit terms: no early nagging, one heads-up before due
-        if due_offset - 3 > 0:
-            points.append((due_offset - 3, "predue"))
+    horizon = max(due_offset, 1)
+    for d in cadence:
+        day = round(d * horizon / CADENCE_BASE_DAYS)
+        if day >= 1:
+            points.append((min(day, horizon), "nudge"))
 
     for k in range(1, max_repeats + 1):
-        points.append((due_offset + repeat_days * k, "overdue"))
-    points.append((due_offset + repeat_days * (max_repeats + 1), "escalate"))
+        points.append((horizon + repeat_days * k, "overdue"))
+    points.append((horizon + repeat_days * (max_repeats + 1), "escalate"))
 
     # Collapse same-day collisions, strongest kind wins
     best: dict[int, str] = {}

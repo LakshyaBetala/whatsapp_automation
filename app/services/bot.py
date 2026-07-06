@@ -83,6 +83,12 @@ async def handle(from_number: str, text: str) -> str:
         if check_match:
             return await _handle_check(business_id, check_match.group(1).strip())
 
+        # ── TERMS <name> <days> — set a party's credit period ────────
+        terms_match = re.match(r"TERMS\s+(.+?)\s+(\d{1,3})$", upper)
+        if terms_match:
+            return await _handle_terms(
+                business_id, terms_match.group(1).strip(), int(terms_match.group(2)))
+
         # ── REMIND — owner decides who gets reminded, right now ──────
         #    REMIND <naam>      one party (consolidated bills + QR)
         #    REMIND TOP [n]     n biggest outstanding parties
@@ -101,6 +107,7 @@ async def handle(from_number: str, text: str) -> str:
             "REMIND Ramesh : usko abhi reminder bhejo\n"
             "REMIND TOP 5 : sabse bade 5 baaki walon ko\n"
             "REMIND OLDEST 5 : sabse purane 5 ko\n"
+            "TERMS Ramesh 90 : uska credit period 90 din karo\n"
             "STOP Ramesh : uske reminders band\n"
             "START Ramesh : reminders phir chalu\n"
             "PAID Ramesh : uska payment mark karo\n\n"
@@ -502,6 +509,54 @@ async def _handle_paid_owner(
             f"{result['bills_affected']} bill(s) updated."
         )
     return f"Payment apply nahi ho paya: {result.get('reason', 'unknown error')}"
+
+
+async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
+    """TERMS <name> <days>: set the party's credit period. The reminder
+    cadence scales with it automatically (90 din -> nudges at 9/21/45/
+    63/90), and open bills' due dates are recomputed."""
+    if not 1 <= days <= 365:
+        return "Credit period 1 se 365 din ke beech hona chahiye."
+    db = require_db()
+    clients_resp = (
+        db.table("clients")
+        .select("id, name, credit_days")
+        .eq("business_id", business_id)
+        .ilike("name", f"%{client_name}%")
+        .execute()
+    )
+    if not clients_resp.data:
+        return f"'{client_name}' naam ka koi client nahi mila. Exact naam likhein."
+    if len(clients_resp.data) > 1:
+        names = ", ".join(c["name"] for c in clients_resp.data[:5])
+        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+
+    client = clients_resp.data[0]
+    db.table("clients").update({"credit_days": days}).eq("id", client["id"]).execute()
+
+    # Recompute due dates on open bills so the new cadence applies to them
+    from datetime import timedelta
+    open_resp = (
+        db.table("bills")
+        .select("id, invoice_date, is_opening_balance")
+        .eq("business_id", business_id)
+        .eq("client_id", client["id"])
+        .in_("status", ["pending", "partial", "overdue"])
+        .execute()
+    )
+    updated = 0
+    for b in open_resp.data or []:
+        if b.get("is_opening_balance"):
+            continue  # OB bills stay due-on-FY-start
+        new_due = (date.fromisoformat(str(b["invoice_date"])) + timedelta(days=days)).isoformat()
+        db.table("bills").update({"due_date": new_due}).eq("id", b["id"]).execute()
+        updated += 1
+
+    return (
+        f"{client['name']} ka credit period ab {days} din hai. ✅\n"
+        f"{updated} khule bills ki due date update ho gayi.\n"
+        f"Reminders ab {days} din ke hisaab se jayenge."
+    )
 
 
 async def _customer_statement(client: dict) -> str:
