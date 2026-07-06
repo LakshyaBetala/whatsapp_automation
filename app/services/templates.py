@@ -42,25 +42,27 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
     ("eod_digest", Lang.hi): {
         "aisensy_name": "eod_digest_hi",
         "body": (
-            "{business} — {date} ka summary\n\n"
-            "Aaj ke bills: {bills_count}  |  Total: {bills_total}\n"
-            "Payment aaya: {payers_count} customers — {payments_total}\n"
-            "Kul outstanding: {outstanding_total}\n"
-            "Sabse purana: {oldest_name} — {oldest_amount} ({oldest_days} din)\n\n"
-            "Reply LIST — poori list\n"
-            "Reply STOP [naam] — reminders band"
+            "{business}\n"
+            "{date} ka hisaab 📋\n\n"
+            "Aaj ke naye bills: {bills_count} (total {bills_total})\n"
+            "Aaj payment aaya: {payers_count} customers se, {payments_total}\n"
+            "Kul baaki: {outstanding_total}\n"
+            "Sabse purana pending: {oldest_name}, {oldest_amount} ({oldest_days} din se)\n\n"
+            "LIST bhejein: poori baaki list\n"
+            "HELP bhejein: saare commands"
         ),
     },
     # --- Invoice delivery ----------------------------------------------
     ("invoice", Lang.hi): {
         "aisensy_name": "invoice_delivery_hi",
         "body": (
-            "Namaste {client}! {business} se aapka bill.\n\n"
-            "Bill no: {invoice_number}\n"
+            "Namaste {client} ji! 🙏\n"
+            "{business} ki taraf se aapka naya bill.\n\n"
+            "Bill number: {invoice_number}\n"
             "Amount: {amount}\n"
             "Date: {date}\n\n"
-            "Payment ke liye: {upi_link}\n"
-            "Bill PDF: {pdf_url}"
+            "UPI se payment: {upi_link}\n\n"
+            "Bill ki PDF saath attach hai. Dhanyavaad!"
         ),
     },
     ("invoice", Lang.gu): {
@@ -89,11 +91,13 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
     ("reminder", Lang.hi): {
         "aisensy_name": "reminder_hi",
         "body": (
-            "Namaste {client}, {business} se yaad dilana.\n\n"
-            "Bill no {invoice_number} ka {outstanding} baaki hai "
-            "({days_overdue} din ho gaye).\n"
-            "Payment ke liye: {upi_link}\n\n"
-            "Payment ho gaya ho to PAID reply karein."
+            "Namaste {client} ji,\n"
+            "{business} ki taraf se ek chhota sa reminder. 🙏\n\n"
+            "Bill {invoice_number} ka {outstanding} abhi baaki hai.\n"
+            "Samay milte hi payment kar dein.\n\n"
+            "UPI se turant payment: {upi_link}\n\n"
+            "Payment ho chuka hai? Bas PAID reply kar dein.\n"
+            "Apna poora hisaab dekhna ho to HISAB likhein."
         ),
     },
     ("reminder", Lang.gu): {
@@ -116,23 +120,26 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
             "Payment zhaala asel tar PAID reply kara."
         ),
     },
-    # --- Overdue (stronger tone, after due date) -------------------------
+    # --- Overdue (firm but respectful, after due date) -------------------
     ("overdue", Lang.hi): {
         "aisensy_name": "overdue_hi",
         "body": (
-            "⚠️ {client}, {business} ka bill OVERDUE hai.\n\n"
-            "Bill no {invoice_number} — {outstanding} baaki\n"
-            "({days_overdue} din ho gaye)\n\n"
-            "Aaj hi payment karein: {upi_link}\n"
-            "Payment ho gaya ho to PAID reply karein."
+            "Namaste {client} ji,\n\n"
+            "{business} ka bill {invoice_number} ab {days_overdue} din se pending hai.\n"
+            "Baaki amount: {outstanding}\n\n"
+            "Aapse nivedan hai ki aaj payment kar dein:\n"
+            "{upi_link}\n\n"
+            "Koi dikkat ho to bina jhijhak call kar lijiye.\n"
+            "Payment ho gaya ho to PAID reply karein. Dhanyavaad."
         ),
     },
     # --- Payment confirmation ------------------------------------------
     ("payment_confirmation", Lang.hi): {
         "aisensy_name": "payment_confirmation_hi",
         "body": (
-            "Payment mil gaya {client}, shukriya! 🙏\n"
-            "Mila: {paid_amount}. Baaki: {outstanding}."
+            "Dhanyavaad {client} ji! 🙏\n"
+            "Aapka payment {paid_amount} mil gaya hai.\n"
+            "Ab baaki: {outstanding}."
         ),
     },
     ("payment_confirmation", Lang.gu): {

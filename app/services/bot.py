@@ -91,17 +91,20 @@ async def handle(from_number: str, text: str) -> str:
         if remind_match:
             return await _handle_remind(business, remind_match.group(1).strip())
 
-        # ── Unrecognised ──────────────────────────────────────────────
+        # ── HELP / unrecognised ──────────────────────────────────────
+        prefix = "" if upper in ("HELP", "MENU", "?") else "Command samajh nahi aaya.\n\n"
         return (
-            "Command samajh nahi aaya. Try:\n"
-            "LIST — outstanding list\n"
-            "CHECK [naam] — ek party ka balance\n"
-            "REMIND [naam] — abhi reminder bhejo\n"
-            "REMIND TOP 5 — sabse bade 5 baaki walon ko\n"
-            "REMIND OLDEST 5 — sabse purane 5 ko\n"
-            "STOP [naam] — reminders band\n"
-            "START [naam] — reminders chalu\n"
-            "PAID [naam] — payment mark"
+            prefix
+            + "Aap yeh commands bhej sakte hain:\n\n"
+            "LIST : poori baaki list\n"
+            "CHECK Ramesh : ek party ka hisaab\n"
+            "REMIND Ramesh : usko abhi reminder bhejo\n"
+            "REMIND TOP 5 : sabse bade 5 baaki walon ko\n"
+            "REMIND OLDEST 5 : sabse purane 5 ko\n"
+            "STOP Ramesh : uske reminders band\n"
+            "START Ramesh : reminders phir chalu\n"
+            "PAID Ramesh : uska payment mark karo\n\n"
+            "(Ramesh ki jagah apni party ka naam likhein)"
         )
 
     # ── Customer message (not owner) ──────────────────────────────────
@@ -124,7 +127,21 @@ async def handle(from_number: str, text: str) -> str:
     if upper == "PAID" or upper.startswith("PAID"):
         return await _handle_paid_customer(client)
 
-    # Ignore other customer messages for now
+    # ── Customer self-service (keyword-only: this number is ALSO the
+    #    shop's normal chat, so the bot must stay silent on normal talk) ─
+    if upper in ("HISAB", "HISAAB", "BALANCE", "BAKI", "BAAKI", "1"):
+        return await _customer_statement(client)
+    if upper in ("MENU", "HELP", "?"):
+        return (
+            f"Namaste {client['name']} ji! 🙏\n"
+            "Main aapki madad kar sakta hoon:\n\n"
+            "HISAB likhein: apna poora baaki dekhein\n"
+            "PAID likhein: payment ki khabar dein\n\n"
+            "Kisi aur baat ke liye seedha message karein,\n"
+            "dukaan se aapko jawab milega."
+        )
+
+    # Stay silent on everything else: a human will reply
     return ""
 
 
@@ -141,7 +158,7 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     )
 
     if not bills_resp.data:
-        return f"{business_name} — koi outstanding nahi hai. Sab clear! 🎉"
+        return f"{business_name}: koi outstanding nahi hai. Sab clear! 🎉"
 
     # Group by client
     client_totals: dict[str, dict] = {}
@@ -160,9 +177,9 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     )
 
     grand_total = sum(c["total"] for c in client_totals.values())
-    lines = [f"{business_name} — Outstanding List\n"]
+    lines = [f"{business_name} ki baaki list:\n"]
     for i, (name, data) in enumerate(sorted_clients[:20], 1):
-        lines.append(f"{i}. {name} — {inr(data['total'])} ({data['count']} bills)")
+        lines.append(f"{i}. {name}: {inr(data['total'])} ({data['count']} bills)")
 
     if len(sorted_clients) > 20:
         lines.append(f"\n...aur {len(sorted_clients) - 20} aur hain")
@@ -265,7 +282,7 @@ async def _handle_check(business_id: str, client_name: str) -> str:
     from datetime import date as _date
     lines = [f"{client['name']}"]
     if not open_bills:
-        lines.append("Koi outstanding nahi — sab clear ✅")
+        lines.append("Koi outstanding nahi, sab clear ✅")
     else:
         total = Decimal(0)
         for b in open_bills[:8]:
@@ -276,7 +293,7 @@ async def _handle_check(business_id: str, client_name: str) -> str:
                 days = (_date.today() - _date.fromisoformat(str(b["due_date"]))).days
                 if days > 0:
                     overdue = f" ({days} din overdue)"
-            lines.append(f"• {b.get('invoice_number') or '—'}: {inr(amt)}{overdue}")
+            lines.append(f"• {b.get('invoice_number') or '-'}: {inr(amt)}{overdue}")
         if len(open_bills) > 8:
             rest = sum(Decimal(str(b["outstanding"])) for b in open_bills[8:])
             total += rest
@@ -338,7 +355,7 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     name = client.get("name", "Customer")
     phone = client.get("whatsapp_number")
     if not phone:
-        return False, f"{name} — ❌ number nahi hai"
+        return False, f"{name}: ❌ number nahi hai"
 
     total = entry["total"]
     bills = entry["bills"]
@@ -349,12 +366,12 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     if len(bills) == 1:
         b = bills[0]
         days = (today - date.fromisoformat(str(b["invoice_date"]))).days
-        lines.append(f"Bill {b.get('invoice_number') or '—'}: {inr(total)} ({days} din)")
+        lines.append(f"Bill {b.get('invoice_number') or '-'}: {inr(total)} ({days} din)")
     else:
         lines.append(f"Bills baaki ({len(bills)}):")
         for b in bills[:4]:
             days = (today - date.fromisoformat(str(b['invoice_date']))).days
-            lines.append(f"• {b.get('invoice_number') or '—'}: {inr(Decimal(str(b['outstanding'])))} ({days} din)")
+            lines.append(f"• {b.get('invoice_number') or '-'}: {inr(Decimal(str(b['outstanding'])))} ({days} din)")
         if len(bills) > 4:
             lines.append(f"• ...aur {len(bills) - 4} bills")
         lines.append(f"Total baaki: {inr(total)}")
@@ -383,8 +400,8 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
         image_filename="payment_qr.png",
     )
     if result.get("sent"):
-        return True, f"{name} — {inr(total)} ({len(bills)} bill{'s' if len(bills) > 1 else ''}) ✅"
-    return False, f"{name} — ❌ bheja nahi gaya ({result.get('reason') or result.get('delivery_status')})"
+        return True, f"{name}: {inr(total)} ({len(bills)} bills) bheja ✅"
+    return False, f"{name}: ❌ nahi gaya ({result.get('reason') or result.get('delivery_status')})"
 
 
 async def _handle_remind(business: dict, arg: str) -> str:
@@ -485,6 +502,42 @@ async def _handle_paid_owner(
             f"{result['bills_affected']} bill(s) updated."
         )
     return f"Payment apply nahi ho paya: {result.get('reason', 'unknown error')}"
+
+
+async def _customer_statement(client: dict) -> str:
+    """A customer asked HISAB: their own bills, personalised to their number."""
+    db = require_db()
+    bills_resp = (
+        db.table("bills")
+        .select("invoice_number, outstanding, invoice_date, status")
+        .eq("business_id", client["business_id"])
+        .eq("client_id", client["id"])
+        .in_("status", ["pending", "partial", "overdue"])
+        .order("invoice_date")
+        .execute()
+    )
+    open_bills = bills_resp.data or []
+    if not open_bills:
+        return (
+            f"Namaste {client['name']} ji! 🙏\n"
+            "Aapka koi bill baaki nahi hai. Sab clear! ✅\n"
+            "Dhanyavaad."
+        )
+
+    total = Decimal(0)
+    lines = [f"Namaste {client['name']} ji! Aapka hisaab:\n"]
+    for b in open_bills[:6]:
+        amt = Decimal(str(b["outstanding"]))
+        total += amt
+        d = date.fromisoformat(str(b["invoice_date"])).strftime("%d-%m-%Y")
+        lines.append(f"Bill {b.get('invoice_number') or '-'}: {inr(amt)} ({d})")
+    if len(open_bills) > 6:
+        rest = sum(Decimal(str(b["outstanding"])) for b in open_bills[6:])
+        total += rest
+        lines.append(f"...aur {len(open_bills) - 6} bills: {inr(rest)}")
+    lines.append(f"\nKul baaki: {inr(total)}")
+    lines.append("\nPayment ho gaya ho to PAID reply karein. Dhanyavaad! 🙏")
+    return "\n".join(lines)
 
 
 async def _handle_paid_customer(client: dict) -> str:
