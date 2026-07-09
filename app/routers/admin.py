@@ -260,7 +260,7 @@ async def admin_page(token: str = Query(...)):
  .msgprev{{white-space:pre-wrap;background:#f6f6f4;border:1px solid #eee;border-radius:8px;padding:12px;font-size:.95em;line-height:1.5;max-height:50vh;overflow:auto}}
 </style></head><body>
 <h2>{biz['business_name']}</h2>
-<div class="sub">Reminder settings - badlo, phir <b>Save</b> dabao.</div>
+<div class="sub">Aapke customers, unki baaki aur naye bills. Tick = us party ko reminder jayega. Reminder timing badalni ho to baayein <b>Reminders</b> tab kholein.</div>
 
 <div class="usage">
   <div><b>{plan_label} plan</b> (₹{plan_price:,}/month) -
@@ -497,7 +497,10 @@ async def admin_reminders(token: str = Query(...)):
  .day{{text-align:center;padding:8px 0;border:1px solid #eee;border-radius:6px;cursor:pointer;background:#fff}}
  .day.off{{background:#eee;color:#999}}
  .day.hol{{background:#fdebec;border-color:#e58;color:#9f2f2d;font-weight:700}}
+ .day.today{{outline:2px solid #0a7d33;outline-offset:-2px}}
  .day.blank{{border:0;cursor:default;background:transparent}}
+ .holist{{margin-top:12px;font-size:.9em;color:#787774}}
+ .holchip{{display:inline-block;background:#fdebec;color:#9f2f2d;border-radius:6px;padding:3px 9px;margin:4px 5px 0 0}}
  .hint{{color:#787774;font-size:.85em;margin-top:6px}}
  .modal{{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9}}
  .modal.show{{display:flex}}
@@ -526,6 +529,7 @@ async def admin_reminders(token: str = Query(...)):
  <div class="calhead"><button onclick="calMove(-1)">&#9664;</button><span id="calLabel"></span><button onclick="calMove(1)">&#9654;</button></div>
  <div id="calGrid" class="calgrid"></div>
  <div class="hint">Date pe tap karke holiday mark karein. Sirf marked (red) dates par reminder skip hoga, aur wo agle working day chala jayega. Baaki har din reminder ja sakta hai.</div>
+ <div id="holist" class="holist"></div>
 </div>
 </div>
 
@@ -551,15 +555,28 @@ document.querySelectorAll('#lang button').forEach(b => b.onclick = () => {{
 }});
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const pad = n => (n < 10 ? '0' : '') + n;
+function fmtDate(ds) {{
+  const [y, m, d] = ds.split('-').map(Number);
+  return d + ' ' + MONTHS[m - 1].slice(0, 3) + ' ' + y;
+}}
+function renderHolidays() {{
+  const el = document.getElementById('holist');
+  if (!FEST.length) {{ el.innerHTML = 'Koi holiday nahi. Har din reminder ja sakta hai.'; return; }}
+  el.innerHTML = 'Holidays (in dino skip): ' +
+    FEST.map(ds => `<span class="holchip">${{fmtDate(ds)}}</span>`).join('');
+}}
 function renderCal() {{
   document.getElementById('calLabel').textContent = MONTHS[calM] + ' ' + calY;
   const lead = new Date(calY, calM, 1).getDay();
   const days = new Date(calY, calM + 1, 0).getDate();
+  const t = new Date();
+  const todayStr = t.getFullYear() + '-' + pad(t.getMonth() + 1) + '-' + pad(t.getDate());
   let h = ['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => `<div class="dow">${{d}}</div>`).join('');
   for (let i = 0; i < lead; i++) h += '<div class="day blank"></div>';
   for (let d = 1; d <= days; d++) {{
     const ds = calY + '-' + pad(calM + 1) + '-' + pad(d);
     let cls = 'day';
+    if (ds === todayStr) cls += ' today';
     if (FEST.includes(ds)) cls += ' hol';
     h += `<div class="${{cls}}" data-d="${{ds}}">${{d}}</div>`;
   }}
@@ -570,6 +587,7 @@ function renderCal() {{
     else {{ FEST.push(ds); FEST.sort(); }}
     renderCal();
   }});
+  renderHolidays();
 }}
 function calMove(delta) {{
   calM += delta;
