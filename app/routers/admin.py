@@ -1420,10 +1420,11 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...)):
 <script>
 const TOKEN = {token!r};
 const CID = {client_id!r};
+const PNAME = {json.dumps(c["name"] or "")};
 let REM_ON = {str(bool(rem_on)).lower()};
 async function toggleRem() {{
   const turningOff = REM_ON;
-  if (turningOff && !confirm('{esc(c["name"])} ke reminders band kar dein? Isko koi automatic reminder nahi jayega.')) return;
+  if (turningOff && !confirm(PNAME + ' ke reminders band kar dein? Isko koi automatic reminder nahi jayega.')) return;
   const btn = document.getElementById('remtoggle'); btn.disabled = true;
   try {{
     const r = await fetch('/admin/set-reminder', {{method:'POST', headers:{{'Content-Type':'application/json'}},
