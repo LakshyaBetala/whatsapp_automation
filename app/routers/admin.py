@@ -389,7 +389,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
         rows.append(
             f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}">'
             f'<td><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
-            f'<td><a class="plink" href="/admin/party?token={token}&client_id={c["id"]}">{cname}</a></td>'
+            f'<td><a class="plink" href="/admin/party?token={token}&client_id={c["id"]}&lang={lang}">{cname}</a></td>'
             f'<td class="amt">{out_str}</td>'
             f'<td class="od">{od_str}</td>'
             f'<td>{rem_badge}</td>'
@@ -1502,7 +1502,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
                 "Reminders abhi OFF hain. ON karne par schedule niche dikhega.")
 
     body = f"""
-<a href="/admin?token={token}" class="back">&#8592; Dashboard</a>
+<a href="/admin?token={token}&lang={lang}" class="back">&#8592; Dashboard</a>
 <h1>{esc(c['name'])}</h1>
 <div class="muted">{src_tag} party &middot; {biz['business_name']}</div>
 

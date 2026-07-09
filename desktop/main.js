@@ -117,6 +117,28 @@ function ping(url, cb) {
   req.on('timeout', () => { req.destroy(); cb(false, ''); });
 }
 
+// POST JSON to the backend (used by the top-bar Reload button -> /admin/reload).
+function httpPostJson(url, bodyObj, cb) {
+  let data;
+  try { data = Buffer.from(JSON.stringify(bodyObj)); } catch (e) { return cb(false, {}); }
+  let req;
+  try {
+    const u = new URL(url);
+    req = http.request({
+      hostname: u.hostname, port: u.port || 80, path: u.pathname + u.search,
+      method: 'POST', timeout: 8000,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+    }, (res) => {
+      let body = '';
+      res.on('data', (d) => (body += d));
+      res.on('end', () => { let j = {}; try { j = JSON.parse(body); } catch (e) {} cb(res.statusCode === 200, j); });
+    });
+  } catch (e) { return cb(false, {}); }
+  req.on('error', () => cb(false, {}));
+  req.on('timeout', () => { req.destroy(); cb(false, {}); });
+  req.write(data); req.end();
+}
+
 function parseWa(ok, body) {
   if (!ok) return { reachable: false, ready: false, qr: null };
   try {
@@ -129,7 +151,7 @@ function parseWa(ok, body) {
 
 function pollStatus() {
   const out = {};
-  let pending = 3;
+  let pending = 4;
   const done = () => { if (--pending === 0) sendToWindow('status', out); };
   ping(`${CONFIG.backendUrl}/health`, (ok) => { out.backend = ok; done(); });
   ping('http://localhost:3001/api/wa/status', (ok, b) => {
@@ -140,6 +162,17 @@ function pollStatus() {
   ping('http://localhost:3002/api/wa/status', (ok, b) => {
     const c = parseWa(ok, b);
     out.company = c.ready; out.companyReachable = c.reachable; out.companyQr = c.qr;
+    done();
+  });
+  // Tally sync freshness for the top bar (label + dot colour + last-sync ISO).
+  const su = CONFIG.token
+    ? `${CONFIG.backendUrl}/admin/sync-status?token=${encodeURIComponent(CONFIG.token)}`
+    : `${CONFIG.backendUrl}/health`;
+  ping(su, (ok, b) => {
+    if (ok) { try { const d = JSON.parse(b);
+      out.tallyLabel = d.tally_label; out.tallyColor = d.tally_color;
+      out.lastSyncedLabel = d.last_synced_label; out.lastSyncedAt = d.last_synced_at;
+    } catch (e) {} }
     done();
   });
 }
@@ -204,6 +237,13 @@ ipcMain.handle('restart-service', (e, name) => {
   else startService(name);
   return true;
 });
+// Top-bar "Reload data" -> force an immediate Tally refresh (rate-limited to
+// once/10min server-side). Returns {ok, cooldown, wait_min, detail}.
+ipcMain.handle('tally-reload', () => new Promise((resolve) => {
+  if (!CONFIG.token) return resolve({ ok: false, detail: 'no token' });
+  httpPostJson(`${CONFIG.backendUrl}/admin/reload`, { token: CONFIG.token },
+    (ok, j) => resolve(ok ? j : { ok: false, detail: 'backend down' }));
+}));
 
 // Single instance - double-clicking the launcher again just focuses the app
 if (!app.requestSingleInstanceLock()) {

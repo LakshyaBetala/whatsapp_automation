@@ -23,7 +23,16 @@
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c9a227; }
   .dot.ok { background: #46d67e; }
   .dot.bad { background: #e2574c; }
-  #main { flex: 1; position: relative; background: #F7F6F3; }
+  #main { flex: 1; display: flex; flex-direction: column; background: #F7F6F3; min-width: 0; }
+  #topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; background: #fff; border-bottom: 1px solid #EAEAEA; font-size: .84rem; color: #787774; flex-shrink: 0; }
+  #topbar .tstat { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  #topbar .tstat b { color: #2F3437; font-weight: 600; }
+  .langtoggle { display: inline-flex; flex-shrink: 0; }
+  .langtoggle button { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; cursor: pointer; font-size: .78rem; font-weight: 600; }
+  .langtoggle button:first-child { border-radius: 6px 0 0 6px; }
+  .langtoggle button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+  .langtoggle button.on { background: #294d38; color: #fff; border-color: #294d38; }
+  #maincontent { flex: 1; position: relative; }
   .view { position: absolute; inset: 0; display: none; }
   .view.on { display: block; }
   .col { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -70,7 +79,7 @@
     <button class="nav" data-v="accounts">Accounts<small>UPI aur bank details</small></button>
     <button class="nav" data-v="setup">WhatsApp Setup<small>Dono number connect karein</small></button>
     <div class="side-foot">
-      <button class="nav" onclick="reloadAll()" style="color:#9fb7a6;font-size:.85rem">Reload data</button>
+      <button class="nav" id="reloadbtn" onclick="reloadData()" style="color:#9fb7a6;font-size:.85rem">Reload data</button>
       <div id="statusbtn" onclick="toggleStatus()">
         <span class="dot" id="d-backend"></span>
         <span class="dot" id="d-whatsapp"></span>
@@ -81,6 +90,14 @@
   </div>
 
   <div id="main">
+    <div id="topbar">
+      <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
+      <div class="langtoggle">
+        <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
+        <button id="lang-en" onclick="setLang('english')">EN</button>
+      </div>
+    </div>
+    <div id="maincontent">
     <div class="view on" id="v-dash">
       <div class="col">
         <div id="dashbanner" class="banner"></div>
@@ -134,6 +151,7 @@
         <div id="log"></div>
       </div>
     </div>
+    </div><!-- /#maincontent -->
   </div>
 </div>
 
@@ -149,14 +167,50 @@ function toggleStatus() { document.getElementById('statuspanel').classList.toggl
 function setDot(id, ok) { const el = document.getElementById(id); if (el) { el.classList.toggle('ok', ok); el.classList.toggle('bad', !ok); } }
 function restart(name) { window.asva.restartService(name); }
 
+// ── UI language (persisted on this laptop) ────────────────────────────
+const WV = { 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
+function currentLang() { return localStorage.getItem('asva_lang') || 'hinglish'; }
+function urlWithLang(url) { if (!url) return url; return url + (url.includes('?') ? '&' : '?') + 'lang=' + encodeURIComponent(currentLang()); }
+function applyLangButtons() {
+  const en = currentLang() === 'english';
+  const hi = document.getElementById('lang-hi'), e = document.getElementById('lang-en');
+  if (hi) hi.classList.toggle('on', !en);
+  if (e) e.classList.toggle('on', en);
+}
+function setLang(l) {
+  localStorage.setItem('asva_lang', l);
+  applyLangButtons();
+  // reload every webview in the new language
+  Object.entries(WV).forEach(([id, key]) => {
+    const w = document.getElementById(id), url = CONFIG && CONFIG[key];
+    if (w && url) { loaded[id] = true; w.src = urlWithLang(url); }
+  });
+}
+
 function loadPage(id, url) {
-  if (url && !loaded[id]) { loaded[id] = true; document.getElementById(id).src = url; }
+  if (url && !loaded[id]) { loaded[id] = true; document.getElementById(id).src = urlWithLang(url); }
 }
 function reloadAll() {
   ['wv-dash', 'wv-reminders', 'wv-analytics', 'wv-accounts'].forEach(id => {
     const w = document.getElementById(id);
     try { if (w && w.reload && loaded[id]) w.reload(); } catch (e) {}
   });
+}
+// Top-bar / sidebar "Reload data": force an immediate Tally refresh, then reload
+// the webviews once the sync lands (so the dashboard re-renders with fresh data).
+let awaitingSync = false, syncBaseline = null, lastSyncedAtSeen = null;
+async function reloadData() {
+  const btn = document.getElementById('reloadbtn');
+  let res = {};
+  try { res = await window.asva.tallyReload(); } catch (e) {}
+  if (res && res.ok === false && res.cooldown) {
+    if (btn) btn.textContent = res.detail || 'Thodi der baad';
+    setTimeout(() => { if (btn) btn.textContent = 'Reload data'; }, 4000);
+    return;
+  }
+  awaitingSync = true; syncBaseline = lastSyncedAtSeen;
+  if (btn) btn.textContent = 'Syncing...';
+  setTimeout(() => { if (awaitingSync) { awaitingSync = false; if (btn) btn.textContent = 'Reload data'; } }, 180000);
 }
 function renderQr(boxId, ready, reachable, qr, label) {
   const el = document.getElementById(boxId);
@@ -179,6 +233,7 @@ function waText(ready, reachable) {
   return 'Start ho raha hai...';
 }
 
+applyLangButtons();
 (async () => {
   CONFIG = await window.asva.getConfig();
   if (!CONFIG.dashboardUrl) document.getElementById('dashov').textContent = 'config.json me agent_token nahi mila.';
@@ -188,6 +243,28 @@ function waText(ready, reachable) {
 })();
 
 window.asva.onStatus((s) => {
+  // ── Top bar: Tally sync freshness + reload-watch ──
+  lastSyncedAtSeen = s.lastSyncedAt || lastSyncedAtSeen;
+  const tdot = document.getElementById('t-dot');
+  if (tdot && s.tallyColor) tdot.style.background = s.tallyColor;
+  const tsync = document.getElementById('t-sync');
+  if (tsync) {
+    let stat = s.tallyLabel || 'Tally', lbl = s.lastSyncedLabel || '';
+    if (currentLang() === 'english') {
+      const m = { 'Tally connected': 'Tally connected', 'Tally sync ho raha hai...': 'Tally syncing...',
+        'Tally se contact nahi (Tally/laptop check karein)': 'Tally not reachable (check Tally/laptop)',
+        'Tally se abhi tak sync nahi': 'Tally not synced yet', 'min pehle': 'min ago',
+        'ghante pehle': 'h ago', 'abhi abhi': 'just now', 'abhi tak nahi': 'never' };
+      for (const h in m) { stat = stat.split(h).join(m[h]); lbl = lbl.split(h).join(m[h]); }
+    }
+    tsync.textContent = stat + (lbl ? ' · ' + lbl : '');
+  }
+  if (awaitingSync && s.lastSyncedAt && s.lastSyncedAt !== syncBaseline) {
+    awaitingSync = false;
+    const btn = document.getElementById('reloadbtn'); if (btn) btn.textContent = 'Reload data';
+    reloadAll();
+  }
+
   setDot('d-backend', !!s.backend); setDot('s-backend', !!s.backend);
   setDot('d-whatsapp', !!s.whatsapp); setDot('s-whatsapp', !!s.whatsapp);
   setDot('d-company', !!s.company); setDot('s-company', !!s.company);
