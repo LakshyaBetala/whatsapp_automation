@@ -160,8 +160,150 @@ def _tally_status(dt: Optional[_dt.datetime]) -> tuple[str, str]:
     return "Tally se contact nahi (Tally/laptop check karein)", "#c0392b"
 
 
+# ── UI language (Hinglish default / English) ──────────────────────────────
+# Pages render in Hinglish; when ?lang=en is passed we translate the FINAL
+# rendered HTML (never the f-string templates - that keeps the fragile markup
+# untouched and makes the worst-case failure "some text stays Hinglish", never
+# a broken page). Applied longest-phrase-first so specifics beat generics.
+_UI_EN: list[tuple[str, str]] = [
+    # ---- Dashboard ----
+    ("Aapke customers, unki baaki aur naye bills. Tick = us party ko reminder jayega. Reminder timing badalni ho to baayein <b>Reminders</b> tab kholein.",
+     "Your customers, their dues and new bills. A tick = that party gets reminders. To change reminder timing, open the <b>Reminders</b> tab on the left."),
+    ("Har party ke aage <b>tick</b> = us party ko reminder jayega. Neeche se search / sort / Save list kar sakte ho. Non-Tally = photo/OCR se bane bills.",
+     "A <b>tick</b> next to a party = that party gets reminders. Search / sort / save the list below. Non-Tally = bills made from a photo/OCR."),
+    ("messages sent is month (auto-managed, not a limit you pay per).",
+     "messages sent this month (auto-managed, not a per-message charge)."),
+    ("active customers is month", "active customers this month"),
+    ("Naya data aaya - dekhein", "New data arrived - view"),
+    ("Tally bills", "Tally bills"),
+    ("Non-Tally bills", "Non-Tally bills"),
+    ("🔍 Naam se dhundo...", "🔍 Search by name..."),
+    ("Baaki: zyada pehle", "Dues: highest first"),
+    ("Overdue: zyada din pehle", "Overdue: most days first"),
+    ("Naam: A to Z", "Name: A to Z"),
+    ("Sabko reminder ON karo", "Turn reminders ON for all"),
+    ("Sabko reminder OFF karo", "Turn reminders OFF for all"),
+    ("✓ Sab ON", "✓ All ON"),
+    ("✗ Sab OFF", "✗ All OFF"),
+    ("💾 Save list", "💾 Save list"),
+    ("Agla reminder", "Next reminder"),
+    ("Send now", "Send now"),
+    ("Sab reminder ho gaye", "All reminders done"),
+    ("Credit days &amp; reminder schedule", "Credit days &amp; reminder schedule"),
+    ("Tally se aaya hua, ya galat/khaali ho to yahan set karein.",
+     "Comes from Tally; set it here if it is wrong or empty."),
+    ("Reminder in dino par jayega (bill ke baad):", "Reminders go on these days (after the bill):"),
+    ("Due date ke baad har ~", "After the due date, every ~"),
+    ("din ek overdue reminder.", "days one overdue reminder."),
+    ("(Timing ASVA khud set karta hai. Aap sirf credit days badal sakte hain.)",
+     "(ASVA sets the timing itself. You only change the credit days.)"),
+    ("Credit days 1 se 730 ke beech likhein.", "Enter credit days between 1 and 730."),
+    ("Abhi ", "Send now to "),
+    (" ko reminder bhejein?", " a reminder?"),
+    ("Kitna payment mila? (Rs me)", "How much was received? (in Rs)"),
+    ("Sahi amount likhein.", "Enter a valid amount."),
+    ("Kuch apply nahi hua.", "Nothing was applied."),
+    (" active customers hain - ", " active customers - "),
+    (" active customers ke liye ", " active customers, "),
+    ("/month) lein.", "/month)."),
+    (" kaafi hai.", " is enough."),
+    ("plan sahi hai.", "plan is correct."),
+    ("Aapka ", "Your "),
+    ("Aapke ", "You have "),
+    ("ASVA suggestion: ", "ASVA suggestion: "),
+    # ---- Reminders page ----
+    ("Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Aap sirf yeh settings badlein.",
+     "ASVA manages reminder timing itself (based on each party's credit days). You only change these settings."),
+    ("Message language", "Message language"),
+    ("Send reminders at", "Send reminders at"),
+    ("Custom line", "Custom line"),
+    ("(optional) e.g. Diwali greetings", "(optional) e.g. Diwali greetings"),
+    ("Early-pay discount", "Early-pay discount"),
+    ("QR + amount is discount se kam ho jayega. 0 = no discount.",
+     "QR + amount drop by this discount. 0 = no discount."),
+    ("Jo settings chuni hain, wahi message dikhega.", "Shows the message with the settings you chose."),
+    ("View message", "View message"),
+    ("Save settings", "Save settings"),
+    ("Aaj se aage ki date pe tap karke holiday mark karein (red). Purani dates select nahi hongi. Marked dates par reminder skip hoga aur agle working day chala jayega. Save dabana zaroori hai; last saved list hi final hoti hai.",
+     "Tap a future date to mark a holiday (red). Past dates cannot be selected. On marked dates reminders skip and move to the next working day. You must press Save; the last saved list is final."),
+    ("Message preview", "Message preview"),
+    ("Koi holiday nahi. Har din reminder ja sakta hai.", "No holidays. Reminders can go any day."),
+    ("Holidays (in dino skip): ", "Holidays (skipped): "),
+    ("Preview not available.", "Preview not available."),
+    ("Preview failed.", "Preview failed."),
+    # ---- Party page ----
+    ("ASVA is party ke credit days ke hisaab se khud reminder bhejta hai.",
+     "ASVA sends reminders itself based on this party's credit days."),
+    ("Reminders abhi OFF hain. ON karne par schedule niche dikhega.",
+     "Reminders are OFF. Turn them ON to see the schedule below."),
+    ("Reminder schedule", "Reminder schedule"),
+    ("Sabhi reminder ja chuke.", "All reminders already sent."),
+    ("Ab tak <b>", "So far <b>"),
+    ("</b> reminder gaye. Aane wale:", "</b> reminders sent. Upcoming:"),
+    ("Reminder OFF karein", "Turn reminder OFF"),
+    ("Reminder ON karein", "Turn reminder ON"),
+    (" ke reminder OFF kar dein? Isko automatic reminder nahi jayega.",
+     " - turn reminders OFF? It will get no automatic reminders."),
+    ("Nahi ho paya.", "Could not do it."),
+    ("Koi bill nahi.", "No bills."),
+    ("Payments received (Tally)", "Payments received (Tally)"),
+    ("Tally me is party ka koi receipt record nahi mila.",
+     "No receipt recorded for this party in Tally."),
+    ("Non-Tally party - payments dashboard se record hote hain.",
+     "Non-Tally party - payments are recorded from the dashboard."),
+    ("Total baaki", "Total outstanding"),
+    ("Open bills", "Open bills"),
+    ("Credit days", "Credit days"),
+    ("aapko alert", "owner alert"),
+    ("Aaj", "Today"),
+    ("Sab ho gaye", "All done"),
+    ("number nahi hai", "no number"),
+    # ---- Analytics ----
+    ("Aging (kitne din se baaki)", "Aging (days outstanding)"),
+    ("Sabse zyada baaki (top 12)", "Highest dues (top 12)"),
+    ("Parties owing", "Parties owing"),
+    ("Overdue parties", "Overdue parties"),
+    ("Open accounts", "Open accounts"),
+    ("Not due", "Not due"),
+    # ---- Accounts ----
+    ("UPI ID (reminder me QR + link isi ka jayega)", "UPI ID (used for the QR + link in reminders)"),
+    ("UPI set hai to har reminder me pay-link + QR apne aap lagta hai.",
+     "If UPI is set, every reminder gets a pay-link + QR automatically."),
+    ("Bank account name", "Bank account name"),
+    ("Account number", "Account number"),
+    ("Bank name", "Bank name"),
+    ("UPI na ho to reminder me ye bank details (A/C + IFSC) bheji jayengi.",
+     "If there is no UPI, these bank details (A/C + IFSC) are sent in reminders."),
+    # ---- Shared / small ----
+    ("Tally se sync:", "Tally sync:"),
+    ("(har 5 min auto)", "(every 5 min, auto)"),
+    ("Reload data", "Reload data"),
+    ("Saving...", "Saving..."),
+    ("Sending...", "Sending..."),
+    ("Save failed", "Save failed"),
+    ("Loading...", "Loading..."),
+    ("Nahi mila", "Not found"),
+    ("plan", "plan"),
+    (" din", " days"),
+    ("Baaki", "Balance"),
+]
+
+
+def _ui_translate(html: str, en: bool) -> str:
+    if not en:
+        return html
+    for h, e in sorted(_UI_EN, key=lambda p: len(p[0]), reverse=True):
+        if h != e:
+            html = html.replace(h, e)
+    return html
+
+
+def _is_en(lang: str) -> bool:
+    return (lang or "").strip().lower().startswith("en")
+
+
 @router.get("/admin", response_class=HTMLResponse)
-async def admin_page(token: str = Query(...)):
+async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
     biz = _biz_by_token(token)
     db = require_db()
 
@@ -419,14 +561,6 @@ async def admin_page(token: str = Query(...)):
   <div class="umsg">{used:,} messages sent is month (auto-managed, not a limit you pay per).</div>
 </div>
 
-<div class="syncbar">
-  <span><span id="tallydot" class="dot" style="background:{tally_color}"></span><b id="tallystat">{tally_label}</b></span>
-  <span>Tally se sync: <b id="synced">{synced_label}</b> <span style="color:#999">(har 5 min auto)</span></span>
-  <button id="reloadbtn" onclick="reloadData()">&#8635; Reload data</button>
-  <span id="syncmsg"></span>
-  <span class="freshchip" id="freshchip" onclick="location.reload()">Naya data aaya - dekhein</span>
-</div>
-
 <div class="subtabs">
  <button class="on" data-sub="tally">Tally bills ({tally_n:,})</button>
  <button data-sub="nontally">Non-Tally bills ({nontally_n:,})</button>
@@ -474,60 +608,18 @@ let WOFF = {woff_json};   // 0-6 (Mon..Sun) or null
 let FEST = {festivals_json};
 let calY, calM;
 
-// ── Reload data (override) + last-synced auto re-render ───────────────
+// Sync time + Tally status + Reload live in the app's top bar now (global).
+// Here we only auto re-render when the 5-min auto-sync brings new data - and
+// never while the owner is mid-edit (their next Save/Reload picks it up).
 const SYNCED_AT = {synced_iso!r};   // ISO of last sync at page load (or "")
-let DIRTY = false;                  // owner changed ticks -> don't auto-reload
+let DIRTY = false;
 function markDirty() {{ DIRTY = true; }}
-async function syncStatus() {{
+setInterval(async () => {{
   try {{
     const r = await fetch('/admin/sync-status?token=' + encodeURIComponent(TOKEN));
-    return await r.json();
-  }} catch (e) {{ return {{}}; }}
-}}
-let reloadPoll = null;
-async function reloadData() {{
-  const btn = document.getElementById('reloadbtn');
-  const msg = document.getElementById('syncmsg');
-  btn.disabled = true; msg.textContent = 'Tally se refresh maang rahe hain...';
-  let d = {{}};
-  try {{
-    const r = await fetch('/admin/reload', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify({{token: TOKEN}})}});
-    d = await r.json();
-  }} catch (e) {{ msg.textContent = 'Reload fail. Dobara try karein.'; btn.disabled = false; return; }}
-  if (!d.ok) {{
-    msg.textContent = d.detail || 'Abhi reload nahi ho sakta.';
-    setTimeout(() => {{ btn.disabled = false; msg.textContent = ''; }}, 5000);
-    return;
-  }}
-  msg.textContent = 'Tally se data aa raha hai... (1-2 min)';
-  let tries = 0;
-  if (reloadPoll) clearInterval(reloadPoll);
-  reloadPoll = setInterval(async () => {{
-    tries++;
-    const s = await syncStatus();
-    paintTally(s);
-    if (s.last_synced_label) document.getElementById('synced').textContent = s.last_synced_label;
-    if (s.last_synced_at && s.last_synced_at !== SYNCED_AT && !s.pending_refresh) {{
-      clearInterval(reloadPoll); location.reload(); return;
-    }}
-    if (tries >= 20) {{ clearInterval(reloadPoll); msg.textContent = 'Ho gaya. Refresh dabayein.'; btn.disabled = false; }}
-  }}, 12000);
-}}
-function paintTally(s) {{
-  if (s.tally_label) document.getElementById('tallystat').textContent = s.tally_label;
-  if (s.tally_color) document.getElementById('tallydot').style.background = s.tally_color;
-}}
-// Ambient: reflect the auto 5-min sync. Update the label + Tally dot; re-render
-// only if the owner has NOT started editing ticks (else show a "naya data" chip).
-setInterval(async () => {{
-  const s = await syncStatus();
-  paintTally(s);
-  if (s.last_synced_label) document.getElementById('synced').textContent = s.last_synced_label;
-  if (s.last_synced_at && s.last_synced_at !== SYNCED_AT) {{
-    if (DIRTY) document.getElementById('freshchip').style.display = 'inline-block';
-    else location.reload();
-  }}
+    const s = await r.json();
+    if (s.last_synced_at && s.last_synced_at !== SYNCED_AT && !DIRTY) location.reload();
+  }} catch (e) {{}}
 }}, 90000);
 
 let SRC = 'tally';   // Dashboard opens on Tally bills
@@ -648,11 +740,11 @@ async function saveTerms() {{
   }} catch (e) {{ btn.disabled = false; btn.textContent = '💾 Save'; alert('Save failed'); }}
 }}
 </script></body></html>"""
-    return HTMLResponse(html)
+    return HTMLResponse(_ui_translate(html, _is_en(lang)))
 
 
 @router.get("/admin/reminders", response_class=HTMLResponse)
-async def admin_reminders(token: str = Query(...)):
+async def admin_reminders(token: str = Query(...), lang: str = Query("hinglish")):
     """Reminder settings on their own page (its own desktop tab): language, send
     time, weekly off, holidays, custom line, early-pay discount, and preview.
     Timing itself is ASVA's logic (per-party credit days), not editable here."""
@@ -861,7 +953,7 @@ async function viewMessage() {{
   }} catch (e) {{ box.textContent = 'Preview failed.'; }}
 }}
 </script></body></html>"""
-    return HTMLResponse(html)
+    return HTMLResponse(_ui_translate(html, _is_en(lang)))
 
 
 class SavePayload(BaseModel):
@@ -1256,7 +1348,7 @@ async def admin_set_reminder(payload: SetReminderPayload):
 
 
 @router.get("/admin/party", response_class=HTMLResponse)
-async def admin_party(token: str = Query(...), client_id: str = Query(...)):
+async def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str = Query("hinglish")):
     """Per-party page: bills, payments received, and the exact reminder schedule
     (which nudges already went, which is next and when) - all fetched from Tally."""
     biz = _biz_by_token(token)
@@ -1473,9 +1565,11 @@ async function toggleRem() {{
  button.danger{background:#c0392b}
  button.primary{background:#0a7d33}
 """
-    return HTMLResponse(f'<!doctype html><meta charset="utf-8">'
-                        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-                        f'<style>{_CSS}{extra}</style><div class="wrap">{body}</div>')
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}{extra}</style><div class="wrap">{body}</div>',
+        _is_en(lang)))
 
 
 # ── Shared minimalist styling for the Analytics / Accounts pages ──────────
@@ -1535,7 +1629,7 @@ def _inr(n) -> str:
 
 
 @router.get("/admin/analytics", response_class=HTMLResponse)
-async def admin_analytics(token: str = Query(...)):
+async def admin_analytics(token: str = Query(...), lang: str = Query("hinglish")):
     biz = _biz_by_token(token)
     db = require_db()
     today = _dt.date.today()
@@ -1601,13 +1695,14 @@ async def admin_analytics(token: str = Query(...)):
         f'<h2>Sabse zyada baaki (top 12)</h2>'
         f'<table><tr><th>Party</th><th class="n">Baaki</th><th class="n">Overdue</th></tr>{rows_html}</table>'
     )
-    return HTMLResponse(f'<!doctype html><meta charset="utf-8">'
-                        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-                        f'<style>{_CSS}</style><div class="wrap">{body}</div>')
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}</style><div class="wrap">{body}</div>', _is_en(lang)))
 
 
 @router.get("/admin/accounts", response_class=HTMLResponse)
-async def admin_accounts(token: str = Query(...)):
+async def admin_accounts(token: str = Query(...), lang: str = Query("hinglish")):
     db = require_db()
     biz = (db.table("businesses")
            .select("id, business_name, upi_vpa, bank_account_name, bank_account_no, bank_ifsc, bank_name")
@@ -1650,9 +1745,10 @@ async function save() {{
   document.getElementById('msg').textContent = r.ok ? 'Saved' : 'Save failed';
 }}
 </script>"""
-    return HTMLResponse(f'<!doctype html><meta charset="utf-8">'
-                        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-                        f'<style>{_CSS}</style><div class="wrap">{body}</div>')
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}</style><div class="wrap">{body}</div>', _is_en(lang)))
 
 
 class AccountsPayload(BaseModel):
