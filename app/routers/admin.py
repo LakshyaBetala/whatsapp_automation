@@ -489,18 +489,23 @@ async def admin_reminders(token: str = Query(...)):
  #saveset{{background:#0a7d33;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-size:1em}}
  #setmsg{{color:#0a7d33;font-weight:600;margin-left:8px}}
  .btn2{{background:#fff;border:1px solid #ccc;border-radius:6px;padding:9px 16px;font-size:.95em}}
- .calhead{{display:flex;align-items:center;gap:12px;margin:8px 0}}
- .calhead button{{background:#fff;border:1px solid #ddd;border-radius:6px;padding:6px 12px}}
- .calhead span{{font-weight:700;min-width:160px;text-align:center}}
- .calgrid{{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:430px}}
- .dow{{text-align:center;font-size:.8em;color:#999;font-weight:600}}
- .day{{text-align:center;padding:8px 0;border:1px solid #eee;border-radius:6px;cursor:pointer;background:#fff}}
- .day.off{{background:#eee;color:#999}}
- .day.hol{{background:#fdebec;border-color:#e58;color:#9f2f2d;font-weight:700}}
- .day.today{{outline:2px solid #0a7d33;outline-offset:-2px}}
- .day.past{{color:#ccc;background:#fafafa;cursor:default}}
- .day.blank{{border:0;cursor:default;background:transparent}}
- .holist{{margin-top:12px;font-size:.9em;color:#787774}}
+ .calwrap{{max-width:340px}}
+ .calhead{{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}}
+ .calhead button{{background:#fff;border:1px solid #ddd;border-radius:6px;padding:4px 12px;font-size:1em;color:#555;cursor:pointer}}
+ .calhead span{{font-size:1.5rem;font-weight:700;color:#1f6c9f;flex:1;text-align:center}}
+ .calgrid{{display:grid;grid-template-columns:repeat(7,1fr)}}
+ .dow{{text-align:center;font-size:.82em;color:#787774;font-weight:600;padding-bottom:8px}}
+ .calrule{{grid-column:1/-1;border-bottom:1px solid #e2e2e0;margin-bottom:8px}}
+ .day{{text-align:center;padding:9px 0;border-radius:50%;cursor:pointer;font-size:.95em}}
+ .day:hover{{background:#eef3ef}}
+ .day.today{{box-shadow:inset 0 0 0 2px #0a7d33;color:#0a7d33;font-weight:700}}
+ .day.hol{{background:#e23b2d;color:#fff;font-weight:700}}
+ .day.hol:hover{{background:#c92f22}}
+ .day.past{{color:#ccc;cursor:default}}
+ .day.past:hover{{background:transparent}}
+ .day.blank{{cursor:default}}
+ .day.blank:hover{{background:transparent}}
+ .holist{{margin-top:14px;font-size:.9em;color:#787774;max-width:340px}}
  .holchip{{display:inline-block;background:#fdebec;color:#9f2f2d;border-radius:6px;padding:3px 9px;margin:4px 5px 0 0}}
  .hint{{color:#787774;font-size:.85em;margin-top:6px}}
  .modal{{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9}}
@@ -527,8 +532,10 @@ async def admin_reminders(token: str = Query(...)):
 
 <div class="card">
  <h3>Holidays</h3>
- <div class="calhead"><button onclick="calMove(-1)">&#9664;</button><span id="calLabel"></span><button onclick="calMove(1)">&#9654;</button></div>
- <div id="calGrid" class="calgrid"></div>
+ <div class="calwrap">
+  <div class="calhead"><button onclick="calMove(-1)">&#9664;</button><span id="calLabel"></span><button onclick="calMove(1)">&#9654;</button></div>
+  <div id="calGrid" class="calgrid"></div>
+ </div>
  <div class="hint">Aaj se aage ki date pe tap karke holiday mark karein (red). Purani dates select nahi hongi. Marked dates par reminder skip hoga aur agle working day chala jayega. Save dabana zaroori hai; last saved list hi final hoti hai.</div>
  <div id="holist" class="holist"></div>
 </div>
@@ -573,7 +580,8 @@ function renderCal() {{
   document.getElementById('calLabel').textContent = MONTHS[calM] + ' ' + calY;
   const lead = new Date(calY, calM, 1).getDay();
   const days = new Date(calY, calM + 1, 0).getDate();
-  let h = ['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => `<div class="dow">${{d}}</div>`).join('');
+  let h = ['S','M','T','W','T','F','S'].map(d => `<div class="dow">${{d}}</div>`).join('');
+  h += '<div class="calrule"></div>';
   for (let i = 0; i < lead; i++) h += '<div class="day blank"></div>';
   for (let d = 1; d <= days; d++) {{
     const ds = calY + '-' + pad(calM + 1) + '-' + pad(d);
