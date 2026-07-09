@@ -2,6 +2,41 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const https = require('https');
+const { URL } = require('url');
+
+// POST JSON using Node's built-in http/https so inbound forwarding NEVER
+// depends on a global `fetch` (undefined on Node < 18 -> every inbound reply
+// silently failed, which looked like "the bot is dead"). Always available.
+function postJson(urlStr, bodyObj, timeoutMs = 30000) {
+    return new Promise((resolve, reject) => {
+        let u;
+        try { u = new URL(urlStr); } catch (e) { return reject(e); }
+        const payload = Buffer.from(JSON.stringify(bodyObj));
+        const lib = u.protocol === 'https:' ? https : http;
+        const req = lib.request({
+            hostname: u.hostname,
+            port: u.port || (u.protocol === 'https:' ? 443 : 80),
+            path: u.pathname + u.search,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length },
+            timeout: timeoutMs,
+        }, (res) => {
+            let data = '';
+            res.on('data', (d) => (data += d));
+            res.on('end', () => {
+                let json = {};
+                try { json = JSON.parse(data); } catch (e) { /* non-JSON body */ }
+                resolve({ status: res.statusCode, json });
+            });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(new Error('request timeout')); });
+        req.write(payload);
+        req.end();
+    });
+}
 
 // Survive transient whatsapp-web.js errors (e.g. EBUSY while cleaning up the
 // session on a WhatsApp-side logout). Without this, such an error crashes the
@@ -80,13 +115,29 @@ client.on('auth_failure', msg => {
     clientReady = false;
 });
 
+let reinitTimer = null;
 client.on('disconnected', (reason) => {
     console.log('WhatsApp Client was disconnected', reason);
     clientReady = false;
-    // Do NOT re-initialize here — whatsapp-web.js recovers on its own and
-    // shows a fresh QR. Calling initialize() again spawns a second browser on
-    // the same session dir ("browser already running" + EBUSY). The
-    // process-level handlers above keep us alive; just wait for the new QR.
+    qrCodeData = null;
+    // On a real LOGOUT/CONFLICT whatsapp-web.js tears the browser down and does
+    // NOT come back on its own - it just sits dead (no QR, no sends, no bot).
+    // Recover by fully destroying the client, then re-initializing to surface a
+    // fresh QR. destroy() closes the browser first, so re-init does not spawn a
+    // second one. EBUSY during session cleanup is swallowed by the process-level
+    // handlers above. Guard against overlapping timers + auto-recovery races.
+    if (reinitTimer) return;
+    reinitTimer = setTimeout(async () => {
+        reinitTimer = null;
+        if (clientReady) return;   // reconnected on its own in the meantime
+        try {
+            await client.destroy();
+        } catch (e) {
+            console.error('destroy() during recovery failed (continuing):', (e && e.message) || e);
+        }
+        console.log('Re-initializing after disconnect to bring back a fresh QR...');
+        startClient();
+    }, 8000);
 });
 
 // ── Inbound: forward customer/owner replies to the backend bot ──────
@@ -117,28 +168,30 @@ client.on('message', async (msg) => {
         }
         if (!text && !media_base64) return;
 
-        const resp = await fetch(`${BACKEND_URL}/webhooks/aisensy`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                data: {
-                    sender: sender,
-                    message: text,
-                    messageId: msg.id ? msg.id._serialized : undefined,
-                    media_base64: media_base64,
-                    media_type: media_type,
-                },
-            }),
+        const resp = await postJson(`${BACKEND_URL}/webhooks/aisensy`, {
+            data: {
+                sender: sender,
+                message: text,
+                messageId: msg.id ? msg.id._serialized : undefined,
+                media_base64: media_base64,
+                media_type: media_type,
+            },
         });
-        const data = await resp.json().catch(() => ({}));
-        console.log(`Inbound from ${sender}: "${text.slice(0, 40)}" -> backend ${resp.status}`);
+        const data = resp.json || {};
+        const reply = (data && typeof data.reply === 'string') ? data.reply : '';
+        console.log(`Inbound from ${sender}: "${text.slice(0, 40)}" -> backend ${resp.status}, reply ${reply.length} chars`);
 
         // If the bot produced a reply, send it back on the same chat
-        if (data && typeof data.reply === 'string' && data.reply.length > 0) {
-            await client.sendMessage(msg.from, data.reply);
+        if (reply.length > 0) {
+            try {
+                await client.sendMessage(msg.from, reply);
+                console.log(`Replied to ${sender} (${reply.length} chars)`);
+            } catch (e) {
+                console.error(`Failed to send reply to ${sender}:`, (e && e.message) || e);
+            }
         }
     } catch (err) {
-        console.error('Failed to forward inbound message:', err.message);
+        console.error('Failed to forward inbound message:', (err && err.message) || err);
     }
 });
 
