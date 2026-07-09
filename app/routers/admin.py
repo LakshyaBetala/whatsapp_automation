@@ -498,6 +498,7 @@ async def admin_reminders(token: str = Query(...)):
  .day.off{{background:#eee;color:#999}}
  .day.hol{{background:#fdebec;border-color:#e58;color:#9f2f2d;font-weight:700}}
  .day.today{{outline:2px solid #0a7d33;outline-offset:-2px}}
+ .day.past{{color:#ccc;background:#fafafa;cursor:default}}
  .day.blank{{border:0;cursor:default;background:transparent}}
  .holist{{margin-top:12px;font-size:.9em;color:#787774}}
  .holchip{{display:inline-block;background:#fdebec;color:#9f2f2d;border-radius:6px;padding:3px 9px;margin:4px 5px 0 0}}
@@ -528,7 +529,7 @@ async def admin_reminders(token: str = Query(...)):
  <h3>Holidays</h3>
  <div class="calhead"><button onclick="calMove(-1)">&#9664;</button><span id="calLabel"></span><button onclick="calMove(1)">&#9654;</button></div>
  <div id="calGrid" class="calgrid"></div>
- <div class="hint">Date pe tap karke holiday mark karein. Sirf marked (red) dates par reminder skip hoga, aur wo agle working day chala jayega. Baaki har din reminder ja sakta hai.</div>
+ <div class="hint">Aaj se aage ki date pe tap karke holiday mark karein (red). Purani dates select nahi hongi. Marked dates par reminder skip hoga aur agle working day chala jayega. Save dabana zaroori hai; last saved list hi final hoti hai.</div>
  <div id="holist" class="holist"></div>
 </div>
 </div>
@@ -555,6 +556,9 @@ document.querySelectorAll('#lang button').forEach(b => b.onclick = () => {{
 }});
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const pad = n => (n < 10 ? '0' : '') + n;
+const _t0 = new Date();
+const TODAY = _t0.getFullYear() + '-' + pad(_t0.getMonth() + 1) + '-' + pad(_t0.getDate());
+FEST = FEST.filter(ds => ds >= TODAY);   // past holidays are irrelevant; drop them
 function fmtDate(ds) {{
   const [y, m, d] = ds.split('-').map(Number);
   return d + ' ' + MONTHS[m - 1].slice(0, 3) + ' ' + y;
@@ -569,14 +573,13 @@ function renderCal() {{
   document.getElementById('calLabel').textContent = MONTHS[calM] + ' ' + calY;
   const lead = new Date(calY, calM, 1).getDay();
   const days = new Date(calY, calM + 1, 0).getDate();
-  const t = new Date();
-  const todayStr = t.getFullYear() + '-' + pad(t.getMonth() + 1) + '-' + pad(t.getDate());
   let h = ['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => `<div class="dow">${{d}}</div>`).join('');
   for (let i = 0; i < lead; i++) h += '<div class="day blank"></div>';
   for (let d = 1; d <= days; d++) {{
     const ds = calY + '-' + pad(calM + 1) + '-' + pad(d);
+    if (ds < TODAY) {{ h += `<div class="day past">${{d}}</div>`; continue; }}  // past = not selectable
     let cls = 'day';
-    if (ds === todayStr) cls += ' today';
+    if (ds === TODAY) cls += ' today';
     if (FEST.includes(ds)) cls += ' hol';
     h += `<div class="${{cls}}" data-d="${{ds}}">${{d}}</div>`;
   }}
@@ -593,6 +596,10 @@ function calMove(delta) {{
   calM += delta;
   if (calM < 0) {{ calM = 11; calY--; }}
   if (calM > 11) {{ calM = 0; calY++; }}
+  // never go before the current month
+  if (calY < _t0.getFullYear() || (calY === _t0.getFullYear() && calM < _t0.getMonth())) {{
+    calY = _t0.getFullYear(); calM = _t0.getMonth();
+  }}
   renderCal();
 }}
 const _now = new Date();
