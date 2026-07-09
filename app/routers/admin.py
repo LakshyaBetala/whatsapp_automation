@@ -238,7 +238,7 @@ async def admin_page(token: str = Query(...)):
         # Reminder status badge: Off, no-bills dash, or next scheduled send.
         cbills = bills_by_client.get(c["id"], [])
         if not rem_on:
-            rem_badge = '<span class="rbadge off">Band</span>'
+            rem_badge = '<span class="rbadge off">OFF</span>'
         elif not cbills:
             rem_badge = '<span class="rbadge none">-</span>'
         else:
@@ -339,9 +339,10 @@ async def admin_page(token: str = Query(...)):
 <title>{biz['business_name']} - Reminder Settings</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
- body{{font-family:system-ui,sans-serif;margin:16px;max-width:860px;color:#222}}
+ body{{font-family:system-ui,sans-serif;margin:16px;max-width:1080px;color:#222}}
  h2{{margin:0 0 4px}} .sub{{color:#666;margin-bottom:12px}}
- table{{border-collapse:collapse;width:100%}}
+ .tablewrap{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+ table{{border-collapse:collapse;width:100%;min-width:760px}}
  td,th{{padding:6px 10px;border-bottom:1px solid #eee;text-align:left}}
  .amt{{text-align:right;font-variant-numeric:tabular-nums}}
  .od{{text-align:right;color:#a00;font-size:.9em;white-space:nowrap}}
@@ -444,9 +445,11 @@ async def admin_page(token: str = Query(...)):
  <button id="save" onclick="save()">💾 Save list</button>
  <span id="msg"></span>
 </div>
+<div class="tablewrap">
 <table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Agla reminder</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
 {''.join(rows)}
 </table>
+</div>
 
 <div class="modal" id="termmodal" onclick="if(event.target===this)this.classList.remove('show')">
   <div class="modalbox">
@@ -1343,44 +1346,68 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...)):
                        else "Non-Tally party - payments dashboard se record hote hain.")
                     + '</td></tr>')
 
-    # ── Reminder schedule (per open bill: what went, what's next) ─────
+    # ── Reminder schedule: only meaningful once reminders are ON, and only
+    # FORWARD from today. A party turned on AFTER the due date should see the
+    # overdue messages it will now get, not a history of dates that never sent
+    # (reminders were off then). Past points are never shown as "missed".
+    from app.jobs.reminder_sweep import latest_reached_point
     rem_on = c.get("reminders_enabled", True)
-    next_label, next_color = (_next_reminder(biz, open_bills, cd_val, today)
-                              if (rem_on and open_bills) else
-                              ("Reminders band hain" if not rem_on else "Koi open bill nahi", "#999"))
-    sched_html = ""
-    for b in open_bills[:6]:
-        inv, pts = _client_points(biz, b, cd_val)
-        if not pts:
-            continue
-        dsi = (today - inv).days
+    sent_count = len(sent_map)
+    _KIND = {"overdue": "overdue", "escalate": "aapko alert", "nudge": "reminder", "predue": "reminder"}
+    _RANK = {"nudge": 0, "predue": 1, "overdue": 2, "escalate": 3}
+    goes_today = None            # a reached-but-unsent point -> fires next sweep
+    upcoming: list = []          # (date, kind) strictly after today
+    if rem_on:
+        for b in open_bills:
+            inv, pts = _client_points(biz, b, cd_val)
+            if not pts:
+                continue
+            dsi = (today - inv).days
+            lrp = latest_reached_point(pts, dsi)
+            if lrp and (b["id"], lrp[0]) not in sent_map:
+                if goes_today is None or _RANK.get(lrp[1], 0) > _RANK.get(goes_today, 0):
+                    goes_today = lrp[1]
+            for day, kind in pts:
+                d = inv + _dt.timedelta(days=day)
+                if d > today:
+                    upcoming.append((d, kind))
+        upcoming = sorted(set(upcoming))[:8]
+
+    def _rc(k):
+        return "#c77b0a" if k in ("overdue", "escalate") else "#0a7d33"
+    if not rem_on:
+        next_label, next_color = "OFF", "#999"
+    elif goes_today:
+        next_label, next_color = f"Aaj ({_KIND[goes_today]})", _rc(goes_today)
+    elif upcoming:
+        d, k = upcoming[0]
+        next_label, next_color = f"{d.strftime('%d %b')} ({_KIND[k]})", _rc(k)
+    else:
+        next_label, next_color = "Sab ho gaye", "#999"
+
+    # Compact forward schedule (only when ON).
+    sched_section = ""
+    if rem_on:
         chips = ""
-        upcoming_marked = False
-        for day, kind in pts:
-            d = inv + _dt.timedelta(days=day)
-            done = (b["id"], day) in sent_map
-            if done:
-                cls = "done"
-            elif day <= dsi:
-                cls = "miss"           # was due, not sent (off-day/holiday/host off)
-            elif not upcoming_marked:
-                cls = "next"; upcoming_marked = True
-            else:
-                cls = "soon"
-            tone = "overdue" if kind in ("overdue", "escalate") else "nudge"
-            chips += f'<span class="chip {cls}" title="{tone}">{d.strftime("%d %b")}</span>'
-        sched_html += (
-            f'<div class="schedrow"><div class="schedbill">{esc(b.get("invoice_number") or "-")} '
-            f'<span class="muted">({_inr(b.get("outstanding"))})</span></div>'
+        if goes_today:
+            chips += f'<span class="chip next" title="{_KIND[goes_today]}">Aaj</span>'
+        for d, k in upcoming:
+            chips += f'<span class="chip {"over" if k in ("overdue","escalate") else "due"}">{d.strftime("%d %b")}</span>'
+        if not chips:
+            chips = '<span class="muted">Sabhi reminder ja chuke.</span>'
+        sched_section = (
+            f'<h2>Reminder schedule</h2><div class="card">'
+            f'<div class="muted" style="margin-bottom:10px">Ab tak <b>{sent_count}</b> reminder gaye. Aane wale:</div>'
             f'<div class="chips">{chips}</div></div>')
-    if not sched_html:
-        sched_html = '<div class="muted">Koi active reminder schedule nahi.</div>'
 
     phone = c.get("whatsapp_number")
     phone_html = esc(phone) if phone else '<span style="color:#c0392b">number nahi hai</span>'
-    toggle_label = "Reminder band karein" if rem_on else "Reminder chalu karein"
+    toggle_label = "Reminder OFF karein" if rem_on else "Reminder ON karein"
     toggle_cls = "danger" if rem_on else "primary"
     src_tag = "Tally" if is_tally else "Non-Tally"
+    rem_hint = ("ASVA is party ke credit days ke hisaab se khud reminder bhejta hai."
+                if rem_on else
+                "Reminders abhi OFF hain. ON karne par schedule niche dikhega.")
 
     body = f"""
 <a href="/admin?token={token}" class="back">&#8592; Dashboard</a>
@@ -1395,27 +1422,22 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...)):
 </div>
 
 <div class="card" style="margin-bottom:18px">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-    <div>WhatsApp: <b>{phone_html}</b> &nbsp;&middot;&nbsp; Reminders:
+  <div class="remrow">
+    <div>WhatsApp: <b>{phone_html}</b> &nbsp;&middot;&nbsp; Reminder:
       <b id="remstate" style="color:{'#0a7d33' if rem_on else '#c0392b'}">{'ON' if rem_on else 'OFF'}</b></div>
     <button id="remtoggle" class="{toggle_cls}" onclick="toggleRem()">{toggle_label}</button>
   </div>
-  <div class="hint">Reminder set hai to ASVA khud is party ke credit days ke hisaab se message bhejta hai. Band karne par confirm poochha jayega.</div>
-</div>
-
-<h2>Reminder schedule</h2>
-<div class="card">
-  {sched_html}
-  <div class="legend"><span class="chip done">bhej diya</span><span class="chip next">agla</span>
-    <span class="chip miss">chhoot gaya</span><span class="chip soon">aage</span></div>
+  <div class="hint" id="remhint">{rem_hint}</div>
 </div>
 
 <h2>Bills</h2>
-<table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th>
-  <th class="n">Baaki</th><th>Due</th><th>Status</th><th class="n">Overdue</th></tr>{bill_rows}</table>
+<div class="tablewrap"><table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th>
+  <th class="n">Baaki</th><th>Due</th><th>Status</th><th class="n">Overdue</th></tr>{bill_rows}</table></div>
+
+{sched_section}
 
 <h2>Payments received (Tally)</h2>
-<table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>{pay_rows}</table>
+<div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>{pay_rows}</table></div>
 
 <script>
 const TOKEN = {token!r};
@@ -1424,38 +1446,30 @@ const PNAME = {json.dumps(c["name"] or "")};
 let REM_ON = {str(bool(rem_on)).lower()};
 async function toggleRem() {{
   const turningOff = REM_ON;
-  if (turningOff && !confirm(PNAME + ' ke reminders band kar dein? Isko koi automatic reminder nahi jayega.')) return;
-  const btn = document.getElementById('remtoggle'); btn.disabled = true;
+  if (turningOff && !confirm(PNAME + ' ke reminder OFF kar dein? Isko automatic reminder nahi jayega.')) return;
+  const btn = document.getElementById('remtoggle'); btn.disabled = true; btn.textContent = '...';
   try {{
     const r = await fetch('/admin/set-reminder', {{method:'POST', headers:{{'Content-Type':'application/json'}},
       body: JSON.stringify({{token: TOKEN, client_id: CID, enabled: !REM_ON}})}});
-    const d = await r.json();
-    if (r.ok) {{ REM_ON = d.enabled;
-      document.getElementById('remstate').textContent = REM_ON ? 'ON' : 'OFF';
-      document.getElementById('remstate').style.color = REM_ON ? '#0a7d33' : '#c0392b';
-      btn.textContent = REM_ON ? 'Reminder band karein' : 'Reminder chalu karein';
-      btn.className = REM_ON ? 'danger' : 'primary';
-    }} else {{ alert('Nahi ho paya.'); }}
+    if (r.ok) {{ location.reload(); return; }}   // reload so the schedule shows/hides
+    alert('Nahi ho paya.');
   }} catch (e) {{ alert('Nahi ho paya.'); }}
-  btn.disabled = false;
+  btn.disabled = false; btn.textContent = REM_ON ? 'Reminder OFF karein' : 'Reminder ON karein';
 }}
 </script>"""
     extra = """
  .back{display:inline-block;margin-bottom:10px;color:#1f6c9f;text-decoration:none;font-weight:600}
- .tag{font-size:.75rem;border-radius:9999px;padding:2px 9px;text-transform:uppercase;letter-spacing:.04em}
+ .remrow{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+ .tablewrap{overflow-x:auto}
+ .tag{font-size:.75rem;border-radius:9999px;padding:2px 9px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
  .tag.ok{background:#edf3ec;color:#346538}
  .tag.warn{background:#fbf3db;color:#956400}
  .tag.due{background:#fdebec;color:#9f2f2d}
- .schedrow{display:flex;gap:12px;align-items:baseline;padding:8px 0;border-bottom:1px solid #f0f0ee;flex-wrap:wrap}
- .schedrow:last-child{border-bottom:0}
- .schedbill{min-width:140px;font-weight:600}
  .chips{display:flex;gap:6px;flex-wrap:wrap}
- .chip{font-size:.78rem;border-radius:6px;padding:2px 8px;border:1px solid #e2e2e0;color:#787774}
- .chip.done{background:#edf3ec;color:#346538;border-color:#cfe3cd}
+ .chip{font-size:.8rem;border-radius:6px;padding:3px 9px;border:1px solid #e2e2e0;color:#787774;white-space:nowrap}
  .chip.next{background:#e1f3fe;color:#1f6c9f;border-color:#bfe2f7;font-weight:700}
- .chip.miss{background:#fdebec;color:#9f2f2d;border-color:#f3cfd0}
- .chip.soon{background:#fff;color:#999}
- .legend{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+ .chip.due{background:#edf3ec;color:#346538;border-color:#cfe3cd}
+ .chip.over{background:#fbf3db;color:#956400;border-color:#f0dfa8}
  button.danger{background:#c0392b}
  button.primary{background:#0a7d33}
 """
