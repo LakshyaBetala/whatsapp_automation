@@ -91,6 +91,23 @@ def _fmt_ago(dt: Optional[_dt.datetime]) -> str:
     return dt.astimezone(IST).strftime("%d %b, %H:%M")
 
 
+def _tally_status(dt: Optional[_dt.datetime]) -> tuple[str, str]:
+    """(label, colour) for the Tally-reachable dot. The agent stamps a sync only
+    after it successfully reads Tally (every ~5 min), so sync freshness is a
+    true reachability signal: fresh=connected, stale=slow, old/none=unreachable."""
+    if not dt:
+        return "Tally se abhi tak sync nahi", "#c0392b"
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    mins = (now - dt).total_seconds() / 60
+    if mins <= 8:
+        return "Tally connected", "#0a7d33"
+    if mins <= 25:
+        return "Tally sync ho raha hai...", "#c77b0a"
+    return "Tally se contact nahi (Tally/laptop check karein)", "#c0392b"
+
+
 @router.get("/admin", response_class=HTMLResponse)
 async def admin_page(token: str = Query(...)):
     biz = _biz_by_token(token)
@@ -99,6 +116,7 @@ async def admin_page(token: str = Query(...)):
     synced_dt = _last_synced_at(db, biz["id"])
     synced_label = _fmt_ago(synced_dt)
     synced_iso = synced_dt.isoformat() if synced_dt else ""
+    tally_label, tally_color = _tally_status(synced_dt)
 
     # All clients (paged) + outstanding totals
     clients: list = []
@@ -299,6 +317,7 @@ async def admin_page(token: str = Query(...)):
  .syncbar b{{color:#222}}
  #reloadbtn{{padding:6px 14px;font-size:.9em;border:1px solid #0a7d33;color:#0a7d33;background:#fff;border-radius:6px}}
  #reloadbtn:disabled{{opacity:.5;cursor:default}}
+ .dot{{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}}
  #syncmsg{{color:#0a7d33}}
  .freshchip{{display:none;background:#fbf3db;color:#956400;border:1px solid #f0dfa8;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:.9em}}
  .subtabs{{display:flex;gap:6px;margin:16px 0 4px;border-bottom:2px solid #ddd}}
@@ -329,6 +348,7 @@ async def admin_page(token: str = Query(...)):
 </div>
 
 <div class="syncbar">
+  <span><span id="tallydot" class="dot" style="background:{tally_color}"></span><b id="tallystat">{tally_label}</b></span>
   <span>Tally se sync: <b id="synced">{synced_label}</b> <span style="color:#999">(har 5 min auto)</span></span>
   <button id="reloadbtn" onclick="reloadData()">&#8635; Reload data</button>
   <span id="syncmsg"></span>
@@ -412,6 +432,7 @@ async function reloadData() {{
   reloadPoll = setInterval(async () => {{
     tries++;
     const s = await syncStatus();
+    paintTally(s);
     if (s.last_synced_label) document.getElementById('synced').textContent = s.last_synced_label;
     if (s.last_synced_at && s.last_synced_at !== SYNCED_AT && !s.pending_refresh) {{
       clearInterval(reloadPoll); location.reload(); return;
@@ -419,10 +440,15 @@ async function reloadData() {{
     if (tries >= 20) {{ clearInterval(reloadPoll); msg.textContent = 'Ho gaya. Refresh dabayein.'; btn.disabled = false; }}
   }}, 12000);
 }}
-// Ambient: reflect the auto 5-min sync. Update the label; re-render only if the
-// owner has NOT started editing ticks (else show a "naya data" chip instead).
+function paintTally(s) {{
+  if (s.tally_label) document.getElementById('tallystat').textContent = s.tally_label;
+  if (s.tally_color) document.getElementById('tallydot').style.background = s.tally_color;
+}}
+// Ambient: reflect the auto 5-min sync. Update the label + Tally dot; re-render
+// only if the owner has NOT started editing ticks (else show a "naya data" chip).
 setInterval(async () => {{
   const s = await syncStatus();
+  paintTally(s);
   if (s.last_synced_label) document.getElementById('synced').textContent = s.last_synced_label;
   if (s.last_synced_at && s.last_synced_at !== SYNCED_AT) {{
     if (DIRTY) document.getElementById('freshchip').style.display = 'inline-block';
@@ -845,10 +871,13 @@ async def admin_sync_status(token: str = Query(...)):
         pending = bool(r.data and r.data[0].get("refresh_requested_at"))
     except Exception:
         pending = False
+    tally_label, tally_color = _tally_status(last)
     return {
         "last_synced_at": last.isoformat() if last else None,
         "last_synced_label": _fmt_ago(last),
         "pending_refresh": pending,
+        "tally_label": tally_label,
+        "tally_color": tally_color,
     }
 
 
