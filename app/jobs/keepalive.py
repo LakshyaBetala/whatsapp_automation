@@ -1,4 +1,4 @@
-"""Supabase keep-alive ping — prevents free-tier project from pausing.
+"""Supabase keep-alive ping - prevents free-tier project from pausing.
 
 Hits our own /health endpoint every 6 hours so Supabase sees activity.
 """
@@ -21,5 +21,5 @@ async def ping() -> None:
             resp = await client.get(url)
             log.info("Keep-alive ping: %s → %s", url, resp.status_code)
     except Exception as exc:
-        # Not critical — log and move on
+        # Not critical - log and move on
         log.warning("Keep-alive ping failed: %s", exc)

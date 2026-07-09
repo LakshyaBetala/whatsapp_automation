@@ -2,7 +2,7 @@
 
 A tappable upi:// link opens GPay/PhonePe/Paytm pre-filled; the QR image
 covers customers who receive the message on a different phone than the
-one they pay from (very common in shops — owner's phone gets the bill,
+one they pay from (very common in shops - owner's phone gets the bill,
 accountant scans the QR).
 """
 from __future__ import annotations
@@ -33,11 +33,11 @@ def upi_link(vpa: str, payee_name: str = "", amount: Decimal | float | None = No
 
 def qr_png_base64(data: str) -> Optional[str]:
     """Render `data` as a QR PNG, base64-encoded. None if qrcode/pillow
-    missing — callers degrade to the text link."""
+    missing - callers degrade to the text link."""
     try:
         import qrcode
     except ImportError:
-        log.warning("qrcode library not installed — sending text link only")
+        log.warning("qrcode library not installed - sending text link only")
         return None
     try:
         img = qrcode.make(data, box_size=8, border=2)

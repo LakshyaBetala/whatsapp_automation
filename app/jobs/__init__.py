@@ -1,1 +1,1 @@
-# Jobs package — scheduler workers
+# Jobs package - scheduler workers

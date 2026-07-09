@@ -1,6 +1,6 @@
 """Bill creation and listing.
 
-POST /bills/create returns immediately — PDF generation and WhatsApp delivery
+POST /bills/create returns immediately - PDF generation and WhatsApp delivery
 run in a FastAPI BackgroundTask (1-3 seconds).  Response returns in <200ms.
 
 GET /bills/{business_id} returns bills with client name and computed days_since_due.
@@ -99,32 +99,36 @@ async def _generate_and_deliver(bill_id: str) -> None:
         Decimal(str(b["outstanding"])) for b in (prev_resp.data or [])
     )
 
-    # ── 1. Generate PDF ───────────────────────────────────────────────
-    pdf_url = None
-    try:
-        pdf_url = await pdf_service.generate_invoice_pdf(
-            business_name=biz.get("business_name", ""),
-            business_phone=biz.get("whatsapp_number", ""),
-            upi_vpa=biz.get("upi_vpa"),
-            client_name=client.get("name", "Customer"),
-            invoice_number=bill.get("invoice_number") or bill_id[:8],
-            invoice_date=date.fromisoformat(str(bill["invoice_date"])),
-            due_date=date.fromisoformat(str(bill["due_date"])) if bill.get("due_date") else date.today(),
-            credit_days=client.get("credit_days", 30),
-            amount=Decimal(str(bill["amount"])),
-            previous_outstanding=previous_outstanding,
-            description="Goods as per invoice",
-            bill_id=bill_id,
-        )
-        db.table("bills").update({"pdf_url": pdf_url}).eq("id", bill_id).execute()
-        log.info("PDF generated for bill %s: %s", bill_id, pdf_url)
-    except Exception:
-        log.exception("PDF generation failed for bill %s", bill_id)
+    # ── 1. PDF ────────────────────────────────────────────────────────
+    # Prefer Tally's OWN exported invoice PDF if the agent already attached it
+    # (bill.pdf_url set during sync) - that is the exact GST tax-invoice, which
+    # ASVA cannot recreate (it has no line items). Otherwise generate our own.
+    pdf_url = bill.get("pdf_url")
+    if not pdf_url:
+        try:
+            pdf_url = await pdf_service.generate_invoice_pdf(
+                business_name=biz.get("business_name", ""),
+                business_phone=biz.get("whatsapp_number", ""),
+                upi_vpa=biz.get("upi_vpa"),
+                client_name=client.get("name", "Customer"),
+                invoice_number=bill.get("invoice_number") or bill_id[:8],
+                invoice_date=date.fromisoformat(str(bill["invoice_date"])),
+                due_date=date.fromisoformat(str(bill["due_date"])) if bill.get("due_date") else date.today(),
+                credit_days=client.get("credit_days", 30),
+                amount=Decimal(str(bill["amount"])),
+                previous_outstanding=previous_outstanding,
+                description="Goods as per invoice",
+                bill_id=bill_id,
+            )
+            db.table("bills").update({"pdf_url": pdf_url}).eq("id", bill_id).execute()
+            log.info("PDF generated for bill %s: %s", bill_id, pdf_url)
+        except Exception:
+            log.exception("PDF generation failed for bill %s", bill_id)
 
     # ── 2. Send WhatsApp ──────────────────────────────────────────────
     client_phone = client.get("whatsapp_number")
     if not client_phone:
-        log.info("No WhatsApp number for client %s — skipping delivery", client.get("name"))
+        log.info("No WhatsApp number for client %s - skipping delivery", client.get("name"))
         return
 
     try:
@@ -176,7 +180,7 @@ async def create_bill(payload: BillCreate, background_tasks: BackgroundTasks):
     """Create a bill manually (non-Tally flow).
 
     Auto-calculates due_date from client's credit_days.
-    Returns immediately — PDF generation + WhatsApp delivery run in background.
+    Returns immediately - PDF generation + WhatsApp delivery run in background.
     """
     db = require_db()
 
@@ -206,7 +210,7 @@ async def create_bill(payload: BillCreate, background_tasks: BackgroundTasks):
     credit_days = client_resp.data["credit_days"]
     due_date = payload.invoice_date + timedelta(days=credit_days)
 
-    # Create bill — do NOT set outstanding (GENERATED ALWAYS column)
+    # Create bill - do NOT set outstanding (GENERATED ALWAYS column)
     bill_data = {
         "business_id": payload.business_id,
         "client_id": payload.client_id,
@@ -220,7 +224,7 @@ async def create_bill(payload: BillCreate, background_tasks: BackgroundTasks):
     bill_resp = db.table("bills").insert(bill_data).execute()
     bill = bill_resp.data[0]
 
-    # PDF + WhatsApp in background — API returns in <200ms
+    # PDF + WhatsApp in background - API returns in <200ms
     background_tasks.add_task(_generate_and_deliver, bill["id"])
 
     return BillCreateResponse(

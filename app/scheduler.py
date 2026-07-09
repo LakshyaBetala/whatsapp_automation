@@ -1,4 +1,4 @@
-"""APScheduler setup — runs in-process inside the FastAPI app.
+"""APScheduler setup - runs in-process inside the FastAPI app.
 
 Three recurring jobs (all in the configured timezone):
   - EOD 9pm digest      -> jobs.eod_digest.run
@@ -35,11 +35,13 @@ def start() -> AsyncIOScheduler:
         misfire_grace_time=3600,
     )
 
+    # Runs every hour (at :minute). Each business only sends once its own
+    # reminder_hour is reached; per-bill dedup keeps every reminder to one
+    # send/day. Hourly (not daily) so a laptop that was off at the send hour
+    # still catches up the next hour it is on. See jobs/reminder_sweep.py.
     sched.add_job(
         reminder_sweep.run,
-        CronTrigger(
-            hour=settings.reminder_sweep_hour, minute=settings.reminder_sweep_minute
-        ),
+        CronTrigger(minute=settings.reminder_sweep_minute),
         id="reminder_sweep",
         replace_existing=True,
         misfire_grace_time=3600,
@@ -65,10 +67,10 @@ def start() -> AsyncIOScheduler:
     sched.start()
     _scheduler = sched
     log.info(
-        "Scheduler started: EOD %02d:%02d, reminders %02d:%02d (%s)",
+        "Scheduler started: EOD %02d:%02d, reminders hourly at :%02d "
+        "(each business sends at its own reminder_hour) (%s)",
         settings.eod_digest_hour,
         settings.eod_digest_minute,
-        settings.reminder_sweep_hour,
         settings.reminder_sweep_minute,
         settings.timezone,
     )

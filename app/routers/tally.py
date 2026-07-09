@@ -41,6 +41,7 @@ class TallyVoucher(BaseModel):
     party_name: str
     amount: float
     date: str  # YYYY-MM-DD
+    pdf_base64: Optional[str] = None   # Tally's own exported invoice PDF (agent attaches for new bills)
 
 class TallySyncPayload(BaseModel):
     business_id: uuid.UUID
@@ -60,7 +61,7 @@ def _fetch_all(query_fn, page_size: int = 1000) -> list:
     """Page through a PostgREST query (Supabase caps responses at ~1000 rows).
 
     query_fn() must return a fresh query builder each call (filters applied,
-    no range) — we add .range() per page.
+    no range) - we add .range() per page.
     """
     rows: list = []
     start = 0
@@ -140,6 +141,10 @@ async def import_outstanding(payload: TallyImportPayload):
                     "tally_ledger_name": debtor.name,
                     "tally_group": debtor.tally_group,
                     "whatsapp_number": phone,
+                    # A recovery tool exists to chase debtors, so new imports
+                    # default to reminders ON. The daily cap + pacing prevent a
+                    # day-one blast; the owner can pause any party.
+                    "reminders_enabled": True,
                 }
                 if credit_days:
                     row["credit_days"] = credit_days
@@ -154,7 +159,7 @@ async def import_outstanding(payload: TallyImportPayload):
                     updates["whatsapp_number"] = phone
                     phones_added += 1
                 # Adopt Tally credit terms only while the client still has
-                # the untouched default (30) — manual edits win
+                # the untouched default (30) - manual edits win
                 if credit_days and existing.get("credit_days", 30) == 30 and credit_days != 30:
                     updates["credit_days"] = credit_days
                 if updates:
@@ -183,7 +188,7 @@ async def import_outstanding(payload: TallyImportPayload):
             continue
         v_num = f"OB-{debtor.name[:20]}"
         if v_num in payload_claimed:
-            # Two debtors share the first 20 chars — full name disambiguates
+            # Two debtors share the first 20 chars - full name disambiguates
             v_num = f"OB-{debtor.name}"
         payload_claimed.add(v_num)
         if v_num in existing_obs:
@@ -197,7 +202,7 @@ async def import_outstanding(payload: TallyImportPayload):
             "amount": debtor.opening_balance,
             "paid_amount": 0.0,
             "invoice_date": fy_start.isoformat(),
-            "due_date": fy_start.isoformat(),  # already outstanding — due immediately
+            "due_date": fy_start.isoformat(),  # already outstanding - due immediately
             "status": "pending",
             "is_opening_balance": True,
         })
@@ -218,7 +223,7 @@ async def import_outstanding(payload: TallyImportPayload):
 @router.post("/sync")
 async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTasks):
     """Apply the FY voucher dump. Batched prefetch (3 paged queries)
-    instead of 2 lookups per voucher — Tokyo latency budget."""
+    instead of 2 lookups per voucher - Tokyo latency budget."""
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
 
@@ -227,6 +232,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     receipts_processed = 0
     unmatched_parties = []
     errors = []
+    delivered = []   # voucher numbers actually sent - the agent cleans these PDFs up
 
     # ── Prefetch: clients, existing bills, applied receipts ──────────
     clients_by_ledger = {
@@ -239,7 +245,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     bills_by_voucher = {
         b["tally_voucher_number"]: b
         for b in _fetch_all(lambda: db.table("bills")
-                            .select("id, tally_voucher_number, amount")
+                            .select("id, tally_voucher_number, amount, pdf_url")
                             .eq("business_id", biz))
         if b.get("tally_voucher_number")
     }
@@ -261,10 +267,10 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
 
             if v.voucher_type.lower() == "sales":
                 existing_bill = bills_by_voucher.get(v.voucher_number)
+                invoice_date = date.fromisoformat(v.date)
                 if not existing_bill:
-                    # New bill insert — due_date = invoice_date + client credit period
+                    # New bill insert - due_date = invoice_date + client credit period
                     credit_days = client.get("credit_days") or 30
-                    invoice_date = date.fromisoformat(v.date)
                     due_date = invoice_date + timedelta(days=credit_days)
                     inserted_bill = db.table("bills").insert({
                         "business_id": biz,
@@ -282,15 +288,8 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     bills_by_voucher[v.voucher_number] = bill_row
                     sales_processed += 1
                     new_bills += 1
-
-                    # Instant PDF+WhatsApp delivery ONLY for fresh bills.
-                    # The first sync replays the whole FY — blasting
-                    # months-old invoices at onboarding would be a
-                    # disaster. Old unpaid bills enter the reminder
-                    # cadence instead (drip-fed by the daily sweep).
-                    if client.get("whatsapp_number") and invoice_date >= date.today() - timedelta(days=1):
-                        background_tasks.add_task(_generate_and_deliver, bill_row["id"])
                 else:
+                    bill_row = existing_bill
                     # Update only when the amount actually changed (rare)
                     if float(existing_bill.get("amount") or 0) != float(v.amount):
                         db.table("bills").update({
@@ -299,9 +298,32 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                         }).eq("id", existing_bill["id"]).execute()
                     sales_processed += 1
 
+                # Deliver to the customer ONLY when the owner exported this bill
+                # from Tally: their TDL drops the exact Tally PDF into the pickup
+                # folder, the agent attaches it as pdf_base64, and we send. No
+                # exported PDF => the bill is recorded but NOTHING is sent, so the
+                # owner controls exactly which bills go out. pdf_url is the
+                # "already delivered" marker (set just before send), so a bill is
+                # never re-sent even across the outstanding-reconcile. The first
+                # sync replays the whole FY, so skip anything older than a few
+                # days to avoid blasting historic invoices at onboarding.
+                already_sent = bool(bill_row.get("pdf_url"))
+                fresh = invoice_date >= date.today() - timedelta(days=3)
+                if v.pdf_base64 and not already_sent and fresh and client.get("whatsapp_number"):
+                    try:
+                        from app.services import pdf as pdf_service
+                        url = await pdf_service.upload_pdf_base64(
+                            bill_row["id"], v.voucher_number, v.pdf_base64)
+                        db.table("bills").update({"pdf_url": url}).eq("id", bill_row["id"]).execute()
+                        bill_row["pdf_url"] = url
+                        background_tasks.add_task(_generate_and_deliver, bill_row["id"])
+                        delivered.append(v.voucher_number)
+                    except Exception as e:
+                        log.warning("Tally PDF upload/deliver failed for %s: %s", v.voucher_number, e)
+
             elif v.voucher_type.lower() == "receipt":
                 # Idempotency: every sync sends the full FY (Tally ignores
-                # date filters over HTTP) — apply each receipt exactly once.
+                # date filters over HTTP) - apply each receipt exactly once.
                 if (v.voucher_number, v.date) in applied_receipts:
                     continue
                 applied_receipts.add((v.voucher_number, v.date))
@@ -343,7 +365,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
 
     # Log to tally_syncs (schema: sync_type enum, records_synced, success, error)
     try:
-        # Unmatched parties (CASH, internal accounts) are informational —
+        # Unmatched parties (CASH, internal accounts) are informational -
         # only real errors mark the sync as failed.
         error_list = sorted(set(unmatched_parties)) + errors
         db.table("tally_syncs").insert({
@@ -361,5 +383,160 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
         "new_bills": new_bills,
         "receipts_processed": receipts_processed,
         "unmatched_parties": unmatched_parties,
+        "delivered": delivered,
         "errors": errors
+    }
+
+
+class TallyOpenBill(BaseModel):
+    party_name: str
+    bill_ref: str = ""
+    bill_date: Optional[str] = None   # YYYY-MM-DD
+    due_date: Optional[str] = None    # YYYY-MM-DD
+    amount: float                     # Tally's NET outstanding for this bill
+
+
+class TallyOutstandingsPayload(BaseModel):
+    business_id: uuid.UUID
+    agent_token: str
+    company_name: str
+    bills: list[TallyOpenBill]
+    all_parties: list[str] = []       # every debtor ledger (to clear fully-paid ones)
+
+
+async def _send_payment_confirmation(business_id, plan_name, client, delta, remaining):
+    """Background: tell a customer 'received Rs X, Rs Y remaining' when Tally
+    shows their balance dropped (i.e. a payment was recorded)."""
+    from app.services import whatsapp
+    from app.services.templates import render, inr
+    from app.models import Lang, MessageType, Plan
+    try:
+        lang = Lang(client.get("language") or "hi")
+    except Exception:
+        lang = Lang.hi
+    try:
+        _, body = render(
+            "payment_confirmation", lang,
+            client=client.get("name", "Customer"),
+            paid_amount=inr(delta), outstanding=inr(remaining))
+        await whatsapp.send_message(
+            business_id=business_id, to_number=client["whatsapp_number"],
+            message_text=body, plan=Plan(plan_name),
+            message_type=MessageType.payment_confirmation,
+            client_id=client["id"], language=lang, channel="shop")
+    except Exception:
+        log.exception("payment confirmation send failed for %s", client.get("name"))
+
+
+@router.post("/outstandings")
+async def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: BackgroundTasks):
+    """Make Tally's bill-by-bill OUTSTANDING the source of truth.
+
+    Each open bill is upserted (keyed by tally_voucher_number = TB-<client>-<ref>)
+    with Tally's NET amount and real dates, so overdue days and amounts are
+    exact. Bills a debtor no longer owes are marked paid. When a bill's net
+    DROPS between refreshes a payment happened, so the customer gets a
+    'received X, remaining Y' confirmation. Runs every sync cycle.
+    """
+    from collections import defaultdict
+    db = _verify_token(payload.business_id, payload.agent_token)
+    biz = str(payload.business_id)
+    fy = _fy_start().isoformat()
+
+    biz_row = db.table("businesses").select("plan").eq("id", biz).limit(1).execute()
+    plan_name = biz_row.data[0]["plan"] if biz_row.data else "starter"
+
+    clients_by_ledger = {
+        c["tally_ledger_name"]: c
+        for c in _fetch_all(lambda: db.table("clients")
+                            .select("id, tally_ledger_name, name, whatsapp_number, language")
+                            .eq("business_id", biz))
+        if c.get("tally_ledger_name")
+    }
+    clients_by_id = {c["id"]: c for c in clients_by_ledger.values()}
+
+    incoming = defaultdict(list)
+    for b in payload.bills:
+        c = clients_by_ledger.get(b.party_name)
+        if c:
+            incoming[c["id"]].append(b)
+
+    target_ids = set(incoming.keys())
+    for name in payload.all_parties:
+        c = clients_by_ledger.get(name)
+        if c:
+            target_ids.add(c["id"])
+
+    # Existing open bills BEFORE upsert (for payment detection + reconcile).
+    existing_bills: list = []
+    for chunk in _chunked(list(target_ids), 100):
+        existing_bills.extend(_fetch_all(lambda c=chunk: db.table("bills")
+                              .select("id, client_id, tally_voucher_number, amount")
+                              .eq("business_id", biz)
+                              .in_("client_id", c)
+                              .in_("status", ["pending", "partial", "overdue"])))
+    old_amount = {e["tally_voucher_number"]: float(e.get("amount") or 0)
+                  for e in existing_bills if e.get("tally_voucher_number")}
+
+    # Build rows + snapshot + detect drops (payments).
+    rows = []
+    snap = defaultdict(set)
+    seen: dict = {}
+    payments: list = []              # (client_id, paid_delta, remaining)
+    for cid, bl in incoming.items():
+        for b in sorted(bl, key=lambda x: ((x.bill_ref or ""), str(x.bill_date or ""), x.amount)):
+            ref = (b.bill_ref or "").strip() or (b.bill_date or "x")
+            base = f"TB-{cid}-{ref}"[:112]
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            vnum = base if n == 0 else f"{base}#{n + 1}"
+            new_amt = round(float(b.amount), 2)
+            inv = b.bill_date or fy
+            rows.append({
+                "business_id": biz, "client_id": cid,
+                "invoice_number": ref[:60], "tally_voucher_number": vnum,
+                "amount": new_amt, "paid_amount": 0.0,
+                "invoice_date": inv, "due_date": b.due_date or inv,
+                "status": "pending", "is_opening_balance": inv < fy,
+            })
+            snap[cid].add(vnum)
+            prev = old_amount.get(vnum)              # only TB- bills that existed
+            if prev is not None and new_amt < prev - 0.99:
+                payments.append((cid, round(prev - new_amt, 2), new_amt))
+
+    errors: list = []
+    upserted = 0
+    for chunk in _chunked(rows, 200):
+        try:
+            db.table("bills").upsert(chunk, on_conflict="business_id,tally_voucher_number").execute()
+            upserted += len(chunk)
+        except Exception as e:
+            errors.append(f"upsert {len(chunk)} bills failed: {e}")
+
+    # Reconcile: bills Tally no longer lists (paid off / old lumps) -> paid.
+    stale = [e["id"] for e in existing_bills
+             if e.get("tally_voucher_number") not in snap.get(e["client_id"], set())]
+    marked_paid = 0
+    for idchunk in _chunked(stale, 200):
+        try:
+            db.table("bills").update({"status": "paid"}).in_("id", idchunk).execute()
+            marked_paid += len(idchunk)
+        except Exception as e:
+            errors.append(f"mark-paid {len(idchunk)} failed: {e}")
+
+    # Customer payment confirmations (bounded, only if they have a number).
+    confirmations = 0
+    for cid, delta, remaining in payments[:30]:
+        cl = clients_by_id.get(cid)
+        if cl and cl.get("whatsapp_number"):
+            background_tasks.add_task(_send_payment_confirmation, biz, plan_name, cl, delta, remaining)
+            confirmations += 1
+
+    return {
+        "parties": len(target_ids),
+        "bills_upserted": upserted,
+        "bills_marked_paid": marked_paid,
+        "payments_detected": len(payments),
+        "confirmations_sent": confirmations,
+        "errors": errors,
     }

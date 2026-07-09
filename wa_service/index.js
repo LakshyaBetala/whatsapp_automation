@@ -3,6 +3,14 @@ const qrcode = require('qrcode');
 const express = require('express');
 const cors = require('cors');
 
+// Survive transient whatsapp-web.js errors (e.g. EBUSY while cleaning up the
+// session on a WhatsApp-side logout). Without this, such an error crashes the
+// Node process, the supervisor restarts it, and you get a NEW QR every time —
+// the "connects then disconnects again and again" loop. We stay alive instead
+// and recover to a QR/ready state cleanly.
+process.on('unhandledRejection', (e) => console.error('unhandledRejection:', (e && e.message) || e));
+process.on('uncaughtException', (e) => console.error('uncaughtException:', (e && e.message) || e));
+
 // Where the FastAPI backend lives — inbound messages are forwarded there
 // so bot commands (LIST / STOP <name> / PAID) work.
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
@@ -18,10 +26,26 @@ app.use(express.json({ limit: '10mb' }));
 
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: SESSION_ID }),
+    // Pin a known-good WhatsApp Web build. Without this, whatsapp-web.js
+    // loads whatever web.whatsapp.com serves; when that page is newer than
+    // the library expects, it reloads mid-injection and initialize() dies
+    // with "Execution context was destroyed". The pinned HTML keeps the
+    // page stable so the QR/auth handshake completes.
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1040310160-alpha.html',
+    },
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',   // low-RAM machines: don't use /dev/shm
+            '--disable-gpu',
+            '--disable-extensions',
+            '--no-first-run',
+        ],
+    },
 });
 
 let qrCodeData = null;
@@ -41,6 +65,12 @@ client.on('ready', () => {
     qrCodeData = null; // Clear QR code as it's no longer needed
 });
 
+// Shows sync progress after scanning. A busy number (many chats) can take
+// several minutes on a slow PC — this proves it is loading, not frozen.
+client.on('loading_screen', (percent, message) => {
+    console.log(`Loading ${percent}% - ${message}`);
+});
+
 client.on('authenticated', () => {
     console.log('WhatsApp Client Authenticated!');
 });
@@ -53,6 +83,10 @@ client.on('auth_failure', msg => {
 client.on('disconnected', (reason) => {
     console.log('WhatsApp Client was disconnected', reason);
     clientReady = false;
+    // Do NOT re-initialize here — whatsapp-web.js recovers on its own and
+    // shows a fresh QR. Calling initialize() again spawns a second browser on
+    // the same session dir ("browser already running" + EBUSY). The
+    // process-level handlers above keep us alive; just wait for the new QR.
 });
 
 // ── Inbound: forward customer/owner replies to the backend bot ──────
@@ -108,7 +142,22 @@ client.on('message', async (msg) => {
     }
 });
 
-client.initialize();
+// Injection can fail transiently (esp. on slow PCs) with a ProtocolError.
+// Retry a few times instead of hard-crashing the whole service.
+async function startClient(attempt = 1) {
+    try {
+        await client.initialize();
+    } catch (err) {
+        console.error(`initialize() failed (attempt ${attempt}): ${err.message}`);
+        if (attempt < 5) {
+            console.log('Retrying in 5s...');
+            setTimeout(() => startClient(attempt + 1), 5000);
+        } else {
+            console.error('Gave up after 5 attempts. Close this window and run again.');
+        }
+    }
+}
+startClient();
 
 // --- Express API --- //
 

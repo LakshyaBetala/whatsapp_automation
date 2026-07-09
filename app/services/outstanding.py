@@ -84,7 +84,7 @@ async def import_outstanding(
                     missing_whatsapp.append(row.ledger_name.strip())
             except Exception as exc:
                 errors.append(f"Client create failed for {row.ledger_name}: {exc}")
-                log.error("Client create failed: %s — %s", row.ledger_name, exc)
+                log.error("Client create failed: %s - %s", row.ledger_name, exc)
                 continue
         else:
             if not client.get("whatsapp_number"):
@@ -123,7 +123,7 @@ async def import_outstanding(
         except Exception as exc:
             bills_skipped += 1
             errors.append(f"Bill upsert failed for {invoice_num}: {exc}")
-            log.error("Bill upsert failed: %s — %s", invoice_num, exc)
+            log.error("Bill upsert failed: %s - %s", invoice_num, exc)
 
     # ── Write audit log ──────────────────────────────────────────────
     db.table("tally_syncs").insert({
@@ -143,7 +143,7 @@ async def import_outstanding(
         "errors": errors,
         "message": (
             f"{bills_imported} bills imported, {clients_created} clients created. "
-            f"{len(missing_whatsapp)} clients without WhatsApp numbers — "
+            f"{len(missing_whatsapp)} clients without WhatsApp numbers - "
             "add numbers to start reminders."
             if missing_whatsapp
             else f"{bills_imported} bills imported, {clients_created} clients created."

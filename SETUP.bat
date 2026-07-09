@@ -8,7 +8,7 @@ echo   ASVA - ONE-TIME SETUP
 echo ================================
 echo.
 
-echo [1/4] Checking Python 3.10+ ...
+echo [1/5] Checking Python 3.10+ ...
 python -c "import sys; assert sys.version_info >= (3,10)" >nul 2>&1
 if errorlevel 1 goto install_python
 echo       Python OK.
@@ -24,7 +24,7 @@ echo   *** Windows needs a fresh window to find the new Python.         ***
 goto end
 
 :check_node
-echo [2/4] Checking Node.js 18+ ...
+echo [2/5] Checking Node.js 18+ ...
 node -e "process.exit(parseInt(process.versions.node)>=18?0:1)" >nul 2>&1
 if errorlevel 1 goto install_node
 echo       Node.js OK.
@@ -48,19 +48,26 @@ echo   Copy the FULL ASVA folder from the main laptop.
 goto end
 
 :pip_install
-echo [3/4] Installing Python packages, 2-3 min...
+echo [3/5] Installing Python packages, 2-3 min...
 python -m pip install -r requirements.txt --quiet
 if errorlevel 1 goto pip_failed
 echo       Python packages OK.
 
-echo [4/4] Installing WhatsApp service packages, 3-5 min...
+echo [4/5] Installing WhatsApp service packages, 3-5 min...
 cd wa_service
+if exist node_modules rmdir /s /q node_modules
+call npm install --no-audit --no-fund
+cd ..
+
+echo [5/5] Installing ASVA app (Electron), 3-5 min...
+cd desktop
 if exist node_modules rmdir /s /q node_modules
 call npm install --no-audit --no-fund
 cd ..
 echo.
 echo ==============================================
-echo   ASVA SETUP COMPLETE. Ab roz START.bat chalao.
+echo   ASVA SETUP COMPLETE.
+echo   Ab roz ASVA.vbs kholo (ek hi app - sab kuch usmein).
 echo ==============================================
 goto end
 

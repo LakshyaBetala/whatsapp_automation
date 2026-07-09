@@ -1,4 +1,4 @@
-"""Photo-bill OCR — extract party/phone/amount from a photographed bill.
+"""Photo-bill OCR - extract party/phone/amount from a photographed bill.
 
 Uses Gemini (free tier) via the REST API with a JSON response schema, so
 no SDK dependency and no cost during the pilot. Requires GEMINI_API_KEY

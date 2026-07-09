@@ -19,12 +19,16 @@ class Settings(BaseSettings):
     aisensy_api_base: str = "https://backend.aisensy.com"
     aisensy_webhook_secret: str = ""
 
-    # --- OpenWA (WhatsApp Node microservice, wa_service/ — port 3001) ---
+    # --- OpenWA (WhatsApp Node microservice, wa_service/ - port 3001) ---
     openwa_url: str = "http://localhost:3001"
     # Optional SECOND wa_service session (our company/platform number) used
     # for owner-facing messages: digest, alerts, renewal notices. Empty =
     # everything goes through the shop's own number.
     platform_wa_url: str = ""
+    # Where an OWNER's support request (TEAM <msg>) is forwarded (your product
+    # team's WhatsApp number). Empty = the bot just acknowledges. Customer
+    # issues are forwarded to their own shop owner, not here.
+    product_team_number: str = ""
 
     # --- App ---
     app_env: str = "development"
@@ -35,9 +39,13 @@ class Settings(BaseSettings):
 
     # --- Sending safety ---
     # Max customer reminders per business per day. Backlog drips out over
-    # following days — protects a fresh WhatsApp session from bulk-send
+    # following days - protects a fresh WhatsApp session from bulk-send
     # ban patterns and customers from a day-1 blast.
     daily_reminder_cap: int = 25
+    # Randomised gap (seconds) between consecutive sends in a sweep so traffic
+    # looks human, not a burst. Keep the window wide; the daily cap bounds total.
+    send_gap_min_s: float = 12.0
+    send_gap_max_s: float = 40.0
 
     # --- Scheduling ---
     eod_digest_hour: int = 21

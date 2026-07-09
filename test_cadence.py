@@ -8,7 +8,11 @@ from unittest.mock import MagicMock
 
 sys.modules.setdefault("weasyprint", MagicMock())
 
-from app.jobs.reminder_sweep import cadence_points, DEFAULT_CADENCE
+from app.jobs.reminder_sweep import (
+    cadence_points,
+    latest_reached_point,
+    DEFAULT_CADENCE,
+)
 
 
 def kinds(points):
@@ -28,9 +32,19 @@ def test_90_day_term_scales_up():
     pts = kinds(cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=90, due_offset=90))
     for d in (9, 21, 45, 63, 90):
         assert pts[d] == "nudge", (d, pts)
-    assert pts[97] == "overdue"
-    assert pts[118] == "escalate"
+    # Overdue spacing also scales: ~21 days (7 * 90/30), not the old fixed 7.
+    assert pts[111] == "overdue"        # 90 + 21
+    assert pts[174] == "escalate"       # 90 + 21*4
     assert min(pts) == 9  # no day-3 nagging for a 90-day company
+
+
+def test_overdue_spacing_scales_with_term():
+    """A long-credit party gets wider overdue spacing, not weekly nagging."""
+    p30 = kinds(cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30))
+    assert p30[37] == "overdue"         # 30-day term keeps ~7-day spacing
+    p90 = kinds(cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=90, due_offset=90))
+    assert p90[111] == "overdue"        # 90-day term stretches to ~21-day
+    assert 97 not in p90                # the old fixed-7 point is gone
 
 
 def test_short_term_compresses():
@@ -54,3 +68,25 @@ def test_points_sorted_and_deduped():
     days = [d for d, _ in pts]
     assert days == sorted(days)
     assert len(days) == len(set(days))
+
+
+# ── next-working-day / laptop-off catch-up (via latest_reached_point) ──────
+
+def test_latest_point_none_before_first():
+    pts = cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30)
+    assert latest_reached_point(pts, 2) is None       # first nudge is day 3
+
+
+def test_latest_point_returns_only_newest_reached():
+    pts = cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30)
+    # by day 16, points 3/7/15 are all "due" — only 15 comes back
+    day, kind = latest_reached_point(pts, 16)
+    assert (day, kind) == (15, "nudge")
+
+
+def test_catch_up_never_stacks():
+    """Laptop off across the day-15 point; on day 21 the sweep sends the day-21
+    reminder only — not a backlog of 15 and 21."""
+    pts = cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30)
+    day, _ = latest_reached_point(pts, 21)
+    assert day == 21

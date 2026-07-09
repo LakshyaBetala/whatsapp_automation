@@ -1,6 +1,6 @@
 """Business registration and usage tracking.
 
-Routers contain ZERO business logic — validate input, call service, return result.
+Routers contain ZERO business logic - validate input, call service, return result.
 """
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ async def register_business(payload: BusinessRegister):
     """Onboard a new SMB owner. Returns the business_id the Tally agent needs."""
     db = require_db()
 
-    # Duplicate check — same number must not register twice
+    # Duplicate check - same number must not register twice
     existing = (
         db.table("businesses")
         .select("id")
@@ -82,7 +82,7 @@ async def register_business(payload: BusinessRegister):
     # Generate agent token
     agent_token = secrets.token_urlsafe(32)
 
-    # Create business — 30-day subscription clock starts now
+    # Create business - 30-day subscription clock starts now
     from datetime import timedelta
     biz_resp = (
         db.table("businesses")
@@ -115,7 +115,7 @@ async def register_business(payload: BusinessRegister):
         business_name=biz.get("business_name"),
         whatsapp_number=biz["whatsapp_number"],
         plan=biz["plan"],
-        message="Save this token — it will not be shown again",
+        message="Save this token - it will not be shown again",
         agent_token=agent_token,
     )
 

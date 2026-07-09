@@ -1,0 +1,12 @@
+{
+  "name": "asva-desktop",
+  "version": "1.0.0",
+  "description": "ASVA control center - supervises the backend, WhatsApp services and Tally watcher, and shows the dashboard in one window.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}

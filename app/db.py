@@ -1,7 +1,7 @@
 """Supabase client singleton.
 
 The backend uses the SERVICE-ROLE key, which bypasses Row Level Security.
-Keep this key server-side only — it must never reach a browser or the agent.
+Keep this key server-side only - it must never reach a browser or the agent.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def get_client() -> Optional[Client]:
     truly need the DB should use `require_db()`.
     """
     if not settings.supabase_configured:
-        log.warning("Supabase not configured — DB calls will be no-ops.")
+        log.warning("Supabase not configured - DB calls will be no-ops.")
         return None
     return create_client(settings.supabase_url, settings.supabase_service_key)
 

@@ -17,7 +17,7 @@ from app.routers import admin, bills, businesses, clients, eod, health, tally, w
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
 )
 log = logging.getLogger("app")
 
@@ -26,9 +26,9 @@ log = logging.getLogger("app")
 async def lifespan(_: FastAPI):
     log.info("Starting ASVA (env=%s)", settings.app_env)
     if not settings.supabase_configured:
-        log.warning("Supabase not configured — running in degraded/local mode.")
+        log.warning("Supabase not configured - running in degraded/local mode.")
     if not settings.aisensy_configured:
-        log.warning("AiSensy not configured — WhatsApp sends will be logged, not sent.")
+        log.warning("AiSensy not configured - WhatsApp sends will be logged, not sent.")
     scheduler.start()
     try:
         yield

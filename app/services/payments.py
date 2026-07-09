@@ -1,4 +1,4 @@
-"""Payment application service — FIFO, oldest bill first.
+"""Payment application service - FIFO, oldest bill first.
 
 Indian wholesale standard: when ₹15,000 arrives against a customer who owes
 ₹10,000 (30-day bill) and ₹25,000 (10-day bill), fully pay the ₹10,000 first,
@@ -31,7 +31,7 @@ async def apply_payment(
         business_id: UUID of the business.
         client_id: UUID of the client (debtor) who paid.
         amount: Total payment amount received.
-        source: Where the payment was detected — ``"tally"``, ``"bot"``, or
+        source: Where the payment was detected - ``"tally"``, ``"bot"``, or
                 ``"customer_reply"``.
 
     Returns:
@@ -98,7 +98,7 @@ async def apply_payment(
         })
 
         log.info(
-            "Applied %s to bill %s — status now %s",
+            "Applied %s to bill %s - status now %s",
             inr(apply_amt),
             bill["invoice_number"],
             new_status,

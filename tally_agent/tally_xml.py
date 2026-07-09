@@ -17,7 +17,7 @@ TallyPrime with multiple companies loaded:
 """
 import xml.etree.ElementTree as ET
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set
 from xml.sax.saxutils import escape
 
@@ -214,6 +214,20 @@ def build_company_list_query() -> str:
     return _collection_query('Company', ['Name'])
 
 
+def build_bills_query(company: str = "") -> str:
+    """Bill-by-bill OUTSTANDING — Tally's own net figure per open bill.
+
+    This is the authoritative source of what each party owes (net of every
+    payment, however it was booked) plus each bill's real date — so overdue
+    days and amounts are exact, instead of the fragile
+    opening+sales-receipts re-derivation. Requires the party ledgers to
+    'maintain balances bill-by-bill' (the norm for wholesale debtors).
+    """
+    return _collection_query('Bills', [
+        'Name', 'Parent', 'BillDate', 'ClosingBalance', 'BillCreditPeriod', 'BillType',
+    ], company)
+
+
 # ── Parsers ───────────────────────────────────────────────────────────
 
 def _elem_name(elem: ET.Element) -> str:
@@ -311,6 +325,64 @@ def parse_ledger_contacts(xml_text: str) -> Dict[str, str]:
         if phone:
             contacts[name] = phone
     return contacts
+
+
+def _parse_flexible_date(raw: Optional[str]) -> Optional[str]:
+    """Tally bill dates arrive as '20210401' or '1-Apr-21' / '1-Apr-2021'.
+    Return 'YYYY-MM-DD' or None."""
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    if re.fullmatch(r'\d{8}', raw):
+        return parse_tally_date(raw)
+    for fmt in ('%d-%b-%Y', '%d-%b-%y', '%d-%m-%Y', '%d/%m/%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(raw, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return None
+
+
+def parse_bills(xml_text: str, debtor_ledgers: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+    """Parse the bill-by-bill outstanding collection.
+
+    Returns one dict per OPEN bill a debtor owes:
+      {party, bill_ref, bill_date, amount, credit_days, due_date}
+
+    ``amount`` is Tally's ClosingBalance for that bill, sign-flipped so a
+    debit (owed) is positive; credit/advance bills (<=0) are dropped.
+    If ``debtor_ledgers`` is given, only bills whose parent ledger is in it
+    are kept (creditors excluded); otherwise all owed bills are returned.
+    """
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+
+    lowered = {n.strip().lower() for n in debtor_ledgers} if debtor_ledgers else None
+    out: List[Dict[str, Any]] = []
+    for b in root.iter('BILL'):
+        party = (b.findtext('PARENT', '') or '').strip()
+        if lowered is not None and party.lower() not in lowered:
+            continue
+        amount = -_to_float(b.findtext('CLOSINGBALANCE', '0'))  # owed -> positive
+        if amount <= 0:
+            continue
+        bill_date = _parse_flexible_date(b.findtext('BILLDATE', ''))
+        credit = parse_credit_days(b.findtext('BILLCREDITPERIOD', ''))
+        due = None
+        if bill_date and credit is not None:
+            due = (datetime.strptime(bill_date, '%Y-%m-%d')
+                   + timedelta(days=credit)).strftime('%Y-%m-%d')
+        out.append({
+            'party': party,
+            'bill_ref': (_elem_name(b) or (b.findtext('NAME', '') or '').strip()),
+            'bill_date': bill_date,
+            'amount': round(amount, 2),
+            'credit_days': credit,
+            'due_date': due or bill_date,
+        })
+    return out
 
 
 def parse_vouchers(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:

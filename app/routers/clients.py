@@ -135,7 +135,7 @@ async def toggle_reminders(client_id: str):
 async def update_credit_days(client_id: str, credit_days: int):
     """Update credit period and recalculate due_date on ALL open bills.
 
-    This is critical — if an owner upgrades a customer from 30-day to 90-day
+    This is critical - if an owner upgrades a customer from 30-day to 90-day
     credit, all 5 open bills must get new due dates.  Otherwise the reminder
     sweep fires early on the old 30-day schedule.
     """

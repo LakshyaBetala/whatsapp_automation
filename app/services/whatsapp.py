@@ -1,4 +1,4 @@
-"""Central WhatsApp send service — using the OpenWA Node microservice.
+"""Central WhatsApp send service - using the OpenWA Node microservice.
 
 The OpenWA service URL comes from settings (OPENWA_URL env var) so the
 backend can run on Railway while the WA service runs elsewhere.
@@ -59,7 +59,7 @@ async def send_message(
     """Send a WhatsApp message via OpenWA.
 
     channel: "shop" = the business's own number (customer-facing);
-    "platform" = our company number (owner-facing: digest/alerts) —
+    "platform" = our company number (owner-facing: digest/alerts) -
     falls back to the shop session when PLATFORM_WA_URL is not set.
 
     Handles:
@@ -70,7 +70,7 @@ async def send_message(
     """
     db = require_db()
 
-    # ── 0. Subscription gate — the server-side "license check" ────────
+    # ── 0. Subscription gate - the server-side "license check" ────────
     from app.services import subscription as subs
     biz_row = (
         db.table("businesses")
@@ -82,7 +82,7 @@ async def send_message(
     if biz_row.data:
         status = subs.effective_status(biz_row.data[0].get("plan_expires_on"))
         if status == "suspended" and message_type != MessageType.owner_alert:
-            log.warning("Business %s suspended — send blocked", business_id)
+            log.warning("Business %s suspended - send blocked", business_id)
             db.table("messages").insert({
                 "business_id": business_id,
                 "client_id": client_id,
@@ -99,7 +99,7 @@ async def send_message(
     # ── 1. Atomic plan-limit check ────────────────────────────────────
     allowed = await _check_usage_and_increment(business_id, plan)
     if not allowed:
-        log.warning("Plan limit reached for business %s — skipping send", business_id)
+        log.warning("Plan limit reached for business %s - skipping send", business_id)
         db.table("messages").insert({
             "business_id": business_id,
             "client_id": client_id,
@@ -210,7 +210,7 @@ async def send_template(
                 resp.raise_for_status()
                 pdf_base64 = base64.b64encode(resp.content).decode("ascii")
         except Exception as exc:
-            log.warning("Could not fetch media %s (%s) — sending link instead", media_url, exc)
+            log.warning("Could not fetch media %s (%s) - sending link instead", media_url, exc)
             if media_url not in text:
                 text = f"{text}\n{media_url}"
 

@@ -1,4 +1,4 @@
-"""Daily subscription check — transitions statuses and warns owners.
+"""Daily subscription check - transitions statuses and warns owners.
 
 Runs each morning. The stored subscription_status column is display-only
 (the live gate in whatsapp.send_message computes from plan_expires_on),
@@ -6,8 +6,8 @@ so a missed run never lets a suspended business keep sending.
 
 Notices (sent to the OWNER via the platform channel):
   - 5 days before expiry: "renew hone wala hai"
-  - on entering grace:    "expire ho gaya — N din baaki"
-  - on suspension:        "reminders band ho gaye — renew karein"
+  - on entering grace:    "expire ho gaya - N din baaki"
+  - on suspension:        "reminders band ho gaye - renew karein"
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ async def run() -> None:
             left = subs.days_left(biz.get("plan_expires_on"))
             name = biz.get("business_name") or ""
 
-            # Heads-up 5 days before expiry (fires exactly once — equality)
+            # Heads-up 5 days before expiry (fires exactly once - equality)
             if live in ("trial", "active") and left == 5:
                 await whatsapp.notify_owner(
                     biz["id"],
@@ -56,7 +56,7 @@ async def run() -> None:
             elif live == "suspended":
                 await whatsapp.notify_owner(
                     biz["id"],
-                    f"{name}: subscription suspend ho gaya — bills aur reminders ab NAHI ja "
+                    f"{name}: subscription suspend ho gaya. Bills aur reminders ab NAHI ja "
                     f"rahe. Renew karte hi sab turant chalu ho jayega.")
         except Exception:
             log.exception("Subscription check failed for %s", biz.get("id"))

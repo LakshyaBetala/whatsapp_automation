@@ -1,12 +1,56 @@
 import argparse
 import asyncio
+import base64
 import calendar
+import os
+import shutil
 import sys
 import httpx
 import logging
 from datetime import date, datetime, timedelta
 from config import load_config
 import tally_xml
+
+
+def _attach_tally_pdfs(vouchers: list, pdf_dir: str) -> int:
+    """For new Sales vouchers, attach Tally's own exported invoice PDF from
+    pdf_dir (as base64) so the customer receives the EXACT Tally bill.
+
+    Robust to filename format: tries Sales_<voucher>.pdf and <voucher>.pdf
+    first, then falls back to ANY .pdf in the folder whose name contains the
+    voucher number (case-insensitive). Returns how many were attached."""
+    if not pdf_dir or not os.path.isdir(pdf_dir):
+        return 0
+    try:
+        files = [f for f in os.listdir(pdf_dir) if f.lower().endswith('.pdf')]
+    except Exception:
+        return 0
+    by_lower = {f.lower(): f for f in files}
+    attached = 0
+    for v in vouchers:
+        if v.get('voucher_type') != 'Sales':
+            continue
+        num = (v.get('voucher_number') or '').strip()
+        if not num:
+            continue
+        match = None
+        for name in (f"Sales_{num}.pdf", f"{num}.pdf", f"Sales_{num.lower()}.pdf"):
+            if name.lower() in by_lower:
+                match = by_lower[name.lower()]
+                break
+        if not match:                      # fallback: any pdf containing the voucher no
+            nl = num.lower()
+            match = next((f for f in files if nl in f.lower()), None)
+        if match:
+            try:
+                src = os.path.join(pdf_dir, match)
+                with open(src, 'rb') as fh:
+                    v['pdf_base64'] = base64.b64encode(fh.read()).decode('ascii')
+                v['_pdf_src'] = src   # remembered so run_watch can move it after send
+                attached += 1
+            except Exception:
+                pass
+    return attached
 
 # Setup file logging
 logging.basicConfig(
@@ -171,6 +215,10 @@ async def run_sync(config: dict):
     except Exception as e:
         log_and_print(f"Failed to push daily sync to backend: {e}", is_error=True)
 
+    # Authoritative accuracy pass: overwrite outstanding with Tally's bill-wise
+    # net figures + real dates (must run AFTER the voucher replay above).
+    await run_apply_outstanding(config)
+
 
 def _vouchers_payload(sales: list, receipts: list) -> list:
     """Map parsed vouchers to the backend's TallySyncPayload shape."""
@@ -195,27 +243,58 @@ def _vouchers_payload(sales: list, receipts: list) -> list:
 
 
 async def run_watch(config: dict):
-    """Live mode: poll Tally every watch_interval_seconds and push new
-    vouchers immediately — a bill made in Tally reaches the customer's
-    WhatsApp (PDF + message) within ~2 minutes.
+    """Live LOCAL mode: poll Tally on this laptop every watch_interval_seconds
+    (default 300 = 5 min). A bill made in Tally reaches the customer's WhatsApp
+    (PDF + message) within one cycle — so a 9:00 bill goes out by ~9:05.
 
-    Each cycle fetches only the last 3 days (light on Tally); the backend
-    is idempotent, so repeats are harmless. The nightly --sync still runs
-    the full FY to catch backdated entries.
+    Each cycle fetches only the last 3 days (light on Tally). Every few cycles
+    it ALSO refreshes the authoritative bill-wise outstanding (accuracy). Every
+    Tally call is made sequentially inside THIS single loop, so Tally (whose
+    HTTP server is single-threaded) never receives concurrent/overlapping
+    requests — the main cause of it wedging.
     """
-    interval = int(config.get('watch_interval_seconds', 120) or 120)
+    interval = int(config.get('watch_interval_seconds', 300) or 300)
     company = config['company_name']
-    log_and_print(f"WATCH MODE: checking Tally every {interval}s for new bills/payments. Ctrl+C to stop.")
+    # Make sure the Tally PDF pickup folder exists (the TDL exports bills here).
+    pdf_dir = config.get('bill_pdf_dir', '')
+    if pdf_dir:
+        try:
+            os.makedirs(pdf_dir, exist_ok=True)
+        except Exception as e:
+            log_and_print(f"Could not create bill_pdf_dir {pdf_dir}: {e}", is_error=True)
+    # Full outstanding sync every N cycles. Default 1 = EVERY cycle, so the
+    # dashboard mirrors live Tally every 5 min (new bills + every party's exact
+    # amount/dates). All Tally calls stay sequential inside this one loop, so
+    # Tally never receives concurrent requests (its server is single-threaded).
+    refresh_cycles = max(1, int(config.get('refresh_every_cycles', 1) or 1))
+    log_and_print(f"WATCH MODE (local): every {interval}s -> deliver new bills + full "
+                  f"outstanding sync (every {refresh_cycles} cycle). Ctrl+C to stop.")
 
     failures = 0
+    cycle = 0
     while True:
-        today = date.today()
-        frm = (today - timedelta(days=2)).strftime('%Y%m%d')
+        stamp = datetime.now().strftime('%H:%M:%S')
         try:
+            # Accuracy refresh on first cycle and periodically — sequential, so
+            # it never overlaps the light check below.
+            if cycle % refresh_cycles == 0:
+                await run_apply_outstanding(config)
+
+            today = date.today()
+            frm = (today - timedelta(days=2)).strftime('%Y%m%d')
             xml = await fetch_and_parse(
                 config, tally_xml.build_voucher_register_query(company, frm, today.strftime('%Y%m%d')))
             r = tally_xml.parse_vouchers(xml)
             vouchers = _vouchers_payload(r['sales'], r['receipts'])
+            # Attach Tally's own exported PDFs (from the pickup folder), and
+            # remember each PDF's source path for cleanup after it is sent.
+            _attach_tally_pdfs(vouchers, pdf_dir)
+            pdf_srcs = {}
+            for v in vouchers:
+                src = v.pop('_pdf_src', None)   # keep it OUT of the wire payload
+                if src:
+                    pdf_srcs[v.get('voucher_number')] = src
+            new_bills = payments = 0
             if vouchers:
                 payload = {
                     "business_id": config['business_id'],
@@ -225,19 +304,122 @@ async def run_watch(config: dict):
                     "vouchers": vouchers,
                 }
                 result = await send_to_backend(config['backend_url'], '/tally/sync', config['agent_token'], payload)
-                if result.get('new_bills') or result.get('receipts_processed'):
-                    log_and_print(
-                        f"NEW: {result.get('new_bills', 0)} bill(s) sent to WhatsApp, "
-                        f"{result.get('receipts_processed', 0)} payment(s) applied.")
+                new_bills = result.get('new_bills', 0)
+                payments = result.get('receipts_processed', 0)
+                # Move sent bills' PDFs into <folder>/sent so the pickup folder
+                # stays clean — no re-upload, no stale file matching a later bill.
+                delivered = set(result.get('delivered') or [])
+                if delivered and pdf_dir and pdf_srcs:
+                    sent_dir = os.path.join(pdf_dir, 'sent')
+                    try:
+                        os.makedirs(sent_dir, exist_ok=True)
+                        for vnum in delivered:
+                            src = pdf_srcs.get(vnum)
+                            if src and os.path.exists(src):
+                                shutil.move(src, os.path.join(sent_dir, os.path.basename(src)))
+                    except Exception as e:
+                        log_and_print(f"PDF cleanup skipped: {e}", is_error=True)
+            # Heartbeat every cycle so the Status log SHOWS the sync running.
+            log_and_print(f"[{stamp}] Tally checked (local) - {new_bills} new bill(s) sent, {payments} payment(s).")
             failures = 0
         except KeyboardInterrupt:
             raise
         except Exception as e:
             failures += 1
-            log_and_print(f"Watch cycle failed ({e}) — retrying in {interval}s", is_error=True)
+            log_and_print(f"[{stamp}] Watch cycle failed ({e}) - retry in {interval}s", is_error=True)
             if failures in (5, 50):  # don't spam; nudge at 10min and ~2h of failures
                 log_and_print("Tally or backend unreachable for a while — check they are running.", is_error=True)
+        cycle += 1
         await asyncio.sleep(interval)
+
+
+async def run_check_outstanding(config: dict):
+    """PREVIEW: pull Tally's bill-by-bill OUTSTANDING and print per-party
+    totals, so we can confirm the amounts match Tally before wiring this
+    authoritative source into the dashboard. Changes nothing."""
+    company = config['company_name']
+    today = date.today()
+    log_and_print("Fetching bill-by-bill outstanding from Tally (PREVIEW — nothing will change)...")
+
+    groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
+    debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
+    masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
+    debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
+    debtor_names = {d['name'] for d in debtors}
+    ledger_close = {d['name']: d.get('current_outstanding', 0) for d in debtors}
+
+    bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
+    bills = tally_xml.parse_bills(bills_xml, debtor_names)
+
+    if not bills:
+        log_and_print(
+            "No bill-by-bill data came back. The ledgers may not 'maintain balances "
+            "bill-by-bill'. Tell me — we can fall back to each ledger's ClosingBalance "
+            "(accurate total, but no per-bill dates).", is_error=True)
+        return
+
+    from collections import defaultdict
+    by_party: dict = defaultdict(list)
+    for b in bills:
+        by_party[b['party']].append(b)
+
+    total = sum(b['amount'] for b in bills)
+    ledger_total = sum(v for v in ledger_close.values() if v and v > 0)
+    log_and_print(f"Got {len(bills)} open bills across {len(by_party)} parties.")
+    log_and_print(f"TOTAL outstanding (bill-wise) = {total:,.0f}   |   ledger ClosingBalance total = {ledger_total:,.0f}")
+    log_and_print("Top 15 parties (bill-wise total; flag if it disagrees with ledger closing):")
+    ranked = sorted(by_party.items(), key=lambda kv: sum(x['amount'] for x in kv[1]), reverse=True)
+    for party, bl in ranked[:15]:
+        s = sum(x['amount'] for x in bl)
+        close = ledger_close.get(party, 0)
+        flag = "" if abs(s - close) < 1 else f"   << ledger says {close:,.0f}"
+        log_and_print(f"  {party[:36]:36} {s:>12,.0f}  ({len(bl)} bills){flag}")
+    p, bl = ranked[0]
+    log_and_print(f"Sample bills for '{p}':")
+    for x in sorted(bl, key=lambda z: z['bill_date'] or '')[:8]:
+        try:
+            od = (today - datetime.strptime(x['due_date'], '%Y-%m-%d').date()).days if x['due_date'] else '?'
+        except ValueError:
+            od = '?'
+        log_and_print(f"    ref={str(x['bill_ref'])[:16]:16} date={x['bill_date']} "
+                      f"amt={x['amount']:>10,.0f} credit={x['credit_days']} overdue={od}d")
+    log_and_print("PREVIEW done — nothing changed. Verify PINEMA/MAHALAKSHMI totals match Tally, then we wire it in.")
+
+
+async def run_apply_outstanding(config: dict):
+    """Push Tally's bill-by-bill outstanding to the backend as the source of
+    truth for amounts + dates (fixes receipt-capture drift). Runs at the end
+    of --sync and via --refresh-outstanding."""
+    company = config['company_name']
+    groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
+    debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
+    masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
+    debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
+    debtor_names = sorted({d['name'] for d in debtors})
+
+    bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
+    bills = tally_xml.parse_bills(bills_xml, set(debtor_names))
+    if not bills:
+        log_and_print("No bill-by-bill data from Tally — outstanding NOT refreshed "
+                      "(ledgers may not maintain balances bill-by-bill).", is_error=True)
+        return
+
+    payload = {
+        "business_id": config['business_id'],
+        "agent_token": config['agent_token'],
+        "company_name": company,
+        "bills": [{
+            "party_name": b['party'], "bill_ref": b['bill_ref'],
+            "bill_date": b['bill_date'], "due_date": b['due_date'], "amount": b['amount'],
+        } for b in bills],
+        "all_parties": debtor_names,
+    }
+    log_and_print(f"Refreshing outstanding from Tally bill-wise: {len(bills)} bills...")
+    try:
+        result = await send_to_backend(config['backend_url'], '/tally/outstandings', config['agent_token'], payload)
+        log_and_print(f"Outstanding refreshed: {result}")
+    except Exception as e:
+        log_and_print(f"Failed to refresh outstanding: {e}", is_error=True)
 
 
 async def auto_discover_tally(config: dict) -> tuple[str, int]:
@@ -275,11 +457,13 @@ def main():
     parser.add_argument('--import-masters', action='store_true', help='Run one-time import of all debtors')
     parser.add_argument('--sync', action='store_true', help='Run daily sync of Day Book')
     parser.add_argument('--watch', action='store_true', help='Live mode: push new bills to WhatsApp within ~2 minutes')
+    parser.add_argument('--check-outstanding', action='store_true', help='PREVIEW bill-by-bill outstanding from Tally (changes nothing)')
+    parser.add_argument('--refresh-outstanding', action='store_true', help='Apply Tally bill-by-bill outstanding as the source of truth (accurate amounts + dates)')
 
     args = parser.parse_args()
 
-    if not args.import_masters and not args.sync and not args.watch:
-        print("Please specify --import-masters, --sync or --watch")
+    if not (args.import_masters or args.sync or args.watch or args.check_outstanding or args.refresh_outstanding):
+        print("Please specify --import-masters, --sync, --watch, --check-outstanding or --refresh-outstanding")
         sys.exit(1)
 
     config = load_config()
@@ -295,6 +479,10 @@ def main():
 
     asyncio.run(check_company(config))
 
+    if args.check_outstanding:
+        asyncio.run(run_check_outstanding(config))
+    if args.refresh_outstanding:
+        asyncio.run(run_apply_outstanding(config))
     if args.import_masters:
         asyncio.run(run_import(config))
     if args.sync:

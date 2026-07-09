@@ -40,14 +40,29 @@ def _ensure_bucket() -> None:
             )
             log.info("Created Supabase Storage bucket: %s", BUCKET_NAME)
         except Exception as exc:
-            # Bucket may already exist from a concurrent call — not fatal.
+            # Bucket may already exist from a concurrent call - not fatal.
             log.warning("Bucket create returned: %s", exc)
+
+
+async def upload_pdf_base64(bill_id: str, invoice_number: str, pdf_b64: str) -> str:
+    """Upload a ready PDF (e.g. Tally's own exported invoice) to Storage and
+    return its public URL. Used when the agent attaches the real Tally PDF."""
+    import base64 as _b64
+    pdf_bytes = _b64.b64decode(pdf_b64)
+    _ensure_bucket()
+    db = require_db()
+    file_path = f"{bill_id or invoice_number}/{invoice_number}.pdf"
+    db.storage.from_(BUCKET_NAME).upload(
+        file_path, pdf_bytes,
+        file_options={"content-type": "application/pdf", "upsert": "true"},
+    )
+    return db.storage.from_(BUCKET_NAME).get_public_url(file_path)
 
 
 def _format_date(d: date | str | None) -> str:
     """Render a date in Indian DD-MM-YYYY format."""
     if d is None:
-        return "—"
+        return "-"
     if isinstance(d, str):
         return d
     return d.strftime("%d-%m-%Y")
@@ -101,7 +116,7 @@ async def generate_invoice_pdf(
         description=description,
     )
 
-    # WeasyPrint HTML → PDF (synchronous — runs in thread if needed).
+    # WeasyPrint HTML → PDF (synchronous - runs in thread if needed).
     # Imported lazily: WeasyPrint dlopens GTK/Pango/Cairo at import time,
     # which fails on a bare Windows box. Railway's buildpack ships them.
     try:
@@ -109,7 +124,7 @@ async def generate_invoice_pdf(
     except OSError as exc:
         raise RuntimeError(
             "WeasyPrint native libraries (GTK3/Pango/Cairo) are not installed "
-            "on this machine — PDF generation unavailable. On Windows install "
+            "on this machine - PDF generation unavailable. On Windows install "
             "the GTK3 runtime; on Railway this works out of the box."
         ) from exc
     pdf_bytes: bytes = HTML(string=html_str).write_pdf()

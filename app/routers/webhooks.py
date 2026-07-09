@@ -1,8 +1,8 @@
 """Inbound WhatsApp webhook from AiSensy.
 
 Two endpoints:
-  GET  /webhooks/aisensy  — Meta verification handshake (required before AiSensy connects)
-  POST /webhooks/aisensy  — receive inbound messages with dedup + always-200
+  GET  /webhooks/aisensy  - Meta verification handshake (required before AiSensy connects)
+  POST /webhooks/aisensy  - receive inbound messages with dedup + always-200
 
 Owners and customers reply with simple commands; AiSensy forwards them here.
 We normalise the payload, then route to the bot command handler:
@@ -93,7 +93,7 @@ async def verify_webhook(
 async def aisensy_inbound(request: Request):
     """Receive and process an inbound WhatsApp message.
 
-    ALWAYS returns 200 — even on internal errors. AiSensy retries on non-200,
+    ALWAYS returns 200 - even on internal errors. AiSensy retries on non-200,
     which causes duplicate processing. Errors are logged, never surfaced.
     """
     try:
@@ -104,7 +104,7 @@ async def aisensy_inbound(request: Request):
             )
             if token != settings.aisensy_webhook_secret:
                 log.warning("Rejected webhook with bad secret")
-                return {"ok": True}  # Still 200 — don't trigger retry
+                return {"ok": True}  # Still 200 - don't trigger retry
 
         body = await request.json()
         sender, text, message_id = _extract(body)
@@ -127,7 +127,7 @@ async def aisensy_inbound(request: Request):
                 .execute()
             )
             if existing.data:
-                log.info("Duplicate webhook messageId=%s — skipping", message_id)
+                log.info("Duplicate webhook messageId=%s - skipping", message_id)
                 return {"ok": True, "duplicate": True}
 
         reply = await bot.handle(
@@ -137,6 +137,6 @@ async def aisensy_inbound(request: Request):
         return {"ok": True, "reply": reply}
 
     except Exception:
-        # Log but NEVER return non-200 — AiSensy will retry
-        log.exception("Webhook processing error — returning 200 anyway")
+        # Log but NEVER return non-200 - AiSensy will retry
+        log.exception("Webhook processing error - returning 200 anyway")
         return {"ok": True, "error": "internal"}

@@ -1,4 +1,4 @@
-"""EOD 9pm digest — sends daily business summary to the owner.
+"""EOD 9pm digest - sends daily business summary to the owner.
 
 Runs at 9 PM IST daily via APScheduler.  Queries 5 metrics for each
 business, skips if all are zero (saves ₹0.145), appends a stale-sync
@@ -17,7 +17,7 @@ from app.services.templates import inr, render
 
 log = logging.getLogger(__name__)
 
-# IST offset — avoids pytz dependency
+# IST offset - avoids pytz dependency
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -66,7 +66,7 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
     # ── 2. Today's payments: unique payers + approximate value ────────
     #    Count: distinct client_ids with payment_confirmation today.
     #    Value: sum paid_amount of bills updated today with paid_amount > 0.
-    #    (Approximate — a proper payments ledger would fix this in a future PR.)
+    #    (Approximate - a proper payments ledger would fix this in a future PR.)
     pay_msgs_resp = (
         db.table("messages")
         .select("client_id")
@@ -120,12 +120,12 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
     )
     oldest = oldest_resp.data[0] if oldest_resp.data else None
     if oldest:
-        oldest_name = (oldest.get("clients") or {}).get("name", "—")
+        oldest_name = (oldest.get("clients") or {}).get("name", "-")
         oldest_amount = Decimal(str(oldest["outstanding"]))
         oldest_date = date.fromisoformat(str(oldest["invoice_date"]))
         oldest_days = (today - oldest_date).days
     else:
-        oldest_name = "—"
+        oldest_name = "-"
         oldest_amount = Decimal(0)
         oldest_days = 0
 
@@ -149,7 +149,7 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
         and oldest_days == 0
     )
     if all_zero:
-        log.info("EOD digest for %s — all zeros, skipping send", business_id)
+        log.info("EOD digest for %s - all zeros, skipping send", business_id)
         return None
 
     # ── Check stale sync ──────────────────────────────────────────────
@@ -167,9 +167,9 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
             last_sync_resp.data[0]["synced_at"].replace("Z", "+00:00")
         )
         if last_synced.astimezone(IST).date() != today:
-            stale_warning = "\n\nAaj Tally sync nahi hua — data purana ho sakta hai."
+            stale_warning = "\n\nAaj Tally sync nahi hua. Data purana ho sakta hai."
     else:
-        stale_warning = "\n\nTally sync kabhi nahi hua — pehle agent install karein."
+        stale_warning = "\n\nTally sync kabhi nahi hua. Pehle agent install karein."
 
     # ── Build template params ─────────────────────────────────────────
     biz_name = business.get("business_name") or "Business"
@@ -219,7 +219,7 @@ async def run() -> None:
         .execute()
     )
     businesses = biz_resp.data or []
-    log.info("EOD digest — processing %d businesses", len(businesses))
+    log.info("EOD digest - processing %d businesses", len(businesses))
 
     from app.services import subscription as subs
 
@@ -272,15 +272,15 @@ async def run() -> None:
                     from datetime import date as _date
                     lines = ["\n\n📞 Kal inko call karein:"]
                     for i, b in enumerate(top_resp.data, 1):
-                        nm = (b.get("clients") or {}).get("name", "—")
+                        nm = (b.get("clients") or {}).get("name", "-")
                         amt = _inr(b["outstanding"])
                         days = ""
                         if b.get("due_date"):
                             days = f" ({( _date.today() - _date.fromisoformat(str(b['due_date'])) ).days} din)"
-                        lines.append(f"{i}. {nm} — {amt}{days}")
+                        lines.append(f"{i}. {nm}: {amt}{days}")
                     action_lines = "\n".join(lines)
             except Exception:
-                log.exception("Action list build failed — digest continues")
+                log.exception("Action list build failed - digest continues")
 
             renewal_note = ""
             if sub_status == "grace":
@@ -307,11 +307,11 @@ async def run() -> None:
         except Exception:
             log.exception("EOD digest failed for business %s", biz["id"])
 
-    log.info("EOD digest complete — sent=%d, skipped=%d", sent, skipped)
+    log.info("EOD digest complete - sent=%d, skipped=%d", sent, skipped)
 
 
 # ======================================================================
-# Preview (GET /eod/{business_id} — no send)
+# Preview (GET /eod/{business_id} - no send)
 # ======================================================================
 
 async def preview(business_id: str) -> dict:
@@ -333,7 +333,7 @@ async def preview(business_id: str) -> dict:
     params = await _build_digest(business_id, biz_resp.data)
     if params is None:
         return {
-            "message": "All values are zero — digest would not be sent tonight.",
+            "message": "All values are zero - digest would not be sent tonight.",
             "would_send": False,
         }
 

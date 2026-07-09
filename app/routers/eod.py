@@ -1,7 +1,7 @@
 """EOD digest preview and manual trigger.
 
-GET  /eod/{business_id}       — preview tonight's digest without sending
-POST /eod/{business_id}/send  — trigger digest immediately (demos/testing)
+GET  /eod/{business_id}       - preview tonight's digest without sending
+POST /eod/{business_id}/send  - trigger digest immediately (demos/testing)
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ async def send_digest(business_id: str):
     if params is None:
         return {
             "sent": False,
-            "reason": "All values are zero — no digest sent.",
+            "reason": "All values are zero - no digest sent.",
         }
 
     from app.models import Lang, MessageType, Plan

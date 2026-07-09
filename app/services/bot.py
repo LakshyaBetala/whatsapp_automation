@@ -3,7 +3,7 @@
 Handles inbound messages from business owners and their customers.
 Commands are parsed with regex first. Gemini fallback is Phase 3.
 
-# Bot replies are always Hindi — owner language is Hindi by default.
+# Bot replies are always Hindi - owner language is Hindi by default.
 # Client language (Gujarati, Marathi) is only for outbound reminders.
 
 Security rule (from CTO audit):
@@ -18,13 +18,57 @@ from decimal import Decimal
 
 from datetime import date
 
+from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
-from app.services.templates import inr
+from app.services.templates import apply_discount, inr
+
+
+async def _forward_to_team(business_id: str, business_name: str, from_number: str, message: str) -> str:
+    """Forward an owner's support request to the ASVA product team."""
+    team = settings.product_team_number
+    if not team:
+        return "Aapki baat note kar li. Team jaldi aapse contact karegi."
+    try:
+        await whatsapp.send_message(
+            business_id=business_id,
+            to_number=team,
+            message_text=f"[ASVA support] {business_name} ({from_number}): {message}",
+            message_type=MessageType.owner_alert,
+            channel="platform",
+        )
+    except Exception:
+        log.exception("Failed to forward support message to team")
+    return "Aapka message ASVA team tak pahuncha diya. Jaldi jawab milega."
 
 log = logging.getLogger(__name__)
+
+# Greeting / help keywords that should ALWAYS get a reply, even from a number
+# we do not recognise (so a new customer or a pilot tester is never ghosted).
+_GREETING = ("HI", "HELLO", "HELP", "MENU", "START", "?", "HEY", "NAMASTE")
+
+
+def _last10(n: str) -> str:
+    """Last 10 digits of a phone number - used as a format-agnostic match key
+    so a number stored as 91XXXXXXXXXX still matches +91, 0-prefixed, etc."""
+    d = "".join(c for c in str(n or "") if c.isdigit())
+    return d[-10:] if len(d) >= 10 else ""
+
+
+def _match_row(db, table: str, select: str, from_number: str):
+    """Find a row in `table` whose whatsapp_number matches `from_number`.
+    Exact match first, then a last-10-digit fallback (format drift safety)."""
+    r = db.table(table).select(select).eq("whatsapp_number", from_number).limit(1).execute()
+    if r.data:
+        return r.data[0]
+    last10 = _last10(from_number)
+    if last10:
+        r = db.table(table).select(select).like("whatsapp_number", f"%{last10}").limit(1).execute()
+        if r.data:
+            return r.data[0]
+    return None
 
 
 async def handle(
@@ -46,15 +90,11 @@ async def handle(
     upper = text.upper().strip()
 
     # ── Identify sender: owner or customer? ───────────────────────────
-    biz_resp = (
-        db.table("businesses")
-        .select("id, business_name, plan, whatsapp_number, upi_vpa")
-        .eq("whatsapp_number", from_number)
-        .limit(1)
-        .execute()
-    )
-    is_owner = bool(biz_resp.data)
-    business = biz_resp.data[0] if is_owner else None
+    business = _match_row(
+        db, "businesses",
+        "id, business_name, plan, whatsapp_number, upi_vpa, discount_pct, msg_language",
+        from_number)
+    is_owner = business is not None
 
     if is_owner:
         business_id = business["id"]
@@ -97,18 +137,18 @@ async def handle(
                 business_id, client_name, Plan(business["plan"])
             )
 
-        # ── CHECK <name> — live balance, matches Tally to the rupee ──
+        # ── CHECK <name> - live balance, matches Tally to the rupee ──
         check_match = re.match(r"CHECK\s+(.+)", upper)
         if check_match:
             return await _handle_check(business_id, check_match.group(1).strip())
 
-        # ── TERMS <name> <days> — set a party's credit period ────────
+        # ── TERMS <name> <days> - set a party's credit period ────────
         terms_match = re.match(r"TERMS\s+(.+?)\s+(\d{1,3})$", upper)
         if terms_match:
             return await _handle_terms(
                 business_id, terms_match.group(1).strip(), int(terms_match.group(2)))
 
-        # ── REMIND — owner decides who gets reminded, right now ──────
+        # ── REMIND - owner decides who gets reminded, right now ──────
         #    REMIND <naam>      one party (consolidated bills + QR)
         #    REMIND TOP [n]     n biggest outstanding parties
         #    REMIND OLDEST [n]  n longest-pending parties
@@ -116,39 +156,49 @@ async def handle(
         if remind_match:
             return await _handle_remind(business, remind_match.group(1).strip())
 
+        # ── TEAM / SUPPORT <message> - reach the ASVA product team ───
+        team_match = re.match(r"(?:TEAM|SUPPORT|PROBLEM|MADAD)\s+(.+)", text.strip(), re.IGNORECASE)
+        if team_match:
+            return await _forward_to_team(
+                business_id, business.get("business_name", ""), from_number, team_match.group(1).strip())
+
         # ── HELP / unrecognised ──────────────────────────────────────
-        prefix = "" if upper in ("HELP", "MENU", "?") else "Command samajh nahi aaya.\n\n"
+        prefix = "" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START") else "Ye command samajh nahi aaya.\n\n"
         return (
             prefix
-            + "Aap yeh commands bhej sakte hain:\n\n"
-            "📸 Bill ki photo bhejo : naya bill banega (OCR)\n"
+            + "Namaste! ASVA aapki udhaari recover karne me madad karta hai.\n\n"
+            "Ye likhkar bhejein:\n"
             "LIST : poori baaki list\n"
             "CHECK Ramesh : ek party ka hisaab\n"
-            "REMIND Ramesh : usko abhi reminder bhejo\n"
+            "REMIND Ramesh : usko abhi reminder\n"
             "REMIND TOP 5 : sabse bade 5 baaki walon ko\n"
-            "REMIND OLDEST 5 : sabse purane 5 ko\n"
-            "TERMS Ramesh 90 : uska credit period 90 din karo\n"
-            "STOP Ramesh : uske reminders band\n"
-            "START Ramesh : reminders phir chalu\n"
-            "PAID Ramesh : uska payment mark karo\n\n"
-            "(Ramesh ki jagah apni party ka naam likhein)"
+            "PAID Ramesh : uska payment mark karein\n"
+            "TERMS Ramesh 90 : credit period 90 din\n"
+            "STOP Ramesh / START Ramesh : reminder band ya chalu\n"
+            "Bill ki photo bhejein : naya bill ban jayega\n\n"
+            "Koi dikkat ho? likhein: TEAM aapki baat\n"
+            "(Ramesh ki jagah apni party ka naam likhein.)"
         )
 
     # ── Customer message (not owner) ──────────────────────────────────
-    # Look up which business this customer belongs to
-    client_resp = (
-        db.table("clients")
-        .select("id, name, business_id")
-        .eq("whatsapp_number", from_number)
-        .limit(1)
-        .execute()
-    )
+    # Look up which business this customer belongs to (format-agnostic match)
+    client = _match_row(db, "clients", "id, name, business_id", from_number)
 
-    if not client_resp.data:
+    if not client:
+        # Unknown sender. Reply ONLY to an explicit greeting/help keyword so a
+        # new customer or a pilot tester is never ghosted - but stay silent on
+        # everything else, so the bot never auto-replies to ordinary chatter
+        # (which would be intrusive and risk the number being flagged).
+        if upper in _GREETING:
+            return (
+                "Namaste! Main is dukaan ka WhatsApp assistant hoon.\n\n"
+                "Apna hisaab dekhne ke liye HISAB bhejein.\n"
+                "Payment ki khabar dene ke liye PAID bhejein.\n\n"
+                "Aapka number abhi hamare records me nahi mila. Dukaan se baat "
+                "karne ke liye TEAM likhkar apni baat bhejein."
+            )
         log.info("Message from unknown number %s: %s", from_number, text)
-        return ""  # Don't reply to unknown numbers
-
-    client = client_resp.data[0]
+        return ""  # stay silent on non-greeting messages from unknown numbers
 
     # ── Customer says PAID ────────────────────────────────────────────
     if upper == "PAID" or upper.startswith("PAID"):
@@ -158,14 +208,25 @@ async def handle(
     #    shop's normal chat, so the bot must stay silent on normal talk) ─
     if upper in ("HISAB", "HISAAB", "BALANCE", "BAKI", "BAAKI", "1"):
         return await _customer_statement(client)
-    if upper in ("MENU", "HELP", "?"):
+    # ── Customer support: forward to the SHOP owner (not the product team) ─
+    cteam = re.match(r"(?:TEAM|SUPPORT|PROBLEM|MADAD|COMPLAINT)\s+(.+)", text.strip(), re.IGNORECASE)
+    if cteam:
+        try:
+            await whatsapp.notify_owner(
+                client["business_id"],
+                f"{client['name']} ({from_number}) ne message bheja: {cteam.group(1).strip()}")
+        except Exception:
+            log.exception("Failed to forward customer message to owner")
+        return "Aapki baat dukaan tak pahuncha di. Jaldi jawab milega."
+
+    if upper in ("MENU", "HELP", "?", "HI", "HELLO"):
         return (
-            f"Namaste {client['name']} ji! 🙏\n"
-            "Main aapki madad kar sakta hoon:\n\n"
-            "HISAB likhein: apna poora baaki dekhein\n"
-            "PAID likhein: payment ki khabar dein\n\n"
-            "Kisi aur baat ke liye seedha message karein,\n"
-            "dukaan se aapko jawab milega."
+            f"Namaste {client['name']} ji!\n"
+            "Main is dukaan ka assistant hoon.\n\n"
+            "HISAB : apna poora baaki dekhein\n"
+            "PAID : payment ki khabar dein\n\n"
+            "Koi sawaal ho to likhein: TEAM aapki baat\n"
+            "Dukaan tak pahuncha denge."
         )
 
     # Stay silent on everything else: a human will reply
@@ -230,7 +291,7 @@ async def _handle_photo_bill(business: dict, media_b64: str, media_type: str) ->
     if not ocr.is_configured():
         return (
             "Photo bill feature abhi setup nahi hua hai.\n"
-            "(GEMINI_API_KEY chahiye — free milta hai aistudio.google.com se.)"
+            "(GEMINI_API_KEY chahiye. Free milta hai aistudio.google.com se.)"
         )
 
     extract = await ocr.extract_bill(media_b64, media_type)
@@ -328,7 +389,7 @@ async def _confirm_photo_bill(business: dict) -> str:
         }).execute()
         client = new_client.data[0]
 
-    # Create the bill (source=photo) — enters the reminder cadence like any bill
+    # Create the bill (source=photo) - enters the reminder cadence like any bill
     invoice_date = date.fromisoformat(str(pb["bill_date"])) if pb.get("bill_date") else date.today()
     credit_days = client.get("credit_days") or 30
     invoice_number = pb.get("bill_number") or f"PH-{pb['id'][:6].upper()}"
@@ -490,7 +551,7 @@ async def _handle_start(business_id: str, client_name: str) -> str:
 
 
 async def _handle_check(business_id: str, client_name: str) -> str:
-    """Instant per-party statement — the anti-'sync is broken' command.
+    """Instant per-party statement - the anti-'sync is broken' command.
 
     Answers with open bills + total + last sync time so the owner can
     verify against Tally to the rupee, any time, in 5 seconds.
@@ -546,7 +607,7 @@ async def _handle_check(business_id: str, client_name: str) -> str:
     lines.append(f"WhatsApp: {phone if phone else '❌ number nahi hai'}")
     lines.append(f"Reminders: {'chalu' if client.get('reminders_enabled', True) else 'band'}")
 
-    # Last sync time — proof of freshness
+    # Last sync time - proof of freshness
     sync_resp = (
         db.table("tally_syncs")
         .select("synced_at")
@@ -618,12 +679,17 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
             lines.append(f"• ...aur {len(bills) - 4} bills")
         lines.append(f"Total baaki: {inr(total)}")
 
+    # Early-payment discount: QR + line reflect the discounted amount.
+    pay_amount, discount_line = apply_discount(
+        total, business.get("discount_pct"), business.get("msg_language") or "hinglish")
     vpa = business.get("upi_vpa")
     qr_b64 = None
     if vpa:
-        link = upi.upi_link(vpa, biz_name, total, f"{len(bills)} bills")
+        link = upi.upi_link(vpa, biz_name, pay_amount, f"{len(bills)} bills")
         qr_b64 = upi.qr_png_base64(link)
         lines += ["", f"Payment: {link}"]
+    if discount_line:
+        lines += ["", discount_line]
     lines += ["", "Payment ho gaya ho to PAID reply karein."]
 
     result = await whatsapp.send_template(
@@ -647,7 +713,7 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
 
 
 async def _handle_remind(business: dict, arg: str) -> str:
-    """REMIND <naam> | REMIND TOP [n] | REMIND OLDEST [n] — the owner
+    """REMIND <naam> | REMIND TOP [n] | REMIND OLDEST [n] - the owner
     chooses exactly who gets nudged and in which order."""
     business_id = business["id"]
     agg = await _open_bills_by_client(business_id)
@@ -696,7 +762,7 @@ async def _handle_remind(business: dict, arg: str) -> str:
 async def _handle_paid_owner(
     business_id: str, client_name: str, plan: Plan
 ) -> str:
-    """Owner confirmed payment — mark paid immediately."""
+    """Owner confirmed payment - mark paid immediately."""
     db = require_db()
     clients_resp = (
         db.table("clients")
@@ -831,7 +897,7 @@ async def _customer_statement(client: dict) -> str:
 
 
 async def _handle_paid_customer(client: dict) -> str:
-    """Customer claimed payment — do NOT auto-mark. Notify owner to confirm.
+    """Customer claimed payment - do NOT auto-mark. Notify owner to confirm.
 
     Security: anyone who knows the WhatsApp number could send PAID.
     Only the owner can actually mark bills as paid.
@@ -839,10 +905,15 @@ async def _handle_paid_customer(client: dict) -> str:
     db = require_db()
     business_id = client["business_id"]
 
-    # Notify owner to confirm
+    # Notify owner on the company number. Tally is the source of truth now, so
+    # nudge them to record it there - the next sync updates the dashboard/amount
+    # automatically (works for partial payments too). The quick bot command
+    # still exists as a fallback.
     await whatsapp.notify_owner(
         business_id,
-        f"{client['name']} ne PAID reply kiya. Confirm karo: PAID {client['name']}",
+        f"{client['name']} ne 'PAID' bola hai. Paisa aaya ho to Tally me receipt "
+        f"entry kar dein. Dashboard sync se apne aap update ho jayega (partial "
+        f"payment bhi sahi dikhega). Ya yahan 'PAID {client['name']}' bhej ke turant mark karein.",
     )
 
     return (

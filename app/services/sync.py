@@ -1,13 +1,13 @@
-"""Tally sync ingestion — vouchers, receipts, and outstanding data.
+"""Tally sync ingestion - vouchers, receipts, and outstanding data.
 
 Called by the ``POST /tally/sync`` endpoint when the Windows agent pushes data.
 
 Design decisions (from CTO audit):
-  - Vouchers: UPSERT on (business_id, tally_voucher_number) — never duplicate bills
+  - Vouchers: UPSERT on (business_id, tally_voucher_number) - never duplicate bills
   - Receipts: apply payments via payments.py FIFO logic
   - Import mode: auto-create clients (via outstanding.py)
   - Regular sync mode: if ledger_name has no matching client, LOG the mismatch
-    and skip — do NOT auto-create. Owner resolves mismatches manually.
+    and skip - do NOT auto-create. Owner resolves mismatches manually.
 """
 from __future__ import annotations
 
@@ -59,9 +59,9 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
     """Process a sync payload from the Tally Windows agent.
 
     Handles three data types in one call:
-      - ``vouchers`` — new sales invoices → upsert into ``bills``
-      - ``receipts`` — payment receipts → apply via FIFO
-      - ``outstanding`` — bulk outstanding snapshot (import mode only)
+      - ``vouchers`` - new sales invoices → upsert into ``bills``
+      - ``receipts`` - payment receipts → apply via FIFO
+      - ``outstanding`` - bulk outstanding snapshot (import mode only)
     """
     db = require_db()
     is_import = payload.sync_type.value == "import"
@@ -108,11 +108,11 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
                     )
                     continue
             else:
-                # Regular sync — log mismatch, do NOT auto-create
+                # Regular sync - log mismatch, do NOT auto-create
                 error_msg = f"unmatched_ledger:{voucher.ledger_name}"
                 errors.append(error_msg)
                 log.warning(
-                    "Unmatched ledger %r in business %s — skipping voucher %s",
+                    "Unmatched ledger %r in business %s - skipping voucher %s",
                     voucher.ledger_name,
                     payload.business_id,
                     voucher.voucher_number,
@@ -136,7 +136,7 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
         }
 
         try:
-            # UPSERT — prevents duplicates on re-sync
+            # UPSERT - prevents duplicates on re-sync
             db.table("bills").upsert(
                 bill_data,
                 on_conflict="business_id,tally_voucher_number",
@@ -144,7 +144,7 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
             bills_created += 1
         except Exception as exc:
             errors.append(f"Bill upsert failed for {voucher.voucher_number}: {exc}")
-            log.error("Bill upsert failed: %s — %s", voucher.voucher_number, exc)
+            log.error("Bill upsert failed: %s - %s", voucher.voucher_number, exc)
 
     # ── Handle payment receipts ───────────────────────────────────────
     for receipt in payload.receipts:
@@ -152,9 +152,9 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
             payload.business_id, receipt.ledger_name
         )
         if not client:
-            errors.append(f"Receipt — unmatched_ledger:{receipt.ledger_name}")
+            errors.append(f"Receipt - unmatched_ledger:{receipt.ledger_name}")
             log.warning(
-                "Receipt for unmatched ledger %r — skipping",
+                "Receipt for unmatched ledger %r - skipping",
                 receipt.ledger_name,
             )
             continue
@@ -171,7 +171,7 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
         except Exception as exc:
             errors.append(f"Payment apply failed for {receipt.ledger_name}: {exc}")
             log.error(
-                "Payment apply failed: %s — %s", receipt.ledger_name, exc
+                "Payment apply failed: %s - %s", receipt.ledger_name, exc
             )
 
     # ── Audit log ─────────────────────────────────────────────────────

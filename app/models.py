@@ -1,7 +1,7 @@
 """Enums and Pydantic schemas shared across the app.
 
 The enum *values* mirror the Postgres enum types in
-migrations/001_initial_schema.sql — keep them in sync.
+migrations/001_initial_schema.sql - keep them in sync.
 """
 from __future__ import annotations
 
@@ -55,13 +55,51 @@ class SyncType(str, Enum):
     pnl = "pnl"
 
 
-# Plan limits — mirror plan_max_* SQL functions.
+# Plan limits + monthly price (INR). The message limit is enforced atomically
+# in Postgres via increment_usage_if_allowed(p_limit=...), where p_limit is
+# read from here - so these numbers ARE the live cap. Client caps are set high
+# enough not to block Tally imports.
+# Plans are metered by ACTIVE DEBTORS - parties with an open bill + a WhatsApp
+# number that ASVA actually reminds. That is what the owner understands ("kitne
+# khaate baaki hain") AND what drives cost (messages ~= debtors x touches), so
+# revenue and cost scale together and margin stays put at any shop size.
+#
+# Priced at ~Rs2.3 / active-debtor / month. On paid Meta (~Rs0.15/utility msg,
+# ~5-6 touches/debtor) this holds ~55% margin worst-case and ~70%+ typical; on
+# OpenWA today the marginal cost is ~0 (near-100% margin).
+#
+# "messages" is a SILENT anti-abuse ceiling (debtors x 8), set well above real
+# use so it never throttles reminders inside a tier. "clients" is uncapped in
+# practice so a full Tally import is never blocked.
+#   Basic  Rs699  -> 300 active debtors
+#   Growth Rs1099 -> 500 active debtors
+#   Pro    Rs1999 -> 1000 active debtors
+#   Max    Rs2999 -> 1300 active debtors
 PLAN_LIMITS: dict[Plan, dict[str, int]] = {
-    Plan.starter: {"clients": 50, "messages": 250},
-    Plan.growth: {"clients": 150, "messages": 750},
-    Plan.pro: {"clients": 250, "messages": 1250},
-    Plan.max: {"clients": 500, "messages": 2500},
+    Plan.starter: {"debtors": 300, "messages": 2400, "clients": 1000000, "price": 699},
+    Plan.growth: {"debtors": 500, "messages": 4000, "clients": 1000000, "price": 1099},
+    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1999},
+    Plan.max: {"debtors": 1300, "messages": 10400, "clients": 1000000, "price": 2999},
 }
+
+# Owner-facing plan labels (the enum values stay stable in the DB).
+PLAN_LABELS: dict[Plan, str] = {
+    Plan.starter: "Basic",
+    Plan.growth: "Growth",
+    Plan.pro: "Pro",
+    Plan.max: "Max",
+}
+
+# Tier order, cheapest first - used to recommend the right plan for a shop.
+PLAN_ORDER: tuple[Plan, ...] = (Plan.starter, Plan.growth, Plan.pro, Plan.max)
+
+
+def recommend_plan(active_debtors: int) -> Plan:
+    """Smallest plan whose debtor cap covers this shop's active debtors."""
+    for p in PLAN_ORDER:
+        if active_debtors <= PLAN_LIMITS[p]["debtors"]:
+            return p
+    return Plan.max
 
 # Reminder cadence (days after due date). Credit period is handled by due_date.
 REMINDER_DAYS: tuple[int, ...] = (7, 15, 30, 45, 60)
@@ -71,7 +109,7 @@ REMINDER_DAYS: tuple[int, ...] = (7, 15, 30, 45, 60)
 class TallyVoucher(BaseModel):
     """A sales voucher the agent detected in Tally."""
     voucher_number: str
-    ledger_name: str                 # debtor — matched to clients.tally_ledger_name
+    ledger_name: str                 # debtor - matched to clients.tally_ledger_name
     amount: Decimal
     date: date
     invoice_number: Optional[str] = None

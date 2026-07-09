@@ -19,7 +19,7 @@ def health():
                 1
             ).execute()
             db_ok = True
-        except Exception:  # noqa: BLE001 — health must never raise
+        except Exception:  # noqa: BLE001 - health must never raise
             db_ok = False
 
     return {
