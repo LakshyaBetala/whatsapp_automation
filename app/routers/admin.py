@@ -43,10 +43,62 @@ def _chunked(items: list, size: int = 100):
         yield items[i:i + size]
 
 
+IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+RELOAD_COOLDOWN_MIN = 10   # "Reload data" may be pressed once per 10 minutes
+
+
+def _parse_ts(raw) -> Optional[_dt.datetime]:
+    """Parse a Postgres timestamptz string into an aware datetime."""
+    if not raw:
+        return None
+    s = str(raw).replace("Z", "+00:00")
+    # Postgres may return microseconds beyond 6 digits or a +00 offset - trim.
+    try:
+        return _dt.datetime.fromisoformat(s)
+    except ValueError:
+        try:
+            return _dt.datetime.fromisoformat(s[:26] + s[-6:] if "+" in s[-6:] else s[:26])
+        except ValueError:
+            return None
+
+
+def _last_synced_at(db, biz_id: str) -> Optional[_dt.datetime]:
+    try:
+        r = (db.table("tally_syncs").select("synced_at")
+             .eq("business_id", biz_id).order("synced_at", desc=True)
+             .limit(1).execute())
+        if r.data:
+            return _parse_ts(r.data[0]["synced_at"])
+    except Exception:
+        pass
+    return None
+
+
+def _fmt_ago(dt: Optional[_dt.datetime]) -> str:
+    if not dt:
+        return "abhi tak nahi"
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    mins = int((now - dt).total_seconds() // 60)
+    if mins < 1:
+        return "abhi abhi"
+    if mins < 60:
+        return f"{mins} min pehle"
+    hrs = mins // 60
+    if hrs < 24:
+        return f"{hrs} ghante pehle"
+    return dt.astimezone(IST).strftime("%d %b, %H:%M")
+
+
 @router.get("/admin", response_class=HTMLResponse)
 async def admin_page(token: str = Query(...)):
     biz = _biz_by_token(token)
     db = require_db()
+
+    synced_dt = _last_synced_at(db, biz["id"])
+    synced_label = _fmt_ago(synced_dt)
+    synced_iso = synced_dt.isoformat() if synced_dt else ""
 
     # All clients (paged) + outstanding totals
     clients: list = []
@@ -243,6 +295,12 @@ async def admin_page(token: str = Query(...)):
  .urec.warn{{color:#a00;font-weight:600}}
  .urec.ok{{color:#346538}}
  .umsg{{margin-top:4px;font-size:.8em;color:#999}}
+ .syncbar{{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:.92em;color:#555;flex-wrap:wrap}}
+ .syncbar b{{color:#222}}
+ #reloadbtn{{padding:6px 14px;font-size:.9em;border:1px solid #0a7d33;color:#0a7d33;background:#fff;border-radius:6px}}
+ #reloadbtn:disabled{{opacity:.5;cursor:default}}
+ #syncmsg{{color:#0a7d33}}
+ .freshchip{{display:none;background:#fbf3db;color:#956400;border:1px solid #f0dfa8;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:.9em}}
  .subtabs{{display:flex;gap:6px;margin:16px 0 4px;border-bottom:2px solid #ddd}}
  .subtabs button{{border:1px solid #ddd;border-bottom:0;background:#f2f2f0;border-radius:8px 8px 0 0;padding:9px 18px;font-weight:600;color:#555}}
  .subtabs button.on{{background:#0a7d33;color:#fff;border-color:#0a7d33}}
@@ -268,6 +326,13 @@ async def admin_page(token: str = Query(...)):
   <div class="ubar"><div class="ufill" style="width:{pct_used}%;background:{bar_color}"></div></div>
   {rec_line}
   <div class="umsg">{used:,} messages sent is month (auto-managed, not a limit you pay per).</div>
+</div>
+
+<div class="syncbar">
+  <span>Tally se sync: <b id="synced">{synced_label}</b> <span style="color:#999">(har 5 min auto)</span></span>
+  <button id="reloadbtn" onclick="reloadData()">&#8635; Reload data</button>
+  <span id="syncmsg"></span>
+  <span class="freshchip" id="freshchip" onclick="location.reload()">Naya data aaya - dekhein</span>
 </div>
 
 <div class="subtabs">
@@ -315,6 +380,56 @@ let WOFF = {woff_json};   // 0-6 (Mon..Sun) or null
 let FEST = {festivals_json};
 let calY, calM;
 
+// ── Reload data (override) + last-synced auto re-render ───────────────
+const SYNCED_AT = {synced_iso!r};   // ISO of last sync at page load (or "")
+let DIRTY = false;                  // owner changed ticks -> don't auto-reload
+function markDirty() {{ DIRTY = true; }}
+async function syncStatus() {{
+  try {{
+    const r = await fetch('/admin/sync-status?token=' + encodeURIComponent(TOKEN));
+    return await r.json();
+  }} catch (e) {{ return {{}}; }}
+}}
+let reloadPoll = null;
+async function reloadData() {{
+  const btn = document.getElementById('reloadbtn');
+  const msg = document.getElementById('syncmsg');
+  btn.disabled = true; msg.textContent = 'Tally se refresh maang rahe hain...';
+  let d = {{}};
+  try {{
+    const r = await fetch('/admin/reload', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN}})}});
+    d = await r.json();
+  }} catch (e) {{ msg.textContent = 'Reload fail. Dobara try karein.'; btn.disabled = false; return; }}
+  if (!d.ok) {{
+    msg.textContent = d.detail || 'Abhi reload nahi ho sakta.';
+    setTimeout(() => {{ btn.disabled = false; msg.textContent = ''; }}, 5000);
+    return;
+  }}
+  msg.textContent = 'Tally se data aa raha hai... (1-2 min)';
+  let tries = 0;
+  if (reloadPoll) clearInterval(reloadPoll);
+  reloadPoll = setInterval(async () => {{
+    tries++;
+    const s = await syncStatus();
+    if (s.last_synced_label) document.getElementById('synced').textContent = s.last_synced_label;
+    if (s.last_synced_at && s.last_synced_at !== SYNCED_AT && !s.pending_refresh) {{
+      clearInterval(reloadPoll); location.reload(); return;
+    }}
+    if (tries >= 20) {{ clearInterval(reloadPoll); msg.textContent = 'Ho gaya. Refresh dabayein.'; btn.disabled = false; }}
+  }}, 12000);
+}}
+// Ambient: reflect the auto 5-min sync. Update the label; re-render only if the
+// owner has NOT started editing ticks (else show a "naya data" chip instead).
+setInterval(async () => {{
+  const s = await syncStatus();
+  if (s.last_synced_label) document.getElementById('synced').textContent = s.last_synced_label;
+  if (s.last_synced_at && s.last_synced_at !== SYNCED_AT) {{
+    if (DIRTY) document.getElementById('freshchip').style.display = 'inline-block';
+    else location.reload();
+  }}
+}}, 90000);
+
 let SRC = 'tally';   // Dashboard opens on Tally bills
 function applyFilter() {{
   const q = document.getElementById('q').value.toLowerCase();
@@ -326,10 +441,12 @@ function applyFilter() {{
 }}
 document.getElementById('q').addEventListener('input', applyFilter);
 function setAll(v) {{
+  markDirty();
   document.querySelectorAll('tr[data-name]').forEach(r => {{
     if (r.style.display !== 'none') r.querySelector('.cb').checked = v;
   }});
 }}
+document.querySelectorAll('.cb').forEach(c => c.addEventListener('change', markDirty));
 function sortRows() {{
   const key = document.getElementById('sort').value;
   const rows = [...document.querySelectorAll('#ptable tr[data-name]')];
@@ -349,6 +466,7 @@ async function save() {{
   const d = await r.json();
   document.getElementById('msg').textContent =
     r.ok ? `✅ Saved - ${{d.enabled}} ON, ${{d.disabled}} OFF` : '❌ Save failed';
+  if (r.ok) DIRTY = false;
 }}
 
 // sub-tabs filter the party table: Tally vs Non-Tally
@@ -677,6 +795,61 @@ async def admin_save(payload: SavePayload):
         db.table("clients").update({"reminders_enabled": False}).in_("id", chunk).execute()
 
     return {"enabled": len(enabled), "disabled": len(disabled)}
+
+
+class ReloadPayload(BaseModel):
+    token: str
+
+
+@router.post("/admin/reload")
+async def admin_reload(payload: ReloadPayload):
+    """Override switch: force the Tally agent to refresh outstanding NOW instead
+    of waiting for its 5-min auto cycle. Rate-limited to once per 10 minutes so
+    a big shop's single-threaded Tally isn't hammered. The agent polls
+    /tally/pending-refresh, runs the refresh, and clears the flag."""
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    now = _dt.datetime.now(_dt.timezone.utc)
+    try:
+        r = (db.table("businesses").select("refresh_requested_at")
+             .eq("id", biz["id"]).limit(1).execute())
+        prev = _parse_ts(r.data[0].get("refresh_requested_at")) if r.data else None
+    except Exception:
+        raise HTTPException(status_code=503,
+                            detail="Reload feature needs migration 015. Apply it, then retry.")
+    if prev:
+        if prev.tzinfo is None:
+            prev = prev.replace(tzinfo=_dt.timezone.utc)
+        elapsed = (now - prev).total_seconds()
+        if elapsed < RELOAD_COOLDOWN_MIN * 60:
+            wait = int((RELOAD_COOLDOWN_MIN * 60 - elapsed) // 60) + 1
+            return {"ok": False, "cooldown": True, "wait_min": wait,
+                    "detail": f"Abhi {wait} min baad dobara Reload kar sakte hain."}
+
+    db.table("businesses").update({"refresh_requested_at": now.isoformat()}).eq("id", biz["id"]).execute()
+    return {"ok": True, "requested_at": now.isoformat()}
+
+
+@router.get("/admin/sync-status")
+async def admin_sync_status(token: str = Query(...)):
+    """Lightweight poll for the dashboard: last Tally sync time + whether a
+    manual reload is still pending. The page polls this after Reload and
+    re-renders once the sync completes (last_synced advances / flag clears)."""
+    biz = _biz_by_token(token)
+    db = require_db()
+    last = _last_synced_at(db, biz["id"])
+    pending = False
+    try:
+        r = (db.table("businesses").select("refresh_requested_at")
+             .eq("id", biz["id"]).limit(1).execute())
+        pending = bool(r.data and r.data[0].get("refresh_requested_at"))
+    except Exception:
+        pending = False
+    return {
+        "last_synced_at": last.isoformat() if last else None,
+        "last_synced_label": _fmt_ago(last),
+        "pending_refresh": pending,
+    }
 
 
 class SettingsPayload(BaseModel):

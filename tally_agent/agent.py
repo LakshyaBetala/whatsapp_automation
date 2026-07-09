@@ -78,6 +78,20 @@ async def fetch_and_parse(config: dict, query: str) -> str:
     raw = await post_to_tally(config['tally_host'], config['tally_port'], query)
     return tally_xml.sanitize_xml(raw)
 
+async def check_pending_refresh(config: dict) -> bool:
+    """Did the owner press 'Reload data' on the dashboard? If so we refresh
+    outstanding immediately instead of waiting for the auto cycle."""
+    try:
+        base = config['backend_url'].rstrip('/')
+        params = {"business_id": config['business_id'], "agent_token": config['agent_token']}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{base}/tally/pending-refresh", params=params)
+            resp.raise_for_status()
+            return bool(resp.json().get("requested"))
+    except Exception:
+        return False
+
+
 async def send_to_backend(url: str, endpoint: str, token: str, payload: dict):
     full_url = f"{url.rstrip('/')}/{endpoint.lstrip('/')}"
     headers = {
@@ -253,7 +267,12 @@ async def run_watch(config: dict):
     HTTP server is single-threaded) never receives concurrent/overlapping
     requests - the main cause of it wedging.
     """
-    interval = int(config.get('watch_interval_seconds', 300) or 300)
+    # Fast tick (default 60s) so a dashboard "Reload data" override is picked up
+    # within ~1 min. The light 3-day voucher check runs every tick; the heavy
+    # full-outstanding refresh runs on its own slower cadence (default 300s =
+    # 5 min) OR immediately when the owner presses Reload.
+    interval = int(config.get('watch_interval_seconds', 60) or 60)
+    outstanding_every = int(config.get('outstanding_every_seconds', 300) or 300)
     company = config['company_name']
     # Make sure the Tally PDF pickup folder exists (the TDL exports bills here).
     pdf_dir = config.get('bill_pdf_dir', '')
@@ -262,23 +281,24 @@ async def run_watch(config: dict):
             os.makedirs(pdf_dir, exist_ok=True)
         except Exception as e:
             log_and_print(f"Could not create bill_pdf_dir {pdf_dir}: {e}", is_error=True)
-    # Full outstanding sync every N cycles. Default 1 = EVERY cycle, so the
-    # dashboard mirrors live Tally every 5 min (new bills + every party's exact
-    # amount/dates). All Tally calls stay sequential inside this one loop, so
-    # Tally never receives concurrent requests (its server is single-threaded).
-    refresh_cycles = max(1, int(config.get('refresh_every_cycles', 1) or 1))
-    log_and_print(f"WATCH MODE (local): every {interval}s -> deliver new bills + full "
-                  f"outstanding sync (every {refresh_cycles} cycle). Ctrl+C to stop.")
+    log_and_print(f"WATCH MODE (local): tick every {interval}s -> deliver new bills; full "
+                  f"outstanding refresh every {outstanding_every}s or on Reload. Ctrl+C to stop.")
 
     failures = 0
-    cycle = 0
+    last_outstanding = 0.0   # monotonic time of the last full refresh (0 = never)
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
         try:
-            # Accuracy refresh on first cycle and periodically - sequential, so
-            # it never overlaps the light check below.
-            if cycle % refresh_cycles == 0:
+            # Heavy accuracy refresh: due on cadence, or forced by the dashboard
+            # Reload override. Sequential, so it never overlaps the light check.
+            now_mono = asyncio.get_event_loop().time()
+            due = (last_outstanding == 0.0) or (now_mono - last_outstanding >= outstanding_every)
+            forced = False if due else await check_pending_refresh(config)
+            if due or forced:
+                if forced:
+                    log_and_print(f"[{stamp}] Reload pressed - refreshing outstanding now.")
                 await run_apply_outstanding(config)
+                last_outstanding = asyncio.get_event_loop().time()
 
             today = date.today()
             frm = (today - timedelta(days=2)).strftime('%Y%m%d')
@@ -329,7 +349,6 @@ async def run_watch(config: dict):
             log_and_print(f"[{stamp}] Watch cycle failed ({e}) - retry in {interval}s", is_error=True)
             if failures in (5, 50):  # don't spam; nudge at 10min and ~2h of failures
                 log_and_print("Tally or backend unreachable for a while - check they are running.", is_error=True)
-        cycle += 1
         await asyncio.sleep(interval)
 
 

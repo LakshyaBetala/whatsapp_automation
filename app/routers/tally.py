@@ -88,6 +88,21 @@ def _verify_token(business_id: uuid.UUID, agent_token: str):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent_token")
     return db
 
+@router.get("/pending-refresh")
+async def pending_refresh(business_id: uuid.UUID, agent_token: str):
+    """Agent polls this each watch tick. Returns whether the owner pressed
+    'Reload data' (an override that forces an immediate outstanding refresh
+    instead of waiting for the 5-min auto cycle). Cleared by /outstandings."""
+    db = _verify_token(business_id, agent_token)
+    try:
+        r = (db.table("businesses").select("refresh_requested_at")
+             .eq("id", str(business_id)).limit(1).execute())
+        req = bool(r.data and r.data[0].get("refresh_requested_at"))
+    except Exception:
+        req = False  # column missing (migration 015 not applied) - non-fatal
+    return {"requested": req}
+
+
 @router.post("/import")
 async def import_outstanding(payload: TallyImportPayload):
     """Bulk import of debtors. Batched: ~6 Supabase round-trips for a
