@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     send_gap_max_s: float = 40.0
 
     # --- Scheduling ---
-    eod_digest_hour: int = 21
+    eod_digest_hour: int = 22   # 10 PM IST - owner's end-of-day summary via the bot
     eod_digest_minute: int = 0
     reminder_sweep_hour: int = 10
     reminder_sweep_minute: int = 0
