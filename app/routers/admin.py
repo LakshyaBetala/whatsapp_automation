@@ -31,11 +31,63 @@ def _biz_by_token(token: str) -> dict:
     resp = (db.table("businesses")
             .select("id, business_name, weekly_off_day, blackout_dates, "
                     "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
-                    "discount_pct, plan, upi_vpa, whatsapp_number")
+                    "discount_pct, plan, upi_vpa, whatsapp_number, reminder_cadence, "
+                    "overdue_repeat_days, overdue_max_repeats")
             .eq("agent_token", token).limit(1).execute())
     if not resp.data:
         raise HTTPException(status_code=401, detail="Invalid token")
     return resp.data[0]
+
+
+def _client_points(biz: dict, bill: dict, credit_days: int):
+    """Cadence points for one bill using the SAME engine the sweep uses, so the
+    dashboard's 'next reminder' is exactly what will actually send."""
+    from app.jobs.reminder_sweep import cadence_points, DEFAULT_CADENCE
+    try:
+        inv = _dt.date.fromisoformat(str(bill["invoice_date"]))
+    except (TypeError, ValueError, KeyError):
+        return None, None
+    due_str = bill.get("due_date")
+    try:
+        due = _dt.date.fromisoformat(str(due_str)) if due_str else inv
+    except (TypeError, ValueError):
+        due = inv
+    pts = cadence_points(
+        cadence=biz.get("reminder_cadence") or DEFAULT_CADENCE,
+        repeat_days=biz.get("overdue_repeat_days") or 7,
+        max_repeats=biz.get("overdue_max_repeats") or 3,
+        credit_days=credit_days or 30,
+        due_offset=(due - inv).days,
+    )
+    return inv, pts
+
+
+def _next_reminder(biz: dict, bills: list, credit_days: int, today: _dt.date):
+    """(label, colour) for a party's next scheduled reminder across its open
+    bills. Green = an upcoming nudge; amber = an overdue-track reminder; the
+    date is invoice_date + cadence-day. No messages-table lookup (dashboard is
+    a hot path); the detail page shows the exact sent/pending breakdown."""
+    best_date = None
+    best_kind = None
+    for b in bills:
+        inv, pts = _client_points(biz, b, credit_days)
+        if not pts:
+            continue
+        dsi = (today - inv).days
+        # earliest cadence point still in the future (or exactly today)
+        for day, kind in pts:
+            if day >= dsi:
+                d = inv + _dt.timedelta(days=day)
+                if best_date is None or d < best_date:
+                    best_date = d
+                    best_kind = kind
+                break
+    if best_date is None:
+        return "Sab reminder ho gaye", "#999"
+    kd = "Aaj" if best_date <= today else best_date.strftime("%d %b")
+    color = "#c77b0a" if best_kind in ("overdue", "escalate") else "#0a7d33"
+    tag = "overdue" if best_kind in ("overdue", "escalate") else "reminder"
+    return f"{kd} ({tag})", color
 
 
 def _chunked(items: list, size: int = 100):
@@ -136,10 +188,11 @@ async def admin_page(token: str = Query(...)):
     today = _dt.date.today()
     totals: dict[str, Decimal] = {}
     overdue_days: dict[str, int] = {}   # client_id -> max days past due
+    bills_by_client: dict[str, list] = {}
     start = 0
     while True:
         resp = (db.table("bills")
-                .select("client_id, outstanding, due_date")
+                .select("client_id, outstanding, due_date, invoice_date")
                 .eq("business_id", biz["id"])
                 .in_("status", ["pending", "partial", "overdue"])
                 .range(start, start + 999).execute())
@@ -147,6 +200,7 @@ async def admin_page(token: str = Query(...)):
         for b in batch:
             cid = b["client_id"]
             totals[cid] = totals.get(cid, Decimal(0)) + Decimal(str(b["outstanding"]))
+            bills_by_client.setdefault(cid, []).append(b)
             dd = b.get("due_date")
             if dd:
                 try:
@@ -168,7 +222,8 @@ async def admin_page(token: str = Query(...)):
         od = overdue_days.get(c["id"], 0)
         od_str = f"{od} din" if od else "-"
         phone = c.get("whatsapp_number") or "❌ no number"
-        checked = "checked" if c.get("reminders_enabled", True) else ""
+        rem_on = c.get("reminders_enabled", True)
+        checked = "checked" if rem_on else ""
         # Source: Tally-synced (has a ledger name) vs OCR/manual (non-Tally).
         src = "tally" if (c.get("tally_ledger_name") or "").strip() else "nontally"
         cname = (c["name"] or "").replace("&", "&amp;").replace("<", "&lt;")
@@ -180,11 +235,22 @@ async def admin_page(token: str = Query(...)):
         cd = c.get("credit_days")
         cd_val = int(cd) if cd else 0
         cd_label = f"{cd_val}d" if cd_val else "set"
+        # Reminder status badge: Off, no-bills dash, or next scheduled send.
+        cbills = bills_by_client.get(c["id"], [])
+        if not rem_on:
+            rem_badge = '<span class="rbadge off">Band</span>'
+        elif not cbills:
+            rem_badge = '<span class="rbadge none">-</span>'
+        else:
+            rl, rc = _next_reminder(biz, cbills, cd_val, today)
+            rem_badge = f'<span class="rbadge" style="color:{rc};border-color:{rc}">{rl}</span>'
         rows.append(
             f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}">'
             f'<td><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
-            f'<td>{cname}</td><td class="amt">{out_str}</td>'
+            f'<td><a class="plink" href="/admin/party?token={token}&client_id={c["id"]}">{cname}</a></td>'
+            f'<td class="amt">{out_str}</td>'
             f'<td class="od">{od_str}</td>'
+            f'<td>{rem_badge}</td>'
             f'<td><button class="termbtn" data-cid="{c["id"]}" data-party="{nm_attr}" data-cd="{cd_val}">{cd_label}</button></td>'
             f'<td class="ph">{phone}</td>'
             f'<td><button class="sendbtn" data-party="{nm_attr}">Send now</button> {pay_btn}</td></tr>'
@@ -330,6 +396,11 @@ async def admin_page(token: str = Query(...)):
  .paybtn{{padding:5px 10px;font-size:.85em;border:1px solid #7d5a0a;color:#7d5a0a;background:#fff;border-radius:6px}}
  .paybtn:disabled{{opacity:.5;cursor:default}}
  .termbtn{{padding:4px 10px;font-size:.85em;border:1px solid #ccc;background:#fff;border-radius:6px}}
+ .plink{{color:#1f6c9f;text-decoration:none;font-weight:600}}
+ .plink:hover{{text-decoration:underline}}
+ .rbadge{{display:inline-block;font-size:.8em;border:1px solid #ccc;border-radius:12px;padding:2px 9px;white-space:nowrap}}
+ .rbadge.off{{color:#999;border-color:#ddd;background:#f5f5f5}}
+ .rbadge.none{{color:#bbb;border:0}}
  .modal{{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9}}
  .modal.show{{display:flex}}
  .modalbox{{background:#fff;max-width:420px;width:90%;border-radius:14px;padding:18px 20px}}
@@ -373,7 +444,7 @@ async def admin_page(token: str = Query(...)):
  <button id="save" onclick="save()">💾 Save list</button>
  <span id="msg"></span>
 </div>
-<table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
+<table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Agla reminder</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
 {''.join(rows)}
 </table>
 
@@ -1159,6 +1230,237 @@ async def admin_record_payment(payload: RecordPaymentPayload):
         "unallocated": round(remaining, 2),
         "confirmation_sent": confirmed,
     }
+
+
+class SetReminderPayload(BaseModel):
+    token: str
+    client_id: str
+    enabled: bool
+
+
+@router.post("/admin/set-reminder")
+async def admin_set_reminder(payload: SetReminderPayload):
+    """Turn reminders ON/OFF for ONE party (per-party page toggle). Removal is
+    confirmed client-side before this is called."""
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    cr = (db.table("clients").select("id, name")
+          .eq("id", payload.client_id).eq("business_id", biz["id"]).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    db.table("clients").update({"reminders_enabled": bool(payload.enabled)}).eq("id", payload.client_id).execute()
+    return {"ok": True, "enabled": bool(payload.enabled)}
+
+
+@router.get("/admin/party", response_class=HTMLResponse)
+async def admin_party(token: str = Query(...), client_id: str = Query(...)):
+    """Per-party page: bills, payments received, and the exact reminder schedule
+    (which nudges already went, which is next and when) - all fetched from Tally."""
+    biz = _biz_by_token(token)
+    db = require_db()
+    today = _dt.date.today()
+
+    cr = (db.table("clients")
+          .select("id, name, whatsapp_number, credit_days, reminders_enabled, "
+                  "tally_ledger_name, language")
+          .eq("id", client_id).eq("business_id", biz["id"]).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    c = cr.data[0]
+    cd_val = int(c.get("credit_days") or 0)
+    is_tally = bool((c.get("tally_ledger_name") or "").strip())
+
+    all_bills = (db.table("bills")
+                 .select("id, invoice_number, amount, paid_amount, outstanding, invoice_date, "
+                         "due_date, status, is_opening_balance")
+                 .eq("business_id", biz["id"]).eq("client_id", client_id)
+                 .order("invoice_date", desc=True).execute()).data or []
+    open_bills = [b for b in all_bills if b["status"] in ("pending", "partial", "overdue")]
+    open_total = sum(Decimal(str(b.get("outstanding") or 0)) for b in open_bills)
+
+    # Payments recorded in Tally for this party (bill-wise history).
+    receipts = []
+    ledger_name = c.get("tally_ledger_name") or c.get("name")
+    try:
+        rr = (db.table("tally_receipts")
+              .select("amount, receipt_date, tally_voucher_number")
+              .eq("business_id", biz["id"]).eq("party_name", ledger_name)
+              .order("receipt_date", desc=True).limit(20).execute())
+        receipts = rr.data or []
+    except Exception:
+        receipts = []
+
+    # Reminders already sent (bill_id, reminder_day) so the schedule shows ticks.
+    sent_map: dict = {}
+    try:
+        mr = (db.table("messages")
+              .select("bill_id, reminder_day, created_at, delivery_status")
+              .eq("business_id", biz["id"]).eq("client_id", client_id)
+              .eq("type", "reminder").limit(500).execute())
+        for m in mr.data or []:
+            sent_map[(m.get("bill_id"), m.get("reminder_day"))] = m
+    except Exception:
+        sent_map = {}
+
+    def esc(s):
+        return (str(s or "")).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    # ── Bills table ───────────────────────────────────────────────────
+    bill_rows = ""
+    for b in all_bills[:200]:
+        odv = ""
+        dd = b.get("due_date")
+        if dd and b["status"] in ("pending", "partial", "overdue"):
+            try:
+                d = (today - _dt.date.fromisoformat(str(dd))).days
+                if d > 0:
+                    odv = f"{d} din"
+            except (TypeError, ValueError):
+                pass
+        stcls = {"paid": "ok", "partial": "warn"}.get(b["status"], "due")
+        bill_rows += (
+            f'<tr><td>{esc(b.get("invoice_number") or "-")}</td>'
+            f'<td>{esc(b.get("invoice_date"))}</td>'
+            f'<td class="n">{_inr(b.get("amount"))}</td>'
+            f'<td class="n">{_inr(b.get("paid_amount"))}</td>'
+            f'<td class="n">{_inr(b.get("outstanding"))}</td>'
+            f'<td>{esc(b.get("due_date") or "-")}</td>'
+            f'<td><span class="tag {stcls}">{esc(b["status"])}</span></td>'
+            f'<td class="n">{odv or "-"}</td></tr>'
+        )
+    if not bill_rows:
+        bill_rows = '<tr><td colspan="8" class="muted">Koi bill nahi.</td></tr>'
+
+    # ── Payments received ─────────────────────────────────────────────
+    pay_rows = "".join(
+        f'<tr><td>{esc(r.get("receipt_date"))}</td>'
+        f'<td class="n">{_inr(r.get("amount"))}</td>'
+        f'<td>{esc(r.get("tally_voucher_number") or "-")}</td></tr>'
+        for r in receipts)
+    if not pay_rows:
+        pay_rows = ('<tr><td colspan="3" class="muted">'
+                    + ("Tally me is party ka koi receipt record nahi mila." if is_tally
+                       else "Non-Tally party - payments dashboard se record hote hain.")
+                    + '</td></tr>')
+
+    # ── Reminder schedule (per open bill: what went, what's next) ─────
+    rem_on = c.get("reminders_enabled", True)
+    next_label, next_color = (_next_reminder(biz, open_bills, cd_val, today)
+                              if (rem_on and open_bills) else
+                              ("Reminders band hain" if not rem_on else "Koi open bill nahi", "#999"))
+    sched_html = ""
+    for b in open_bills[:6]:
+        inv, pts = _client_points(biz, b, cd_val)
+        if not pts:
+            continue
+        dsi = (today - inv).days
+        chips = ""
+        upcoming_marked = False
+        for day, kind in pts:
+            d = inv + _dt.timedelta(days=day)
+            done = (b["id"], day) in sent_map
+            if done:
+                cls = "done"
+            elif day <= dsi:
+                cls = "miss"           # was due, not sent (off-day/holiday/host off)
+            elif not upcoming_marked:
+                cls = "next"; upcoming_marked = True
+            else:
+                cls = "soon"
+            tone = "overdue" if kind in ("overdue", "escalate") else "nudge"
+            chips += f'<span class="chip {cls}" title="{tone}">{d.strftime("%d %b")}</span>'
+        sched_html += (
+            f'<div class="schedrow"><div class="schedbill">{esc(b.get("invoice_number") or "-")} '
+            f'<span class="muted">({_inr(b.get("outstanding"))})</span></div>'
+            f'<div class="chips">{chips}</div></div>')
+    if not sched_html:
+        sched_html = '<div class="muted">Koi active reminder schedule nahi.</div>'
+
+    phone = c.get("whatsapp_number")
+    phone_html = esc(phone) if phone else '<span style="color:#c0392b">number nahi hai</span>'
+    toggle_label = "Reminder band karein" if rem_on else "Reminder chalu karein"
+    toggle_cls = "danger" if rem_on else "primary"
+    src_tag = "Tally" if is_tally else "Non-Tally"
+
+    body = f"""
+<a href="/admin?token={token}" class="back">&#8592; Dashboard</a>
+<h1>{esc(c['name'])}</h1>
+<div class="muted">{src_tag} party &middot; {biz['business_name']}</div>
+
+<div class="grid">
+  <div class="card kpi"><div class="n">{_inr(open_total)}</div><div class="l">Total baaki</div></div>
+  <div class="card kpi"><div class="n">{len(open_bills)}</div><div class="l">Open bills</div></div>
+  <div class="card kpi"><div class="n">{cd_val or '-'}</div><div class="l">Credit days</div></div>
+  <div class="card kpi"><div class="n" style="font-size:1rem;color:{next_color}">{next_label}</div><div class="l">Agla reminder</div></div>
+</div>
+
+<div class="card" style="margin-bottom:18px">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div>WhatsApp: <b>{phone_html}</b> &nbsp;&middot;&nbsp; Reminders:
+      <b id="remstate" style="color:{'#0a7d33' if rem_on else '#c0392b'}">{'ON' if rem_on else 'OFF'}</b></div>
+    <button id="remtoggle" class="{toggle_cls}" onclick="toggleRem()">{toggle_label}</button>
+  </div>
+  <div class="hint">Reminder set hai to ASVA khud is party ke credit days ke hisaab se message bhejta hai. Band karne par confirm poochha jayega.</div>
+</div>
+
+<h2>Reminder schedule</h2>
+<div class="card">
+  {sched_html}
+  <div class="legend"><span class="chip done">bhej diya</span><span class="chip next">agla</span>
+    <span class="chip miss">chhoot gaya</span><span class="chip soon">aage</span></div>
+</div>
+
+<h2>Bills</h2>
+<table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th>
+  <th class="n">Baaki</th><th>Due</th><th>Status</th><th class="n">Overdue</th></tr>{bill_rows}</table>
+
+<h2>Payments received (Tally)</h2>
+<table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>{pay_rows}</table>
+
+<script>
+const TOKEN = {token!r};
+const CID = {client_id!r};
+let REM_ON = {str(bool(rem_on)).lower()};
+async function toggleRem() {{
+  const turningOff = REM_ON;
+  if (turningOff && !confirm('{esc(c["name"])} ke reminders band kar dein? Isko koi automatic reminder nahi jayega.')) return;
+  const btn = document.getElementById('remtoggle'); btn.disabled = true;
+  try {{
+    const r = await fetch('/admin/set-reminder', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID, enabled: !REM_ON}})}});
+    const d = await r.json();
+    if (r.ok) {{ REM_ON = d.enabled;
+      document.getElementById('remstate').textContent = REM_ON ? 'ON' : 'OFF';
+      document.getElementById('remstate').style.color = REM_ON ? '#0a7d33' : '#c0392b';
+      btn.textContent = REM_ON ? 'Reminder band karein' : 'Reminder chalu karein';
+      btn.className = REM_ON ? 'danger' : 'primary';
+    }} else {{ alert('Nahi ho paya.'); }}
+  }} catch (e) {{ alert('Nahi ho paya.'); }}
+  btn.disabled = false;
+}}
+</script>"""
+    extra = """
+ .back{display:inline-block;margin-bottom:10px;color:#1f6c9f;text-decoration:none;font-weight:600}
+ .tag{font-size:.75rem;border-radius:9999px;padding:2px 9px;text-transform:uppercase;letter-spacing:.04em}
+ .tag.ok{background:#edf3ec;color:#346538}
+ .tag.warn{background:#fbf3db;color:#956400}
+ .tag.due{background:#fdebec;color:#9f2f2d}
+ .schedrow{display:flex;gap:12px;align-items:baseline;padding:8px 0;border-bottom:1px solid #f0f0ee;flex-wrap:wrap}
+ .schedrow:last-child{border-bottom:0}
+ .schedbill{min-width:140px;font-weight:600}
+ .chips{display:flex;gap:6px;flex-wrap:wrap}
+ .chip{font-size:.78rem;border-radius:6px;padding:2px 8px;border:1px solid #e2e2e0;color:#787774}
+ .chip.done{background:#edf3ec;color:#346538;border-color:#cfe3cd}
+ .chip.next{background:#e1f3fe;color:#1f6c9f;border-color:#bfe2f7;font-weight:700}
+ .chip.miss{background:#fdebec;color:#9f2f2d;border-color:#f3cfd0}
+ .chip.soon{background:#fff;color:#999}
+ .legend{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+ button.danger{background:#c0392b}
+ button.primary{background:#0a7d33}
+"""
+    return HTMLResponse(f'<!doctype html><meta charset="utf-8">'
+                        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+                        f'<style>{_CSS}{extra}</style><div class="wrap">{body}</div>')
 
 
 # ── Shared minimalist styling for the Analytics / Accounts pages ──────────
