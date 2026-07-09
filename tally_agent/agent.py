@@ -136,7 +136,7 @@ async def run_import(config: dict):
     log_and_print("Note: run --sync after import to bring in this FY's bills and payments.")
 
     if not debtors:
-        log_and_print("No debtors found — is the right company open in Tally?", is_error=True)
+        log_and_print("No debtors found - is the right company open in Tally?", is_error=True)
         return
 
     payload = {
@@ -163,7 +163,7 @@ async def run_sync(config: dict):
     today = date.today()
 
     # Sync window: FY start .. today by default. 'sync_from_date'
-    # (YYYY-MM-DD) in config.json overrides — needed for companies whose
+    # (YYYY-MM-DD) in config.json overrides - needed for companies whose
     # books belong to an earlier financial year.
     from_cfg = str(config.get('sync_from_date', '') or '').replace('-', '')
     from_str = from_cfg if len(from_cfg) == 8 else _fy_start(today).strftime('%Y%m%d')
@@ -187,7 +187,7 @@ async def run_sync(config: dict):
             receipts.extend(r['receipts'])
             log_and_print(f"  {chunk_start:%b %Y}: {len(r['sales'])} sales, {len(r['receipts'])} receipts")
         except Exception as e:
-            log_and_print(f"  {chunk_start:%b %Y}: fetch failed ({e}) — continuing", is_error=True)
+            log_and_print(f"  {chunk_start:%b %Y}: fetch failed ({e}) - continuing", is_error=True)
         chunk_start = chunk_end + timedelta(days=1)
 
     log_and_print(f"Extracted {len(sales)} Sales and {len(receipts)} Receipts total.")
@@ -227,7 +227,7 @@ def _vouchers_payload(sales: list, receipts: list) -> list:
         for r in records:
             number = r.get('number') or ''
             if vtype == "Sales" and not number:
-                # Sales dedup keys on voucher number — skip unnumbered ones
+                # Sales dedup keys on voucher number - skip unnumbered ones
                 log_and_print(f"Skipping unnumbered Sales voucher for {r.get('party')}", is_error=True)
                 continue
             if vtype == "Receipt" and not number:
@@ -245,13 +245,13 @@ def _vouchers_payload(sales: list, receipts: list) -> list:
 async def run_watch(config: dict):
     """Live LOCAL mode: poll Tally on this laptop every watch_interval_seconds
     (default 300 = 5 min). A bill made in Tally reaches the customer's WhatsApp
-    (PDF + message) within one cycle — so a 9:00 bill goes out by ~9:05.
+    (PDF + message) within one cycle - so a 9:00 bill goes out by ~9:05.
 
     Each cycle fetches only the last 3 days (light on Tally). Every few cycles
     it ALSO refreshes the authoritative bill-wise outstanding (accuracy). Every
     Tally call is made sequentially inside THIS single loop, so Tally (whose
     HTTP server is single-threaded) never receives concurrent/overlapping
-    requests — the main cause of it wedging.
+    requests - the main cause of it wedging.
     """
     interval = int(config.get('watch_interval_seconds', 300) or 300)
     company = config['company_name']
@@ -275,7 +275,7 @@ async def run_watch(config: dict):
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
         try:
-            # Accuracy refresh on first cycle and periodically — sequential, so
+            # Accuracy refresh on first cycle and periodically - sequential, so
             # it never overlaps the light check below.
             if cycle % refresh_cycles == 0:
                 await run_apply_outstanding(config)
@@ -307,7 +307,7 @@ async def run_watch(config: dict):
                 new_bills = result.get('new_bills', 0)
                 payments = result.get('receipts_processed', 0)
                 # Move sent bills' PDFs into <folder>/sent so the pickup folder
-                # stays clean — no re-upload, no stale file matching a later bill.
+                # stays clean - no re-upload, no stale file matching a later bill.
                 delivered = set(result.get('delivered') or [])
                 if delivered and pdf_dir and pdf_srcs:
                     sent_dir = os.path.join(pdf_dir, 'sent')
@@ -328,7 +328,7 @@ async def run_watch(config: dict):
             failures += 1
             log_and_print(f"[{stamp}] Watch cycle failed ({e}) - retry in {interval}s", is_error=True)
             if failures in (5, 50):  # don't spam; nudge at 10min and ~2h of failures
-                log_and_print("Tally or backend unreachable for a while — check they are running.", is_error=True)
+                log_and_print("Tally or backend unreachable for a while - check they are running.", is_error=True)
         cycle += 1
         await asyncio.sleep(interval)
 
@@ -339,7 +339,7 @@ async def run_check_outstanding(config: dict):
     authoritative source into the dashboard. Changes nothing."""
     company = config['company_name']
     today = date.today()
-    log_and_print("Fetching bill-by-bill outstanding from Tally (PREVIEW — nothing will change)...")
+    log_and_print("Fetching bill-by-bill outstanding from Tally (PREVIEW - nothing will change)...")
 
     groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
     debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
@@ -354,7 +354,7 @@ async def run_check_outstanding(config: dict):
     if not bills:
         log_and_print(
             "No bill-by-bill data came back. The ledgers may not 'maintain balances "
-            "bill-by-bill'. Tell me — we can fall back to each ledger's ClosingBalance "
+            "bill-by-bill'. Tell me - we can fall back to each ledger's ClosingBalance "
             "(accurate total, but no per-bill dates).", is_error=True)
         return
 
@@ -383,7 +383,7 @@ async def run_check_outstanding(config: dict):
             od = '?'
         log_and_print(f"    ref={str(x['bill_ref'])[:16]:16} date={x['bill_date']} "
                       f"amt={x['amount']:>10,.0f} credit={x['credit_days']} overdue={od}d")
-    log_and_print("PREVIEW done — nothing changed. Verify PINEMA/MAHALAKSHMI totals match Tally, then we wire it in.")
+    log_and_print("PREVIEW done - nothing changed. Verify PINEMA/MAHALAKSHMI totals match Tally, then we wire it in.")
 
 
 async def run_apply_outstanding(config: dict):
@@ -400,7 +400,7 @@ async def run_apply_outstanding(config: dict):
     bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
     bills = tally_xml.parse_bills(bills_xml, set(debtor_names))
     if not bills:
-        log_and_print("No bill-by-bill data from Tally — outstanding NOT refreshed "
+        log_and_print("No bill-by-bill data from Tally - outstanding NOT refreshed "
                       "(ledgers may not maintain balances bill-by-bill).", is_error=True)
         return
 

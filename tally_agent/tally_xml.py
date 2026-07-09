@@ -1,18 +1,18 @@
-"""Tally XML queries and parsers — no TDL files required.
+"""Tally XML queries and parsers - no TDL files required.
 
 Everything works over plain HTTP against a stock TallyPrime acting as
 server (F1 > Settings > Connectivity). Verified live against
 TallyPrime with multiple companies loaded:
 
   - Collections are scoped per company via SVCURRENTCOMPANY (mandatory
-    when >1 company is open — otherwise Tally answers for whichever
+    when >1 company is open - otherwise Tally answers for whichever
     company happens to be active).
   - Ledger ClosingBalance sign: NEGATIVE = customer owes (debit).
   - Voucher collections IGNORE SVFROMDATE/SVTODATE over HTTP and return
     the company's active financial year. Sync therefore sends the whole
     FY and relies on backend idempotency (sales dedup by voucher number,
     receipts dedup by the tally_receipts table).
-  - Sales voucher Amount is negative, Receipt positive — use abs().
+  - Sales voucher Amount is negative, Receipt positive - use abs().
   - Responses arrive in UTF-16 (BOM) or UTF-8 depending on query type.
 """
 import xml.etree.ElementTree as ET
@@ -36,7 +36,7 @@ def sanitize_xml(raw_bytes: bytes) -> str:
     elif raw_bytes[:3] == b'\xef\xbb\xbf':
         text = raw_bytes.decode('utf-8-sig', errors='ignore')
     elif raw_bytes[:1] == b'<' or raw_bytes[:64].lstrip()[:1] == b'<':
-        # Plain XML with no BOM — UTF-8 first, cp1252 fallback
+        # Plain XML with no BOM - UTF-8 first, cp1252 fallback
         try:
             text = raw_bytes.decode('utf-8')
         except UnicodeDecodeError:
@@ -127,7 +127,7 @@ def _phone_from_ledger(ledger: ET.Element) -> Optional[str]:
     return None
 
 
-# ── Query builders (inline TDL collections — no .tdl files needed) ────
+# ── Query builders (inline TDL collections - no .tdl files needed) ────
 
 def _collection_query(objtype: str, methods: List[str], company: str = "") -> str:
     sv_company = f'<SVCURRENTCOMPANY>{escape(company)}</SVCURRENTCOMPANY>' if company else ''
@@ -159,7 +159,7 @@ def _collection_query(objtype: str, methods: List[str], company: str = "") -> st
 
 
 def build_groups_query(company: str = "") -> str:
-    """All account groups (name + parent) — used to find every subgroup
+    """All account groups (name + parent) - used to find every subgroup
     under Sundry Debtors (shops group customers by street/route)."""
     return _collection_query('Group', ['Name', 'Parent'], company)
 
@@ -175,7 +175,7 @@ def build_masters_query(company: str = "") -> str:
 
 def build_vouchers_query(company: str = "") -> str:
     """All vouchers of the CURRENT-DATE window (collection queries ignore
-    date filters). Kept for diagnostics — sync uses the Voucher Register."""
+    date filters). Kept for diagnostics - sync uses the Voucher Register."""
     return _collection_query('Voucher', [
         'Date', 'VoucherTypeName', 'VoucherNumber', 'PartyLedgerName', 'Amount',
     ], company)
@@ -185,7 +185,7 @@ def build_voucher_register_query(company: str, from_date: str, to_date: str) -> 
     """Voucher Register report WITH working date filters.
 
     Unlike collections and Day Book, this report honours SVFROMDATE/
-    SVTODATE (the TYPE="Date" attribute matters) — verified against
+    SVTODATE (the TYPE="Date" attribute matters) - verified against
     archived-FY companies whose books are far from today's date.
     Dates are 'YYYYMMDD'.
     """
@@ -215,10 +215,10 @@ def build_company_list_query() -> str:
 
 
 def build_bills_query(company: str = "") -> str:
-    """Bill-by-bill OUTSTANDING — Tally's own net figure per open bill.
+    """Bill-by-bill OUTSTANDING - Tally's own net figure per open bill.
 
     This is the authoritative source of what each party owes (net of every
-    payment, however it was booked) plus each bill's real date — so overdue
+    payment, however it was booked) plus each bill's real date - so overdue
     days and amounts are exact, instead of the fragile
     opening+sales-receipts re-derivation. Requires the party ledgers to
     'maintain balances bill-by-bill' (the norm for wholesale debtors).
@@ -279,10 +279,10 @@ def parse_masters(xml_text: str, debtor_groups: Set[str]) -> List[Dict[str, Any]
     debit balances as negative, so we flip).
 
     opening_balance is the FY-START balance (Tally OpeningBalance), NOT
-    today's closing — the sync replays this FY's vouchers on top of it,
+    today's closing - the sync replays this FY's vouchers on top of it,
     so using the closing balance would double-count this year's sales.
     current_outstanding (today's closing) is informational.
-    Zero-balance clients are kept — they get bills later and we want their
+    Zero-balance clients are kept - they get bills later and we want their
     phone numbers on file.
     """
     try:
@@ -410,7 +410,7 @@ def parse_vouchers(xml_text: str) -> Dict[str, List[Dict[str, Any]]]:
             continue
 
         # Collection exports put the total in AMOUNT; the Voucher Register
-        # report leaves it empty and carries amounts in ledger-entry lists —
+        # report leaves it empty and carries amounts in ledger-entry lists -
         # the party's own entry is the invoice/receipt total.
         amount = abs(_to_float(v.findtext('AMOUNT', '0')))
         if amount == 0:
