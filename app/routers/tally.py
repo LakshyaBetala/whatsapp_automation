@@ -402,6 +402,12 @@ class TallyOutstandingsPayload(BaseModel):
     company_name: str
     bills: list[TallyOpenBill]
     all_parties: list[str] = []       # every debtor ledger (to clear fully-paid ones)
+    # Ledger ClosingBalance per party (Tally's authoritative "what they owe
+    # today" total). This is the source of truth for the amount; the bill-wise
+    # list above only breaks it into aged bills WHEN it reconciles. Sending
+    # this fixes parties whose ledgers don't 'maintain balances bill-by-bill'
+    # (they return zero bills, so without this they'd wrongly show as cleared).
+    ledger_balances: dict[str, float] = {}
 
 
 async def _send_payment_confirmation(business_id, plan_name, client, delta, remaining):
@@ -461,11 +467,22 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
         if c:
             incoming[c["id"]].append(b)
 
+    # Ledger ClosingBalance per client_id = Tally's authoritative total owed.
+    ledger_bal: dict[str, float] = {}
+    for name, amt in (payload.ledger_balances or {}).items():
+        c = clients_by_ledger.get(name)
+        if c:
+            ledger_bal[c["id"]] = round(float(amt or 0), 2)
+    # Only trust ledger balances as the source of truth if the agent actually
+    # sent them (older agents don't); otherwise fall back to bill-wise only.
+    use_ledger = bool(payload.ledger_balances)
+
     target_ids = set(incoming.keys())
     for name in payload.all_parties:
         c = clients_by_ledger.get(name)
         if c:
             target_ids.add(c["id"])
+    target_ids.update(ledger_bal.keys())
 
     # Existing open bills BEFORE upsert (for payment detection + reconcile).
     existing_bills: list = []
@@ -479,30 +496,62 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
                   for e in existing_bills if e.get("tally_voucher_number")}
 
     # Build rows + snapshot + detect drops (payments).
+    #
+    # Per party the rule is: the LEDGER closing balance is the true total.
+    #   - ledger says 0 (or party absent)  -> no rows; existing bills reconcile
+    #     to 'paid' below (nothing owed).
+    #   - bill-wise list reconciles to the ledger total (within Rs 1) -> keep the
+    #     aged bills (accurate dates/overdue).
+    #   - otherwise (no bill-wise data, or it doesn't add up: the ledger doesn't
+    #     'maintain balances bill-by-bill', has advances, on-account receipts,
+    #     etc.) -> ONE lump balance bill for the exact ledger total, due FY start.
+    # This guarantees every party's dashboard total == Tally to the rupee.
     rows = []
     snap = defaultdict(set)
     seen: dict = {}
     payments: list = []              # (client_id, paid_delta, remaining)
-    for cid, bl in incoming.items():
+
+    def _emit(cid, vnum, invoice_number, amount, inv, due):
+        rows.append({
+            "business_id": biz, "client_id": cid,
+            "invoice_number": (invoice_number or vnum)[:60],
+            "tally_voucher_number": vnum,
+            "amount": round(float(amount), 2), "paid_amount": 0.0,
+            "invoice_date": inv, "due_date": due or inv,
+            "status": "pending", "is_opening_balance": inv < fy,
+        })
+        snap[cid].add(vnum)
+        prev = old_amount.get(vnum)
+        na = round(float(amount), 2)
+        if prev is not None and na < prev - 0.99:
+            payments.append((cid, round(prev - na, 2), na))
+
+    for cid in target_ids:
+        bl = incoming.get(cid, [])
+        lb = ledger_bal.get(cid, 0.0)
+
+        if use_ledger and lb <= 0:
+            continue  # owes nothing per Tally's ledger -> reconcile away below
+
+        bill_rows = []
         for b in sorted(bl, key=lambda x: ((x.bill_ref or ""), str(x.bill_date or ""), x.amount)):
             ref = (b.bill_ref or "").strip() or (b.bill_date or "x")
             base = f"TB-{cid}-{ref}"[:112]
             n = seen.get(base, 0)
             seen[base] = n + 1
             vnum = base if n == 0 else f"{base}#{n + 1}"
-            new_amt = round(float(b.amount), 2)
             inv = b.bill_date or fy
-            rows.append({
-                "business_id": biz, "client_id": cid,
-                "invoice_number": ref[:60], "tally_voucher_number": vnum,
-                "amount": new_amt, "paid_amount": 0.0,
-                "invoice_date": inv, "due_date": b.due_date or inv,
-                "status": "pending", "is_opening_balance": inv < fy,
-            })
-            snap[cid].add(vnum)
-            prev = old_amount.get(vnum)              # only TB- bills that existed
-            if prev is not None and new_amt < prev - 0.99:
-                payments.append((cid, round(prev - new_amt, 2), new_amt))
+            bill_rows.append((vnum, ref[:60], round(float(b.amount), 2), inv, b.due_date or inv))
+        bill_sum = round(sum(r[2] for r in bill_rows), 2)
+
+        reconciles = bill_rows and (not use_ledger or abs(bill_sum - lb) <= 1.0)
+        if reconciles:
+            for vnum, ref, amt, inv, due in bill_rows:
+                _emit(cid, vnum, ref, amt, inv, due)
+        elif use_ledger:
+            # Lump the exact ledger total so the party's dashboard matches Tally.
+            _emit(cid, f"LB-{cid}", "Balance", lb, fy, fy)
+        # else: old agent + no bill-wise data -> nothing to write for this party
 
     errors: list = []
     upserted = 0
@@ -531,6 +580,23 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
         if cl and cl.get("whatsapp_number"):
             background_tasks.add_task(_send_payment_confirmation, biz, plan_name, cl, delta, remaining)
             confirmations += 1
+
+    # Stamp the sync so the dashboard's "last synced" is fresh every cycle (the
+    # /sync endpoint only logs when there are vouchers; this runs every refresh).
+    try:
+        db.table("tally_syncs").insert({
+            "business_id": biz, "sync_type": "poll",
+            "records_synced": upserted, "success": len(errors) == 0,
+            "error": "; ".join(errors)[:2000] if errors else None,
+        }).execute()
+    except Exception as e:
+        log.error("Failed to log outstandings sync: %s", e)
+
+    # Clear a pending manual "Reload data" request now that fresh data is in.
+    try:
+        db.table("businesses").update({"refresh_requested_at": None}).eq("id", biz).execute()
+    except Exception:
+        pass  # column may not exist yet (migration 015 not applied) - non-fatal
 
     return {
         "parties": len(target_ids),

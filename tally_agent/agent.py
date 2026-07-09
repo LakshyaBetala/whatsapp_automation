@@ -397,11 +397,19 @@ async def run_apply_outstanding(config: dict):
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
     debtor_names = sorted({d['name'] for d in debtors})
 
+    # Ledger ClosingBalance per party = Tally's authoritative "owes today" total.
+    # The backend uses this as the source of truth for the amount and only keeps
+    # the bill-wise breakdown when it reconciles. Parties whose ledgers don't
+    # 'maintain balances bill-by-bill' (zero bills) are still correct via this.
+    ledger_balances = {
+        d['name']: round(float(d.get('current_outstanding') or 0), 2)
+        for d in debtors if (d.get('current_outstanding') or 0) > 0
+    }
+
     bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
     bills = tally_xml.parse_bills(bills_xml, set(debtor_names))
-    if not bills:
-        log_and_print("No bill-by-bill data from Tally - outstanding NOT refreshed "
-                      "(ledgers may not maintain balances bill-by-bill).", is_error=True)
+    if not bills and not ledger_balances:
+        log_and_print("No outstanding data from Tally - nothing refreshed.", is_error=True)
         return
 
     payload = {
@@ -413,8 +421,10 @@ async def run_apply_outstanding(config: dict):
             "bill_date": b['bill_date'], "due_date": b['due_date'], "amount": b['amount'],
         } for b in bills],
         "all_parties": debtor_names,
+        "ledger_balances": ledger_balances,
     }
-    log_and_print(f"Refreshing outstanding from Tally bill-wise: {len(bills)} bills...")
+    log_and_print(f"Refreshing outstanding from Tally: {len(bills)} bills, "
+                  f"{len(ledger_balances)} parties owing (ledger totals authoritative)...")
     try:
         result = await send_to_backend(config['backend_url'], '/tally/outstandings', config['agent_token'], payload)
         log_and_print(f"Outstanding refreshed: {result}")
