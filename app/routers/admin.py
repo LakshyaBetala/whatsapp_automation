@@ -187,6 +187,16 @@ _UI_EN: list[tuple[str, str]] = [
     ("✗ Sab OFF", "✗ All OFF"),
     ("💾 Save list", "💾 Save list"),
     ("Agla reminder", "Next reminder"),
+    ("👁 Aaj kaun?", "👁 Who today?"),
+    ("Aaj kaun ko reminder jayega dekhein", "See who gets a reminder today"),
+    ("Aaj kaun ko reminder jayega", "Who gets a reminder today"),
+    ("Aaj holiday hai.", "Today is a holiday."),
+    ("Koi reminder nahi jayega; agle working day chala jayega.",
+     "No reminders will go; they move to the next working day."),
+    ("Aaj kisi ko reminder nahi jayega.", "No reminders will go today."),
+    (" parties</b> ko aaj reminder jayega (total ", " parties</b> get a reminder today (total "),
+    (" aaj, baaki agle dino.", " today, the rest over the next days."),
+    ("Load nahi hua.", "Could not load."),
     ("Send now", "Send now"),
     ("Sab reminder ho gaye", "All reminders done"),
     ("Credit days &amp; reminder schedule", "Credit days &amp; reminder schedule"),
@@ -615,6 +625,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
  <button onclick="setAll(true)" title="Sabko reminder ON karo">✓ Sab ON</button>
  <button onclick="setAll(false)" title="Sabko reminder OFF karo">✗ Sab OFF</button>
  <button id="save" onclick="save()">💾 Save list</button>
+ <button onclick="dueToday()" title="Aaj kaun ko reminder jayega dekhein">👁 Aaj kaun?</button>
  {batch_bulk}
  <span id="msg"></span>
 </div>
@@ -622,6 +633,14 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
 <table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Agla reminder</th><th>Batch</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
 {''.join(rows)}
 </table>
+</div>
+
+<div class="modal" id="duemodal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modalbox">
+    <h3>Aaj kaun ko reminder jayega</h3>
+    <div id="duebody" class="msgprev">...</div>
+    <div style="margin-top:12px;text-align:right"><button onclick="document.getElementById('duemodal').classList.remove('show')">Close</button></div>
+  </div>
 </div>
 
 <div class="modal" id="termmodal" onclick="if(event.target===this)this.classList.remove('show')">
@@ -743,6 +762,26 @@ async function recordPayment(btn) {{
   }} catch (e) {{ btn.textContent = '❌'; btn.disabled = false; }}
 }}
 document.querySelectorAll('.paybtn').forEach(b => b.onclick = () => recordPayment(b));
+
+// ── "Who gets a reminder today" dry run (nothing is sent) ──────────────
+async function dueToday() {{
+  const box = document.getElementById('duebody');
+  box.textContent = 'Loading...';
+  document.getElementById('duemodal').classList.add('show');
+  try {{
+    const r = await fetch('/admin/due-today?token=' + encodeURIComponent(TOKEN));
+    const d = await r.json();
+    if (d.holiday) {{ box.innerHTML = '<b>Aaj holiday hai.</b> Koi reminder nahi jayega; agle working day chala jayega.'; return; }}
+    if (!d.count) {{ box.textContent = 'Aaj kisi ko reminder nahi jayega.'; return; }}
+    const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
+    let h = '<b>' + d.count + ' parties</b> ko aaj reminder jayega (total ' + inr(d.total) + ').';
+    if (d.capped) h += ' Pehle ' + d.cap + ' aaj, baaki agle dino.';
+    h += '<br><br>' + d.parties.map(p =>
+      '- ' + p.name + ': ' + inr(p.amount) + (p.kind === 'overdue' ? ' (overdue)' : '')).join('<br>');
+    if (d.count > d.parties.length) h += '<br>... aur ' + (d.count - d.parties.length) + ' aur';
+    box.innerHTML = h;
+  }} catch (e) {{ box.textContent = 'Load nahi hua.'; }}
+}}
 
 // ── Reminder batch assignment (per-row select + bulk on checked rows) ──
 async function assignBatch(sel) {{
@@ -1149,6 +1188,89 @@ async def admin_sync_status(token: str = Query(...)):
         "pending_refresh": pending,
         "tally_label": tally_label,
         "tally_color": tally_color,
+    }
+
+
+@router.get("/admin/due-today")
+async def admin_due_today(token: str = Query(...)):
+    """Dry run: exactly which parties would get a reminder in today's sweep, using
+    the SAME cadence + dedup logic the sweep uses. Nothing is sent. So the owner
+    is never surprised by who gets messaged."""
+    from app.jobs.reminder_sweep import (cadence_points, latest_reached_point,
+                                          DEFAULT_CADENCE, STYLE_CADENCE)
+    from app.services.batches import resolve_batch
+    from app.config import settings as _s
+    biz = _biz_by_token(token)
+    db = require_db()
+    today = _dt.date.today()
+    blackout = {str(d) for d in (biz.get("blackout_dates") or [])}
+    holiday = today.isoformat() in blackout
+
+    # Already-sent (bill, reminder_day) pairs for this business, fetched once.
+    sent_pairs: set = set()
+    start = 0
+    while True:
+        r = (db.table("messages").select("bill_id, reminder_day")
+             .eq("business_id", biz["id"]).eq("type", "reminder")
+             .range(start, start + 999).execute()).data or []
+        for m in r:
+            if m.get("bill_id") is not None and m.get("reminder_day") is not None:
+                sent_pairs.add((m["bill_id"], m["reminder_day"]))
+        if len(r) < 1000:
+            break
+        start += 1000
+
+    bills = _fetch_paged(db, "bills",
+                         "id, invoice_number, outstanding, due_date, invoice_date, client_id, "
+                         "clients(id, name, whatsapp_number, reminders_enabled, credit_days, reminder_batch)",
+                         biz["id"], status_in=["pending", "partial", "overdue"])
+
+    from collections import defaultdict
+    agg: dict = defaultdict(lambda: {"name": "", "amount": Decimal(0), "kind": "nudge"})
+    for b in bills:
+        client = b.get("clients") or {}
+        if not client.get("reminders_enabled", True):
+            continue
+        try:
+            inv = _dt.date.fromisoformat(str(b["invoice_date"]))
+        except (TypeError, ValueError):
+            continue
+        due = b.get("due_date")
+        try:
+            due_d = _dt.date.fromisoformat(str(due)) if due else inv
+        except (TypeError, ValueError):
+            due_d = inv
+        batch = resolve_batch(biz, client.get("reminder_batch"))
+        pts = cadence_points(
+            cadence=STYLE_CADENCE.get(batch["style"], biz.get("reminder_cadence") or DEFAULT_CADENCE),
+            repeat_days=biz.get("overdue_repeat_days") or 7,
+            max_repeats=biz.get("overdue_max_repeats") or 3,
+            credit_days=client.get("credit_days") or 30,
+            due_offset=(due_d - inv).days)
+        applicable = latest_reached_point(pts, (today - inv).days)
+        if applicable is None:
+            continue
+        day, kind = applicable
+        if (b["id"], day) in sent_pairs:
+            continue
+        if kind != "escalate" and not client.get("whatsapp_number"):
+            continue
+        cid = b["client_id"]
+        e = agg[cid]
+        e["name"] = client.get("name", "?")
+        e["amount"] += Decimal(str(b.get("outstanding") or 0))
+        if kind in ("overdue", "escalate"):
+            e["kind"] = "overdue"
+    parties = sorted(agg.values(), key=lambda x: x["amount"], reverse=True)
+    cap = _s.daily_reminder_cap
+    return {
+        "holiday": holiday,
+        "count": len(parties),
+        "total": float(sum(p["amount"] for p in parties)),
+        "cap": cap,
+        "capped": cap > 0 and len(parties) > cap,
+        "parties": [{"name": p["name"], "amount": float(p["amount"]), "kind": p["kind"]}
+                    for p in parties[:60]],
     }
 
 
