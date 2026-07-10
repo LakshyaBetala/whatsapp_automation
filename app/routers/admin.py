@@ -288,8 +288,12 @@ _UI_EN: list[tuple[str, str]] = [
     ("Sab ho gaye", "All done"),
     ("number nahi hai", "no number"),
     # ---- Analytics ----
+    ("Collections (last 6 months)", "Collections (last 6 months)"),
     ("Aging (kitne din se baaki)", "Aging (days outstanding)"),
     ("Sabse zyada baaki (top 12)", "Highest dues (top 12)"),
+    ("Is month aaya", "Received this month"),
+    ("Collection rate", "Collection rate"),
+    ("Avg DSO", "Avg DSO"),
     ("Parties owing", "Parties owing"),
     ("Overdue parties", "Overdue parties"),
     ("Open accounts", "Open accounts"),
@@ -1938,13 +1942,14 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("hinglish")
     today = _dt.date.today()
 
     names = {c["id"]: c["name"] for c in _fetch_paged(db, "clients", "id, name", biz["id"])}
-    bills = _fetch_paged(db, "bills", "client_id, outstanding, due_date", biz["id"],
+    bills = _fetch_paged(db, "bills", "client_id, outstanding, due_date, invoice_date", biz["id"],
                          status_in=["pending", "partial", "overdue"])
 
     total = Decimal(0)
     by_client: dict = defaultdict(Decimal)
     overdue_parties: set = set()
     od_by_client: dict = defaultdict(int)
+    age_wsum = Decimal(0)   # sum(outstanding * age_days) for a money-weighted DSO
     buckets = {"Not due": Decimal(0), "1-30": Decimal(0), "31-60": Decimal(0),
                "61-90": Decimal(0), "90+": Decimal(0)}
     for b in bills:
@@ -1954,6 +1959,11 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("hinglish")
         cid = b["client_id"]
         total += out
         by_client[cid] += out
+        try:
+            age = max((today - _dt.date.fromisoformat(str(b.get("invoice_date")))).days, 0)
+            age_wsum += out * age
+        except (TypeError, ValueError):
+            pass
         od = 0
         dd = b.get("due_date")
         if dd:
@@ -1968,11 +1978,32 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("hinglish")
                else "61-90" if od <= 90 else "90+")
         buckets[key] += out
 
+    # ── Collections from Tally receipts: this month + last-6-months trend ──
+    receipts = []
+    try:
+        receipts = _fetch_paged(db, "tally_receipts", "amount, receipt_date", biz["id"])
+    except Exception:
+        receipts = []
+    month_coll: dict = defaultdict(Decimal)
+    for r in receipts:
+        d = str(r.get("receipt_date") or "")[:7]
+        if len(d) == 7:
+            month_coll[d] += Decimal(str(r.get("amount") or 0))
+    this_m = today.strftime("%Y-%m")
+    coll_this = month_coll.get(this_m, Decimal(0))
+    coll_count = sum(1 for r in receipts if str(r.get("receipt_date") or "")[:7] == this_m)
+    # Money-weighted DSO: average days each rupee has been outstanding.
+    dso = int(age_wsum / total) if total > 0 else 0
+    # Collection rate this month = collected / (collected + still outstanding).
+    denom = coll_this + total
+    coll_rate = int(coll_this * 100 / denom) if denom > 0 else 0
+
     kpis = [
         (_inr(total), "Total baaki"),
-        (str(len(by_client)), "Parties owing"),
+        (_inr(coll_this), "Is month aaya"),
+        (f"{coll_rate}%", "Collection rate"),
+        (f"{dso} din", "Avg DSO"),
         (str(len(overdue_parties)), "Overdue parties"),
-        (str(sum(1 for v in by_client.values() if v > 0)), "Open accounts"),
     ]
     kpi_html = "".join(
         f'<div class="card kpi"><div class="n">{n}</div><div class="l">{l}</div></div>'
@@ -1985,6 +2016,20 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("hinglish")
         f'<div class="amt">{_inr(v)}</div></div>'
         for k, v in buckets.items())
 
+    # Last 6 months collections trend.
+    last6 = []
+    m0 = today.replace(day=1)
+    for _ in range(6):
+        last6.append((m0.strftime("%b"), month_coll.get(m0.strftime("%Y-%m"), Decimal(0))))
+        m0 = (m0 - _dt.timedelta(days=1)).replace(day=1)
+    last6.reverse()
+    cmax = max((v for _, v in last6), default=Decimal(1)) or Decimal(1)
+    coll_html = "".join(
+        f'<div class="age"><div class="lbl">{m}</div>'
+        f'<div class="barwrap"><i style="width:{float(v / cmax * 100):.1f}%;background:#346538"></i></div>'
+        f'<div class="amt">{_inr(v)}</div></div>'
+        for m, v in last6)
+
     top = sorted(by_client.items(), key=lambda kv: kv[1], reverse=True)[:12]
     rows_html = "".join(
         f'<tr><td>{names.get(cid, "?")}</td><td class="n">{_inr(amt)}</td>'
@@ -1994,6 +2039,7 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("hinglish")
     body = (
         f'<h1>Analytics</h1><div class="muted">{biz["business_name"]}</div>'
         f'<div class="grid">{kpi_html}</div>'
+        f'<h2>Collections (last 6 months)</h2><div class="card">{coll_html}</div>'
         f'<h2>Aging (kitne din se baaki)</h2><div class="card">{age_html}</div>'
         f'<h2>Sabse zyada baaki (top 12)</h2>'
         f'<table><tr><th>Party</th><th class="n">Baaki</th><th class="n">Overdue</th></tr>{rows_html}</table>'
