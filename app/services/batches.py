@@ -27,7 +27,13 @@ def default_batch(biz: dict) -> dict:
         "lang": (biz.get("msg_language") or "hinglish"),
         "disc": _num(biz.get("discount_pct")),
         "line": (biz.get("reminder_custom_line") or ""),
+        "upi": "",   # blank = use the shop's default UPI (businesses.upi_vpa)
     }
+
+
+def batch_vpa(biz: dict, batch: dict) -> str | None:
+    """The UPI VPA a batch pays into: its own, else the shop default."""
+    return (batch.get("upi") or "").strip() or (biz.get("upi_vpa") or None)
 
 
 def _num(v) -> float:
@@ -49,6 +55,7 @@ def normalize_batch(b: dict, biz: dict | None = None) -> dict:
         "lang": lang,
         "disc": round(_num((b or {}).get("disc")), 2),
         "line": str((b or {}).get("line") or "").strip()[:120],
+        "upi": str((b or {}).get("upi") or "").strip()[:60],
     }
 
 

@@ -200,6 +200,16 @@ async def handle(
         log.info("Message from unknown number %s: %s", from_number, text)
         return ""  # stay silent on non-greeting messages from unknown numbers
 
+    # ── Customer opt-out (silent safety net; NOT advertised in any message) ─
+    # We never tell customers to "reply STOP" - it would clutter the message and
+    # invite opt-outs. But if a customer DOES ask to stop, we honour it at once:
+    # pause their reminders and tell the owner. Protects the WhatsApp number.
+    low = text.lower()
+    if upper in ("STOP", "UNSUBSCRIBE", "OPTOUT") or any(
+        p in low for p in ("band kar", "mat bhej", "reminder band", "stop reminder", "unsubscribe")
+    ):
+        return await _handle_customer_optout(client, from_number)
+
     # ── Customer says PAID ────────────────────────────────────────────
     if upper == "PAID" or upper.startswith("PAID"):
         return await _handle_paid_customer(client)
@@ -700,7 +710,8 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     # Early-payment discount from the batch: QR + line reflect the discount
     # (line appears only when the batch actually sets one).
     pay_amount, discount_line = apply_discount(total, batch["disc"], batch["lang"])
-    vpa = business.get("upi_vpa")
+    from app.services.batches import batch_vpa
+    vpa = batch_vpa(business, batch)
     qr_b64 = None
     if vpa:
         link = upi.upi_link(vpa, biz_name, pay_amount, f"{len(bills)} bills")
@@ -915,6 +926,25 @@ async def _customer_statement(client: dict) -> str:
     lines.append(f"\nKul baaki: {inr(total)}")
     lines.append("\nPayment ho gaya ho to PAID reply karein. Dhanyavaad! 🙏")
     return "\n".join(lines)
+
+
+async def _handle_customer_optout(client: dict, from_number: str) -> str:
+    """A customer asked to stop reminders. Pause them and notify the owner.
+    Not advertised anywhere - this only fires if the customer initiates it."""
+    db = require_db()
+    try:
+        db.table("clients").update({"reminders_enabled": False}).eq("id", client["id"]).execute()
+    except Exception:
+        log.exception("opt-out pause failed for %s", client.get("name"))
+    try:
+        await whatsapp.notify_owner(
+            client["business_id"],
+            f"{client['name']} ({from_number}) ne reminder band karne ko kaha. "
+            f"ASVA ne unke reminders pause kar diye. Chalu karna ho to dashboard me tick karein.")
+    except Exception:
+        log.exception("opt-out owner notify failed")
+    return ("Theek hai, aapko ab payment reminder nahi bhejenge. "
+            "Zaroorat pade to dukaan se baat kar sakte hain. Dhanyavaad.")
 
 
 async def _handle_paid_customer(client: dict) -> str:

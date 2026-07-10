@@ -167,8 +167,8 @@ def _tally_status(dt: Optional[_dt.datetime]) -> tuple[str, str]:
 # a broken page). Applied longest-phrase-first so specifics beat generics.
 _UI_EN: list[tuple[str, str]] = [
     # ---- Dashboard ----
-    ("Aapke customers, unki baaki aur naye bills. Tick = us party ko reminder jayega. Reminder timing badalni ho to baayein <b>Reminders</b> tab kholein.",
-     "Your customers, their dues and new bills. A tick = that party gets reminders. To change reminder timing, open the <b>Reminders</b> tab on the left."),
+    ("Aapke customers aur unki baaki. Tick = us party ko reminder ON. Timing aur batches ke liye <b>Reminders</b> tab.",
+     "Your customers and their dues. A tick = reminders ON for that party. For timing and batches, open the <b>Reminders</b> tab."),
     ("Har party ke aage <b>tick</b> = us party ko reminder jayega. Neeche se search / sort / Save list kar sakte ho. Non-Tally = photo/OCR se bane bills.",
      "A <b>tick</b> next to a party = that party gets reminders. Search / sort / save the list below. Non-Tally = bills made from a photo/OCR."),
     ("messages sent is month (auto-managed, not a limit you pay per).",
@@ -212,13 +212,8 @@ _UI_EN: list[tuple[str, str]] = [
     ("Aapke ", "You have "),
     ("ASVA suggestion: ", "ASVA suggestion: "),
     # ---- Reminder batches ----
-    ("Kaise kaam karta hai (3 step):", "How it works (3 steps):"),
-    ("Neeche <b>batch</b> banayein - tone (gentle/standard/firm), language aur discount chunein.",
-     "Create a <b>batch</b> below - choose tone (gentle/standard/firm), language and discount."),
-    ("<b>Dashboard</b> me har party ke aage batch select karein.",
-     "On the <b>Dashboard</b>, pick a batch next to each party."),
-    ("ASVA khud us batch ke hisaab se professional reminder bhejta hai. Preview se message dekh lein.",
-     "ASVA sends a professional reminder based on that batch. Use Preview to see the message."),
+    ("Batch banayein (tone, language, discount) &rarr; Dashboard me har party ko batch dein &rarr; ASVA khud reminder bhejta hai. Jo assign nahi, unko Batch 1.",
+     "Create a batch (tone, language, discount) &rarr; assign each party a batch on the Dashboard &rarr; ASVA sends the reminders. Unassigned parties use Batch 1."),
     ("Alag customers ko alag tone, language ya discount dena ho to batches banayein (max 5). Har batch ka apna severity, language, discount aur custom line hota hai. Dashboard se har party ko batch chunein. Jo assign nahi, unko Batch 1 jaata hai. Discount sirf ussi batch me lagta hai jisme aap set karo (0 = koi discount nahi).",
      "To give different customers a different tone, language or discount, create batches (max 5). Each batch has its own severity, language, discount and custom line. Assign each party to a batch from the Dashboard. Unassigned parties use Batch 1. A discount applies only to the batch you set it on (0 = no discount)."),
     ("Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Yahan sirf batches, send time aur holidays set karein.",
@@ -595,7 +590,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
  .msgprev{{white-space:pre-wrap;background:#f6f6f4;border:1px solid #eee;border-radius:8px;padding:12px;font-size:.95em;line-height:1.5;max-height:50vh;overflow:auto}}
 </style></head><body>
 <h2>{biz['business_name']}</h2>
-<div class="sub">Aapke customers, unki baaki aur naye bills. Tick = us party ko reminder jayega. Reminder timing badalni ho to baayein <b>Reminders</b> tab kholein.</div>
+<div class="sub">Aapke customers aur unki baaki. Tick = us party ko reminder ON. Timing aur batches ke liye <b>Reminders</b> tab.</div>
 
 <div class="usage">
   <div><b>{plan_label} plan</b> (₹{plan_price:,}/month) -
@@ -610,7 +605,6 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
  <button data-sub="nontally">Non-Tally bills ({nontally_n:,})</button>
 </div>
 
-<div class="help">Har party ke aage <b>tick</b> = us party ko reminder jayega. Neeche se search / sort / Save list kar sakte ho. Non-Tally = photo/OCR se bane bills.</div>
 <div class="bar">
  <input type="search" id="q" placeholder="🔍 Naam se dhundo...">
  <select id="sort" onchange="sortRows()">
@@ -865,6 +859,7 @@ function renderBatches(){
       +'<select class="bstyle" title="Severity">'+bopts(STYLES,b.style)+'</select>'
       +'<select class="blang" title="Language">'+bopts(LANGS,b.lang)+'</select>'
       +'<input class="bdisc" type="number" min="0" max="50" step="0.5" value="'+(b.disc||0)+'" title="Discount %"><span class="pct">% off</span>'
+      +'<input class="bupi" value="'+besc(b.upi||'')+'" placeholder="UPI (optional)" title="Is batch ka UPI. Khaali = shop default.">'
       +'<input class="bline" value="'+besc(b.line)+'" placeholder="Custom line (optional)">'
       +'<button type="button" class="btn2 bprev" onclick="previewBatch('+i+')">Preview</button>'
       +(BATCHES.length>1?'<button type="button" class="brm" onclick="removeBatch('+i+')" title="Remove">x</button>':'')
@@ -875,10 +870,10 @@ function collectBatches(){
   return Array.prototype.slice.call(document.querySelectorAll('#batchlist .brow')).map(function(r){
     return {name:r.querySelector('.bname').value, style:r.querySelector('.bstyle').value,
       lang:r.querySelector('.blang').value, disc:parseFloat(r.querySelector('.bdisc').value)||0,
-      line:r.querySelector('.bline').value};
+      upi:r.querySelector('.bupi').value, line:r.querySelector('.bline').value};
   });
 }
-function addBatch(){ if(BATCHES.length>=5){return;} BATCHES=collectBatches(); BATCHES.push({name:'Batch '+(BATCHES.length+1),style:'standard',lang:'hinglish',disc:0,line:''}); renderBatches(); }
+function addBatch(){ if(BATCHES.length>=5){return;} BATCHES=collectBatches(); BATCHES.push({name:'Batch '+(BATCHES.length+1),style:'standard',lang:'hinglish',disc:0,upi:'',line:''}); renderBatches(); }
 function removeBatch(i){ BATCHES=collectBatches(); BATCHES.splice(i,1); renderBatches(); }
 function saveBatches(){
   var msg=document.getElementById('batchmsg'); msg.textContent='Saving...';
@@ -891,7 +886,7 @@ function previewBatch(i){
   var b=collectBatches()[i]; if(!b){return;}
   var box=document.getElementById('prevtext'); box.textContent='Loading...';
   document.getElementById('prevmodal').classList.add('show');
-  var p=new URLSearchParams({token:TOKEN,style:b.style,language:b.lang,custom_line:b.line||'',discount_pct:String(b.disc||0)});
+  var p=new URLSearchParams({token:TOKEN,style:b.style,language:b.lang,custom_line:b.line||'',discount_pct:String(b.disc||0),upi:b.upi||''});
   fetch('/admin/preview?'+p.toString()).then(function(r){return r.json();}).then(function(d){box.textContent=d.message||'Preview not available.';}).catch(function(){box.textContent='Preview failed.';});
 }
 renderBatches();
@@ -944,14 +939,13 @@ renderBatches();
  .brow{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid #eee}}
  .brow:last-child{{border-bottom:0}}
  .bnum{{width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:#294d38;color:#fff;font-weight:700;font-size:.8rem;flex-shrink:0}}
- .bname{{width:110px}} .bdisc{{width:60px}} .bline{{flex:1;min-width:150px}}
+ .bname{{width:100px}} .bdisc{{width:56px}} .bupi{{width:110px}} .bline{{flex:1;min-width:130px}}
  .pct{{color:#787774;font-size:.85em}}
  .brm{{border:1px solid #eee;background:#fff;border-radius:6px;padding:7px 10px;color:#c0392b;font-weight:700}}
  .bprev{{padding:7px 12px}}
  #savebatch{{background:#0a7d33;color:#fff;border:0;border-radius:6px;padding:9px 18px;font-size:1em}}
  #batchmsg{{color:#0a7d33;font-weight:600}}
- .guide{{background:#e1f3fe;border:1px solid #bfe2f7;border-radius:12px;padding:16px 18px;margin:14px 0;font-size:.92em;line-height:1.7;color:#1f4d6b}}
- .guide b{{color:#123}}
+ .guide{{background:#f4f9fd;border-left:3px solid #bfe2f7;border-radius:0 8px 8px 0;padding:9px 14px;margin:0 0 14px;font-size:.88em;line-height:1.6;color:#4a6b82}}
 </style></head><body>
 <div class="wrap">
 <h2>Reminders</h2>
@@ -963,16 +957,9 @@ renderBatches();
  <div style="margin-top:10px"><button id="saveset" onclick="saveSettings()">Save time</button><span id="setmsg"></span></div>
 </div>
 
-<div class="guide">
- <b>Kaise kaam karta hai (3 step):</b>
- <div>1. Neeche <b>batch</b> banayein - tone (gentle/standard/firm), language aur discount chunein.</div>
- <div>2. <b>Dashboard</b> me har party ke aage batch select karein.</div>
- <div>3. ASVA khud us batch ke hisaab se professional reminder bhejta hai. Preview se message dekh lein.</div>
-</div>
-
 <div class="card">
  <h3>Reminder batches</h3>
- <div class="hint" style="margin:0 0 12px">Alag customers ko alag tone, language ya discount dena ho to batches banayein (max 5). Har batch ka apna severity, language, discount aur custom line hota hai. Dashboard se har party ko batch chunein. Jo assign nahi, unko Batch 1 jaata hai. Discount sirf ussi batch me lagta hai jisme aap set karo (0 = koi discount nahi).</div>
+ <div class="guide">Batch banayein (tone, language, discount) &rarr; Dashboard me har party ko batch dein &rarr; ASVA khud reminder bhejta hai. Jo assign nahi, unko Batch 1.</div>
  <div id="batchlist"></div>
  <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
    <button type="button" class="btn2" onclick="addBatch()">+ Batch add karein</button>
@@ -1287,6 +1274,7 @@ async def admin_preview(
     language: str = Query("hinglish"),
     custom_line: str = Query(""),
     discount_pct: float = Query(0.0),
+    upi: str = Query(""),
 ):
     """Render the exact reminder a customer would receive for the given (unsaved)
     settings, so the owner can preview it before saving."""
@@ -1303,7 +1291,7 @@ async def admin_preview(
     # Sample figures for a realistic preview.
     sample_amt = Decimal("12500")
     biz_name = biz.get("business_name", "")
-    vpa = biz.get("upi_vpa") or "shopupi@bank"
+    vpa = (upi or "").strip() or biz.get("upi_vpa") or "shopupi@bank"
     pay_amount, discount_line = apply_discount(sample_amt, discount_pct, lang)
 
     template_key = "reminder"

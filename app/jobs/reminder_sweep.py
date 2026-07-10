@@ -311,8 +311,10 @@ async def run() -> None:
         pay_amount, discount_line = apply_discount(
             outstanding, batch["disc"], batch_lang)
 
-        # UPI link + QR (attached to customer messages when VPA is set)
-        vpa = biz.get("upi_vpa")
+        # UPI link + QR (attached to customer messages when VPA is set). The
+        # batch may pay into its own UPI account; else the shop's default.
+        from app.services.batches import batch_vpa
+        vpa = batch_vpa(biz, batch)
         pay_link = upi.upi_link(vpa, biz_name, pay_amount, invoice_num) if vpa else ""
         qr_b64 = upi.qr_png_base64(pay_link) if (vpa and kind != "escalate") else None
 
