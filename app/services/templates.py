@@ -117,12 +117,11 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
         "aisensy_name": "reminder_hi",
         "body": (
             "Namaste {client} ji,\n"
-            "{business} ki taraf se ek chhota sa reminder. 🙏\n\n"
+            "{business} ki taraf se vinamra reminder.\n\n"
             "Bill {invoice_number} ka {outstanding} abhi baaki hai.\n"
-            "Samay milte hi payment kar dein.\n\n"
-            "UPI se turant payment: {upi_link}\n\n"
-            "Payment ho chuka hai? Bas PAID reply kar dein.\n"
-            "Apna poora hisaab dekhna ho to HISAB likhein."
+            "Suvidha anusaar payment kar dein:\n"
+            "{upi_link}\n\n"
+            "Payment ho chuka ho to PAID reply karein. Dhanyavaad."
         ),
     },
     ("reminder", Lang.gu): {
@@ -149,12 +148,11 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
     ("overdue", Lang.hi): {
         "aisensy_name": "overdue_hi",
         "body": (
-            "Namaste {client} ji,\n\n"
-            "{business} ka bill {invoice_number} ab {days_overdue} din se pending hai.\n"
-            "Baaki amount: {outstanding}\n\n"
-            "Aapse nivedan hai ki aaj payment kar dein:\n"
+            "Namaste {client} ji,\n"
+            "{business} ka bill {invoice_number} {days_overdue} din se pending hai.\n"
+            "Baaki: {outstanding}\n\n"
+            "Kripya jald payment kar dein:\n"
             "{upi_link}\n\n"
-            "Koi dikkat ho to bina jhijhak call kar lijiye.\n"
             "Payment ho gaya ho to PAID reply karein. Dhanyavaad."
         ),
     },
@@ -162,23 +160,65 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
     ("reminder_en", Lang.hi): {
         "aisensy_name": "reminder_en",
         "body": (
-            "Hello {client},\n"
-            "A gentle reminder from {business}.\n\n"
-            "Bill {invoice_number} of {outstanding} is still pending.\n"
-            "Kindly make the payment when you can.\n\n"
-            "Pay instantly via UPI: {upi_link}\n\n"
-            "Already paid? Just reply PAID.\n"
-            "To see your full account, reply HISAB."
+            "Dear {client},\n"
+            "A payment reminder from {business}.\n\n"
+            "Invoice {invoice_number} of {outstanding} is currently outstanding.\n"
+            "Kindly arrange the payment at your convenience:\n"
+            "{upi_link}\n\n"
+            "If already paid, please reply PAID. Thank you."
         ),
     },
     ("overdue_en", Lang.hi): {
         "aisensy_name": "overdue_en",
         "body": (
-            "Hello {client},\n\n"
-            "{business}: bill {invoice_number} is now {days_overdue} days pending.\n"
+            "Dear {client},\n"
+            "Invoice {invoice_number} from {business} is now {days_overdue} days overdue.\n"
             "Outstanding: {outstanding}\n\n"
-            "Request you to please clear it today:\n{upi_link}\n\n"
-            "If already paid, reply PAID. Thank you."
+            "Kindly arrange payment at the earliest:\n"
+            "{upi_link}\n\n"
+            "If already paid, please reply PAID. Thank you."
+        ),
+    },
+    ("reminder_en_gentle", Lang.hi): {
+        "aisensy_name": "reminder_en_gentle",
+        "body": (
+            "Dear {client},\n"
+            "A gentle reminder from {business}. No urgency.\n\n"
+            "Whenever convenient, kindly review invoice {invoice_number} of {outstanding}:\n"
+            "{upi_link}\n\n"
+            "If already paid, please reply PAID. Thank you."
+        ),
+    },
+    ("reminder_en_firm", Lang.hi): {
+        "aisensy_name": "reminder_en_firm",
+        "body": (
+            "Dear {client},\n"
+            "A payment reminder from {business}.\n\n"
+            "Invoice {invoice_number} of {outstanding} is due. Kindly clear it today:\n"
+            "{upi_link}\n\n"
+            "If already paid, please reply PAID. Thank you."
+        ),
+    },
+    ("overdue_en_gentle", Lang.hi): {
+        "aisensy_name": "overdue_en_gentle",
+        "body": (
+            "Dear {client},\n"
+            "Invoice {invoice_number} of {outstanding} from {business} is pending "
+            "({days_overdue} days).\n"
+            "Whenever you can, kindly clear it:\n"
+            "{upi_link}\n\n"
+            "Please let us know if there is any issue. If already paid, reply PAID."
+        ),
+    },
+    ("overdue_en_firm", Lang.hi): {
+        "aisensy_name": "overdue_en_firm",
+        "body": (
+            "Dear {client},\n"
+            "Invoice {invoice_number} from {business} is now {days_overdue} days overdue.\n"
+            "Outstanding: {outstanding}\n\n"
+            "Kindly settle it today:\n"
+            "{upi_link}\n\n"
+            "If already paid, please reply PAID. Thank you."
         ),
     },
     ("invoice_en", Lang.hi): {
@@ -197,39 +237,42 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
     ("reminder_gentle", Lang.hi): {
         "aisensy_name": "reminder_gentle_hi",
         "body": (
-            "Namaste {client} ji 🙏\n"
+            "Namaste {client} ji,\n"
             "{business} ki taraf se ek chhoti si yaad. Koi jaldi nahi.\n\n"
-            "Jab suvidha ho, bill {invoice_number} ka {outstanding} dekh lijiyega.\n\n"
-            "UPI se payment: {upi_link}\n\n"
-            "Payment ho chuka ho to bas PAID reply kar dein. Dhanyavaad!"
+            "Jab suvidha ho, bill {invoice_number} ka {outstanding} dekh lijiyega:\n"
+            "{upi_link}\n\n"
+            "Payment ho chuka ho to PAID reply karein. Dhanyavaad."
         ),
     },
     ("reminder_firm", Lang.hi): {
         "aisensy_name": "reminder_firm_hi",
         "body": (
             "Namaste {client} ji,\n"
-            "{business} ka bill {invoice_number} ka {outstanding} abhi baaki hai.\n\n"
-            "Kripya aaj payment kar dein:\n{upi_link}\n\n"
+            "{business} ka bill {invoice_number} ka {outstanding} baaki hai.\n\n"
+            "Kripya aaj payment kar dein:\n"
+            "{upi_link}\n\n"
             "Payment ho gaya ho to PAID reply karein. Dhanyavaad."
         ),
     },
     ("overdue_gentle", Lang.hi): {
         "aisensy_name": "overdue_gentle_hi",
         "body": (
-            "Namaste {client} ji 🙏\n\n"
-            "{business} ka bill {invoice_number} ka {outstanding} abhi baaki hai "
-            "({days_overdue} din ho gaye).\n"
-            "Jab ho sake, payment kar dijiyega: {upi_link}\n\n"
-            "Koi dikkat ho to nishankoch batayein. Payment ho gaya ho to PAID reply karein."
+            "Namaste {client} ji,\n"
+            "{business} ka bill {invoice_number} ka {outstanding} baaki hai "
+            "({days_overdue} din).\n"
+            "Jab ho sake, payment kar dijiyega:\n"
+            "{upi_link}\n\n"
+            "Koi dikkat ho to bata dijiye. Payment ho gaya ho to PAID reply karein."
         ),
     },
     ("overdue_firm", Lang.hi): {
         "aisensy_name": "overdue_firm_hi",
         "body": (
-            "Namaste {client} ji,\n\n"
+            "Namaste {client} ji,\n"
             "{business} ka bill {invoice_number} ab {days_overdue} din se pending hai.\n"
             "Baaki: {outstanding}\n\n"
-            "Kripya aaj hi payment kar dein: {upi_link}\n\n"
+            "Kripya aaj hi payment kar dein:\n"
+            "{upi_link}\n\n"
             "Payment ho gaya ho to PAID reply karein. Dhanyavaad."
         ),
     },

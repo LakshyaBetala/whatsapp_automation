@@ -348,10 +348,10 @@ async def run() -> None:
 
             template_key = "overdue" if kind == "overdue" else "reminder"
             style = batch_style
-            # English preference swaps to the _en templates (no tone split there).
+            # English swaps to the _en templates, which now HAVE gentle/firm tone
+            # variants too (reminder_en_gentle / _firm etc.), so keep the style.
             if batch_lang == "english":
                 template_key += "_en"
-                style = "standard"
             tpl_name, body = render(
                 template_key,
                 client_lang,
