@@ -627,7 +627,7 @@ async def _open_bills_by_client(business_id: str) -> dict[str, dict]:
     resp = (
         db.table("bills")
         .select("id, invoice_number, outstanding, invoice_date, due_date, "
-                "client_id, clients(id, name, whatsapp_number, reminders_enabled, language)")
+                "client_id, clients(id, name, whatsapp_number, reminders_enabled, language, reminder_batch)")
         .eq("business_id", business_id)
         .in_("status", ["pending", "partial", "overdue"])
         .order("invoice_date")
@@ -664,8 +664,10 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     bills = entry["bills"]
     today = date.today()
     biz_name = business.get("business_name", "")
-    # Professional copy in the business's chosen language (Hinglish default).
-    en = (business.get("msg_language") or "hinglish").strip().lower() == "english"
+    # Professional copy in the party's reminder-batch language (Hinglish default).
+    from app.services.batches import resolve_batch
+    batch = resolve_batch(business, client.get("reminder_batch"))
+    en = batch["lang"] == "english"
 
     def _age(b) -> int:
         return (today - date.fromisoformat(str(b["invoice_date"]))).days
@@ -695,9 +697,9 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
                 lines.append(f"- aur {len(bills) - 4} bills")
             lines.append(f"Kul baaki: {inr(total)}")
 
-    # Early-payment discount: QR + line reflect the discounted amount.
-    pay_amount, discount_line = apply_discount(
-        total, business.get("discount_pct"), business.get("msg_language") or "hinglish")
+    # Early-payment discount from the batch: QR + line reflect the discount
+    # (line appears only when the batch actually sets one).
+    pay_amount, discount_line = apply_discount(total, batch["disc"], batch["lang"])
     vpa = business.get("upi_vpa")
     qr_b64 = None
     if vpa:
@@ -706,6 +708,8 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
         lines += ["", (f"To pay via UPI: {link}" if en else f"UPI se payment: {link}")]
     if discount_line:
         lines += ["", discount_line]
+    if batch.get("line"):
+        lines += ["", batch["line"]]
     lines += ["", ("Once paid, kindly reply PAID. Thank you."
                    if en else "Payment ho jaye to PAID reply karein. Dhanyavaad.")]
 

@@ -176,7 +176,8 @@ async def run() -> None:
             "id, business_name, whatsapp_number, plan, blackout_dates, "
             "reminders_enabled, upi_vpa, reminder_cadence, weekly_off_day, "
             "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
-            "discount_pct, overdue_repeat_days, overdue_max_repeats, plan_expires_on"
+            "discount_pct, overdue_repeat_days, overdue_max_repeats, plan_expires_on, "
+            "reminder_batches"
         )
         .eq("reminders_enabled", True)
         .execute()
@@ -203,7 +204,7 @@ async def run() -> None:
         .select(
             "id, invoice_number, amount, outstanding, status, due_date, "
             "invoice_date, business_id, client_id, "
-            "clients(id, name, whatsapp_number, language, reminders_enabled, credit_days)"
+            "clients(id, name, whatsapp_number, language, reminders_enabled, credit_days, reminder_batch)"
         )
         .in_("status", ["pending", "partial", "overdue"])
         .in_("business_id", list(businesses.keys()))
@@ -249,8 +250,16 @@ async def run() -> None:
         days_since_invoice = (today - invoice_date).days
         due_offset = (due_date - invoice_date).days
 
+        # Per-party reminder batch: its severity (style) drives the cadence and
+        # tone, its language/discount/custom-line drive the copy. Falls back to
+        # the business's global settings when no batches are configured.
+        from app.services.batches import resolve_batch
+        batch = resolve_batch(biz, client.get("reminder_batch"))
+        batch_style = batch["style"]
+        batch_lang = batch["lang"]
+
         points = cadence_points(
-            cadence=biz.get("reminder_cadence") or DEFAULT_CADENCE,
+            cadence=STYLE_CADENCE.get(batch_style, biz.get("reminder_cadence") or DEFAULT_CADENCE),
             repeat_days=biz.get("overdue_repeat_days") or 7,
             max_repeats=biz.get("overdue_max_repeats") or 3,
             credit_days=client.get("credit_days") or 30,
@@ -296,10 +305,11 @@ async def run() -> None:
         days_since_due = max((today - due_date).days, 0)
         biz_name = biz.get("business_name", "")
 
-        # Early-payment discount: the QR + shown amount drop by discount_pct,
-        # and a discount line is appended to the reminder.
+        # Early-payment discount (from the party's batch): the QR + shown amount
+        # drop by the batch discount, and a discount line is appended - only when
+        # the batch actually sets a discount (else no line at all).
         pay_amount, discount_line = apply_discount(
-            outstanding, biz.get("discount_pct"), biz.get("msg_language") or "hinglish")
+            outstanding, batch["disc"], batch_lang)
 
         # UPI link + QR (attached to customer messages when VPA is set)
         vpa = biz.get("upi_vpa")
@@ -337,9 +347,9 @@ async def run() -> None:
                 continue
 
             template_key = "overdue" if kind == "overdue" else "reminder"
-            style = biz.get("reminder_style") or "standard"
+            style = batch_style
             # English preference swaps to the _en templates (no tone split there).
-            if (biz.get("msg_language") or "hinglish") == "english":
+            if batch_lang == "english":
                 template_key += "_en"
                 style = "standard"
             tpl_name, body = render(
@@ -356,7 +366,7 @@ async def run() -> None:
             # Early-payment discount line (auto), then owner's optional custom line.
             if discount_line:
                 body = f"{body}\n\n{discount_line}"
-            custom_line = (biz.get("reminder_custom_line") or "").strip()
+            custom_line = (batch.get("line") or "").strip()
             if custom_line:
                 body = f"{body}\n\n{custom_line}"
 

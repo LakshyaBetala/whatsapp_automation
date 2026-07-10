@@ -32,7 +32,7 @@ def _biz_by_token(token: str) -> dict:
             .select("id, business_name, weekly_off_day, blackout_dates, "
                     "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
                     "discount_pct, plan, upi_vpa, whatsapp_number, reminder_cadence, "
-                    "overdue_repeat_days, overdue_max_repeats")
+                    "overdue_repeat_days, overdue_max_repeats, reminder_batches")
             .eq("agent_token", token).limit(1).execute())
     if not resp.data:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -211,6 +211,23 @@ _UI_EN: list[tuple[str, str]] = [
     ("Aapka ", "Your "),
     ("Aapke ", "You have "),
     ("ASVA suggestion: ", "ASVA suggestion: "),
+    # ---- Reminder batches ----
+    ("Alag customers ko alag tone, language ya discount dena ho to batches banayein (max 5). Har batch ka apna severity, language, discount aur custom line hota hai. Dashboard se har party ko batch chunein. Jo assign nahi, unko Batch 1 jaata hai. Discount sirf ussi batch me lagta hai jisme aap set karo (0 = koi discount nahi).",
+     "To give different customers a different tone, language or discount, create batches (max 5). Each batch has its own severity, language, discount and custom line. Assign each party to a batch from the Dashboard. Unassigned parties use Batch 1. A discount applies only to the batch you set it on (0 = no discount)."),
+    ("Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Yahan sirf batches, send time aur holidays set karein.",
+     "ASVA manages reminder timing itself (based on each party's credit days). Here you only set batches, send time and holidays."),
+    ("Reminder batches", "Reminder batches"),
+    ("+ Batch add karein", "+ Add batch"),
+    ("Save batches", "Save batches"),
+    ("Save time", "Save time"),
+    ("Custom line (optional)", "Custom line (optional)"),
+    ("Har din is time par (jab tak system on hai).", "Every day at this time (while the system is on)."),
+    ("Batch assign", "Assign batch"),
+    ("Selected parties ko is batch me daalein", "Move selected parties to this batch"),
+    ("Pehle parties tick karein.", "Tick some parties first."),
+    ("(is party ke reminder ki tone/language/discount)", "(this party's reminder tone/language/discount)"),
+    ("Batch: 1 (Standard). Alag batches Reminders tab me banayein.",
+     "Batch: 1 (Standard). Create more batches in the Reminders tab."),
     # ---- Reminders page ----
     ("Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Aap sirf yeh settings badlein.",
      "ASVA manages reminder timing itself (based on each party's credit days). You only change these settings."),
@@ -317,7 +334,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
     start = 0
     while True:
         resp = (db.table("clients")
-                .select("id, name, whatsapp_number, reminders_enabled, tally_ledger_name, credit_days")
+                .select("id, name, whatsapp_number, reminders_enabled, tally_ledger_name, credit_days, reminder_batch")
                 .eq("business_id", biz["id"])
                 .order("name")
                 .range(start, start + 999).execute())
@@ -357,6 +374,20 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
 
     clients.sort(key=lambda c: totals.get(c["id"], Decimal(0)), reverse=True)
 
+    from app.services.batches import get_batches
+    batches = get_batches(biz)
+    multi_batch = len(batches) > 1
+
+    def _batch_opts(cur: int) -> str:
+        return ''.join(
+            f'<option value="{i}"{" selected" if i == cur else ""}>{i + 1}. '
+            f'{(b["name"] or "").replace("&", "&amp;").replace("<", "&lt;")}</option>'
+            for i, b in enumerate(batches))
+
+    batch_bulk = (f'<select id="bulkbatch">{_batch_opts(0)}</select>'
+                  f'<button onclick="assignChecked()" title="Selected parties ko is batch me daalein">Batch assign</button>'
+                  if multi_batch else '')
+
     rows = []
     for c in clients:
         out = totals.get(c["id"], Decimal(0))
@@ -386,6 +417,11 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
         else:
             rl, rc = _next_reminder(biz, cbills, cd_val, today)
             rem_badge = f'<span class="rbadge" style="color:{rc};border-color:{rc}">{rl}</span>'
+        cur_batch = int(c.get("reminder_batch") or 0)
+        if cur_batch >= len(batches):
+            cur_batch = 0
+        batch_cell = (f'<select class="bsel" data-cid="{c["id"]}">{_batch_opts(cur_batch)}</select>'
+                      if multi_batch else f'<span class="rbadge none">{cur_batch + 1}</span>')
         rows.append(
             f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}">'
             f'<td><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
@@ -393,6 +429,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
             f'<td class="amt">{out_str}</td>'
             f'<td class="od">{od_str}</td>'
             f'<td>{rem_badge}</td>'
+            f'<td>{batch_cell}</td>'
             f'<td><button class="termbtn" data-cid="{c["id"]}" data-party="{nm_attr}" data-cd="{cd_val}">{cd_label}</button></td>'
             f'<td class="ph">{phone}</td>'
             f'<td><button class="sendbtn" data-party="{nm_attr}">Send now</button> {pay_btn}</td></tr>'
@@ -577,10 +614,11 @@ async def admin_page(token: str = Query(...), lang: str = Query("hinglish")):
  <button onclick="setAll(true)" title="Sabko reminder ON karo">✓ Sab ON</button>
  <button onclick="setAll(false)" title="Sabko reminder OFF karo">✗ Sab OFF</button>
  <button id="save" onclick="save()">💾 Save list</button>
+ {batch_bulk}
  <span id="msg"></span>
 </div>
 <div class="tablewrap">
-<table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Agla reminder</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
+<table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Agla reminder</th><th>Batch</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
 {''.join(rows)}
 </table>
 </div>
@@ -705,6 +743,32 @@ async function recordPayment(btn) {{
 }}
 document.querySelectorAll('.paybtn').forEach(b => b.onclick = () => recordPayment(b));
 
+// ── Reminder batch assignment (per-row select + bulk on checked rows) ──
+async function assignBatch(sel) {{
+  const cid = sel.dataset.cid, batch = parseInt(sel.value);
+  sel.disabled = true;
+  try {{
+    const r = await fetch('/admin/assign-batch', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_ids: [cid], batch: batch}})}});
+    if (!r.ok) alert('Batch assign fail');
+  }} catch (e) {{ alert('Batch assign fail'); }}
+  sel.disabled = false;
+}}
+document.querySelectorAll('.bsel').forEach(s => s.onchange = () => assignBatch(s));
+
+async function assignChecked() {{
+  const ids = [...document.querySelectorAll('.cb:checked')].map(c => c.value);
+  if (!ids.length) {{ alert('Pehle parties tick karein.'); return; }}
+  const batch = parseInt(document.getElementById('bulkbatch').value);
+  if (!confirm(ids.length + ' parties ko Batch ' + (batch + 1) + ' me daalein?')) return;
+  const r = await fetch('/admin/assign-batch', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{token: TOKEN, client_ids: ids, batch: batch}})}});
+  const d = await r.json();
+  if (r.ok) {{ document.getElementById('msg').textContent = '✅ ' + (d.assigned || 0) + ' -> Batch ' + (batch + 1);
+    setTimeout(() => location.reload(), 900); }}
+  else document.getElementById('msg').textContent = '❌ Assign failed';
+}}
+
 // ── Per-party credit days + read-only reminder schedule ──────────────
 const BASE_CADENCE = {base_cadence_json};   // reminder timing is ASVA's logic
 let TERM_CID = null;
@@ -778,6 +842,54 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("hinglish")
         f'<option value="{h}" {"selected" if h == rhour else ""}>{h:02d}:00</option>'
         for h in range(24))
 
+    from app.services.batches import get_batches
+    batches_json = json.dumps(get_batches(biz))
+    # Batch editor JS kept as a plain string (single braces) and interpolated, so
+    # it needs no f-string brace-doubling.
+    batch_js = r"""
+var STYLES=[['gentle','Gentle'],['standard','Standard'],['firm','Firm']];
+var LANGS=[['hinglish','Hinglish'],['english','English']];
+function besc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function bopts(list,val){return list.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('');}
+function renderBatches(){
+  document.getElementById('batchlist').innerHTML = BATCHES.map(function(b,i){
+    return '<div class="brow"><span class="bnum">'+(i+1)+'</span>'
+      +'<input class="bname" value="'+besc(b.name)+'" placeholder="Name">'
+      +'<select class="bstyle" title="Severity">'+bopts(STYLES,b.style)+'</select>'
+      +'<select class="blang" title="Language">'+bopts(LANGS,b.lang)+'</select>'
+      +'<input class="bdisc" type="number" min="0" max="50" step="0.5" value="'+(b.disc||0)+'" title="Discount %"><span class="pct">% off</span>'
+      +'<input class="bline" value="'+besc(b.line)+'" placeholder="Custom line (optional)">'
+      +'<button type="button" class="btn2 bprev" onclick="previewBatch('+i+')">Preview</button>'
+      +(BATCHES.length>1?'<button type="button" class="brm" onclick="removeBatch('+i+')" title="Remove">x</button>':'')
+      +'</div>';
+  }).join('');
+}
+function collectBatches(){
+  return Array.prototype.slice.call(document.querySelectorAll('#batchlist .brow')).map(function(r){
+    return {name:r.querySelector('.bname').value, style:r.querySelector('.bstyle').value,
+      lang:r.querySelector('.blang').value, disc:parseFloat(r.querySelector('.bdisc').value)||0,
+      line:r.querySelector('.bline').value};
+  });
+}
+function addBatch(){ if(BATCHES.length>=5){return;} BATCHES=collectBatches(); BATCHES.push({name:'Batch '+(BATCHES.length+1),style:'standard',lang:'hinglish',disc:0,line:''}); renderBatches(); }
+function removeBatch(i){ BATCHES=collectBatches(); BATCHES.splice(i,1); renderBatches(); }
+function saveBatches(){
+  var msg=document.getElementById('batchmsg'); msg.textContent='Saving...';
+  fetch('/admin/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,batches:collectBatches()})})
+    .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+    .then(function(x){ if(x.ok){ BATCHES=x.d.batches; renderBatches(); msg.textContent='Saved'; } else { msg.textContent='Save failed'; } })
+    .catch(function(){ msg.textContent='Save failed'; });
+}
+function previewBatch(i){
+  var b=collectBatches()[i]; if(!b){return;}
+  var box=document.getElementById('prevtext'); box.textContent='Loading...';
+  document.getElementById('prevmodal').classList.add('show');
+  var p=new URLSearchParams({token:TOKEN,style:b.style,language:b.lang,custom_line:b.line||'',discount_pct:String(b.disc||0)});
+  fetch('/admin/preview?'+p.toString()).then(function(r){return r.json();}).then(function(d){box.textContent=d.message||'Preview not available.';}).catch(function(){box.textContent='Preview failed.';});
+}
+renderBatches();
+"""
+
     html = f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{biz['business_name']} - Reminders</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -822,22 +934,35 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("hinglish")
  .modal.show{{display:flex}}
  .modalbox{{background:#fff;max-width:420px;width:90%;border-radius:14px;padding:18px 20px}}
  .msgprev{{white-space:pre-wrap;background:#f6f6f4;border:1px solid #eee;border-radius:8px;padding:12px;font-size:.95em;line-height:1.5;max-height:50vh;overflow:auto}}
+ .brow{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid #eee}}
+ .brow:last-child{{border-bottom:0}}
+ .bnum{{width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:#294d38;color:#fff;font-weight:700;font-size:.8rem;flex-shrink:0}}
+ .bname{{width:110px}} .bdisc{{width:60px}} .bline{{flex:1;min-width:150px}}
+ .pct{{color:#787774;font-size:.85em}}
+ .brm{{border:1px solid #eee;background:#fff;border-radius:6px;padding:7px 10px;color:#c0392b;font-weight:700}}
+ .bprev{{padding:7px 12px}}
+ #savebatch{{background:#0a7d33;color:#fff;border:0;border-radius:6px;padding:9px 18px;font-size:1em}}
+ #batchmsg{{color:#0a7d33;font-weight:600}}
 </style></head><body>
 <div class="wrap">
 <h2>Reminders</h2>
-<div class="sub">Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Aap sirf yeh settings badlein.</div>
+<div class="sub">Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Yahan sirf batches, send time aur holidays set karein.</div>
 
 <div class="card">
- <div class="row"><label>Message language</label><div class="seg" id="lang">{lang_seg}</div></div>
- <div class="row"><label>Send reminders at</label><select id="rhour">{hour_opts}</select></div>
- <div class="row"><label>Custom line</label>
-   <input id="cline" maxlength="120" placeholder="(optional) e.g. Diwali greetings" value="{cline_attr}"></div>
- <div class="row"><label>Early-pay discount</label>
-   <input id="disc" type="number" min="0" max="50" step="0.5" value="{disc_cur}" style="width:90px"> %
-   <span class="hint" style="margin:0">QR + amount is discount se kam ho jayega. 0 = no discount.</span></div>
- <div class="row"><button type="button" class="btn2" onclick="viewMessage()">View message</button>
-   <span class="hint" style="margin:0">Jo settings chuni hain, wahi message dikhega.</span></div>
- <div style="margin-top:14px"><button id="saveset" onclick="saveSettings()">Save settings</button><span id="setmsg"></span></div>
+ <div class="row"><label>Send reminders at</label><select id="rhour">{hour_opts}</select>
+   <span class="hint" style="margin:0">Har din is time par (jab tak system on hai).</span></div>
+ <div style="margin-top:10px"><button id="saveset" onclick="saveSettings()">Save time</button><span id="setmsg"></span></div>
+</div>
+
+<div class="card">
+ <h3>Reminder batches</h3>
+ <div class="hint" style="margin:0 0 12px">Alag customers ko alag tone, language ya discount dena ho to batches banayein (max 5). Har batch ka apna severity, language, discount aur custom line hota hai. Dashboard se har party ko batch chunein. Jo assign nahi, unko Batch 1 jaata hai. Discount sirf ussi batch me lagta hai jisme aap set karo (0 = koi discount nahi).</div>
+ <div id="batchlist"></div>
+ <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+   <button type="button" class="btn2" onclick="addBatch()">+ Batch add karein</button>
+   <button id="savebatch" onclick="saveBatches()">Save batches</button>
+   <span id="batchmsg"></span>
+ </div>
 </div>
 
 <div class="card">
@@ -861,16 +986,11 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("hinglish")
 
 <script>
 const TOKEN = {token!r};
-let STYLE = {style!r};
-let LANG = {msg_lang!r};
 let WOFF = {woff_json};
 let FEST = {festivals_json};
+let BATCHES = {batches_json};
 let calY, calM;
-
-document.querySelectorAll('#lang button').forEach(b => b.onclick = () => {{
-  LANG = b.dataset.v;
-  document.querySelectorAll('#lang button').forEach(x => x.classList.toggle('on', x === b));
-}});
+{batch_js}
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const pad = n => (n < 10 ? '0' : '') + n;
 const _t0 = new Date();
@@ -928,29 +1048,11 @@ async function saveSettings() {{
   document.getElementById('setmsg').textContent = 'Saving...';
   const r = await fetch('/admin/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}},
     body: JSON.stringify({{
-      token: TOKEN, reminder_style: STYLE, msg_language: LANG,
+      token: TOKEN,
       reminder_hour: parseInt(document.getElementById('rhour').value),
-      reminder_custom_line: document.getElementById('cline').value,
-      discount_pct: parseFloat(document.getElementById('disc').value) || 0,
       weekly_off_day: null, blackout_dates: FEST
     }})}});
   document.getElementById('setmsg').textContent = r.ok ? 'Saved' : 'Save failed';
-}}
-
-async function viewMessage() {{
-  const box = document.getElementById('prevtext');
-  box.textContent = 'Loading...';
-  document.getElementById('prevmodal').classList.add('show');
-  const p = new URLSearchParams({{
-    token: TOKEN, style: STYLE, language: LANG,
-    custom_line: document.getElementById('cline').value,
-    discount_pct: document.getElementById('disc').value || '0'
-  }});
-  try {{
-    const r = await fetch('/admin/preview?' + p.toString());
-    const d = await r.json();
-    box.textContent = d.message || 'Preview not available.';
-  }} catch (e) {{ box.textContent = 'Preview failed.'; }}
 }}
 </script></body></html>"""
     return HTMLResponse(_ui_translate(html, _is_en(lang)))
@@ -1045,6 +1147,50 @@ async def admin_sync_status(token: str = Query(...)):
         "tally_label": tally_label,
         "tally_color": tally_color,
     }
+
+
+class BatchesPayload(BaseModel):
+    token: str
+    batches: list[dict]
+
+
+@router.post("/admin/batches")
+async def admin_save_batches(payload: BatchesPayload):
+    """Save the business's reminder batches (up to 5). Each batch carries its own
+    severity (style), language, early-pay discount and custom line."""
+    from app.services.batches import normalize_batches
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    clean = normalize_batches(payload.batches)
+    db.table("businesses").update({"reminder_batches": clean}).eq("id", biz["id"]).execute()
+    return {"ok": True, "batches": clean}
+
+
+class AssignBatchPayload(BaseModel):
+    token: str
+    client_ids: list[str]
+    batch: int
+
+
+@router.post("/admin/assign-batch")
+async def admin_assign_batch(payload: AssignBatchPayload):
+    """Assign one or more parties to a reminder batch (0-4)."""
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    b = max(0, min(4, int(payload.batch)))
+    ids = [i for i in (payload.client_ids or []) if i]
+    if not ids:
+        return {"ok": True, "assigned": 0}
+    # Scope to this business, then update in chunks.
+    valid = set()
+    for chunk in _chunked(ids, 100):
+        r = (db.table("clients").select("id").eq("business_id", biz["id"])
+             .in_("id", chunk).execute())
+        valid.update(c["id"] for c in (r.data or []))
+    ids = [i for i in ids if i in valid]
+    for chunk in _chunked(ids, 100):
+        db.table("clients").update({"reminder_batch": b}).in_("id", chunk).execute()
+    return {"ok": True, "assigned": len(ids), "batch": b}
 
 
 class SettingsPayload(BaseModel):
@@ -1188,6 +1334,9 @@ async def admin_send_now(payload: SendNowPayload):
         "upi_vpa": biz.get("upi_vpa"),
         "discount_pct": biz.get("discount_pct"),
         "msg_language": biz.get("msg_language"),
+        "reminder_style": biz.get("reminder_style"),
+        "reminder_custom_line": biz.get("reminder_custom_line"),
+        "reminder_batches": biz.get("reminder_batches"),
     }
     try:
         reply = await bot._handle_remind(business, party)
@@ -1357,7 +1506,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
     cr = (db.table("clients")
           .select("id, name, whatsapp_number, credit_days, reminders_enabled, "
-                  "tally_ledger_name, language")
+                  "tally_ledger_name, language, reminder_batch")
           .eq("id", client_id).eq("business_id", biz["id"]).limit(1).execute())
     if not cr.data:
         raise HTTPException(status_code=404, detail="party not found")
@@ -1492,6 +1641,23 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
             f'<div class="muted" style="margin-bottom:10px">Ab tak <b>{sent_count}</b> reminder gaye. Aane wale:</div>'
             f'<div class="chips">{chips}</div></div>')
 
+    # Reminder batch selector (only meaningful when the shop has >1 batch).
+    from app.services.batches import get_batches
+    pbatches = get_batches(biz)
+    cur_batch = int(c.get("reminder_batch") or 0)
+    if cur_batch >= len(pbatches):
+        cur_batch = 0
+    if len(pbatches) > 1:
+        bopts = ''.join(
+            f'<option value="{i}"{" selected" if i == cur_batch else ""}>{i + 1}. {esc(b["name"])}</option>'
+            for i, b in enumerate(pbatches))
+        batch_html = (f'<div class="row" style="margin-top:10px">Batch: '
+                      f'<select id="pbatch" onchange="assignBatch()">{bopts}</select> '
+                      f'<span class="muted">(is party ke reminder ki tone/language/discount)</span></div>')
+    else:
+        batch_html = ('<div class="row" style="margin-top:10px"><span class="muted">'
+                      'Batch: 1 (Standard). Alag batches Reminders tab me banayein.</span></div>')
+
     phone = c.get("whatsapp_number")
     phone_html = esc(phone) if phone else '<span style="color:#c0392b">number nahi hai</span>'
     toggle_label = "Reminder OFF karein" if rem_on else "Reminder ON karein"
@@ -1520,6 +1686,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     <button id="remtoggle" class="{toggle_cls}" onclick="toggleRem()">{toggle_label}</button>
   </div>
   <div class="hint" id="remhint">{rem_hint}</div>
+  {batch_html}
 </div>
 
 <h2>Bills</h2>
@@ -1536,6 +1703,16 @@ const TOKEN = {token!r};
 const CID = {client_id!r};
 const PNAME = {json.dumps(c["name"] or "")};
 let REM_ON = {str(bool(rem_on)).lower()};
+async function assignBatch() {{
+  const sel = document.getElementById('pbatch'); if (!sel) return;
+  sel.disabled = true;
+  try {{
+    const r = await fetch('/admin/assign-batch', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_ids: [CID], batch: parseInt(sel.value)}})}});
+    if (r.ok) location.reload(); else alert('Batch assign fail');
+  }} catch (e) {{ alert('Batch assign fail'); }}
+  sel.disabled = false;
+}}
 async function toggleRem() {{
   const turningOff = REM_ON;
   if (turningOff && !confirm(PNAME + ' ke reminder OFF kar dein? Isko automatic reminder nahi jayega.')) return;

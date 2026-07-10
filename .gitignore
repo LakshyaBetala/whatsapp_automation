@@ -29,11 +29,11 @@ Asva/
 *.xml
 *.txt
 !requirements.txt
-# Scratch / debug scripts
-batch*.py
-dump_*.py
-analyze_*.py
-parse_*.py
+# Scratch / debug scripts (root only - do not catch app/ package modules)
+/batch*.py
+/dump_*.py
+/analyze_*.py
+/parse_*.py
 
 # Agent config holds the live agent_token — never commit
 tally_agent/config.json
