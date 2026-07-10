@@ -212,6 +212,13 @@ _UI_EN: list[tuple[str, str]] = [
     ("Aapke ", "You have "),
     ("ASVA suggestion: ", "ASVA suggestion: "),
     # ---- Reminder batches ----
+    ("Kaise kaam karta hai (3 step):", "How it works (3 steps):"),
+    ("Neeche <b>batch</b> banayein - tone (gentle/standard/firm), language aur discount chunein.",
+     "Create a <b>batch</b> below - choose tone (gentle/standard/firm), language and discount."),
+    ("<b>Dashboard</b> me har party ke aage batch select karein.",
+     "On the <b>Dashboard</b>, pick a batch next to each party."),
+    ("ASVA khud us batch ke hisaab se professional reminder bhejta hai. Preview se message dekh lein.",
+     "ASVA sends a professional reminder based on that batch. Use Preview to see the message."),
     ("Alag customers ko alag tone, language ya discount dena ho to batches banayein (max 5). Har batch ka apna severity, language, discount aur custom line hota hai. Dashboard se har party ko batch chunein. Jo assign nahi, unko Batch 1 jaata hai. Discount sirf ussi batch me lagta hai jisme aap set karo (0 = koi discount nahi).",
      "To give different customers a different tone, language or discount, create batches (max 5). Each batch has its own severity, language, discount and custom line. Assign each party to a batch from the Dashboard. Unassigned parties use Batch 1. A discount applies only to the batch you set it on (0 = no discount)."),
     ("Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Yahan sirf batches, send time aur holidays set karein.",
@@ -943,6 +950,8 @@ renderBatches();
  .bprev{{padding:7px 12px}}
  #savebatch{{background:#0a7d33;color:#fff;border:0;border-radius:6px;padding:9px 18px;font-size:1em}}
  #batchmsg{{color:#0a7d33;font-weight:600}}
+ .guide{{background:#e1f3fe;border:1px solid #bfe2f7;border-radius:12px;padding:16px 18px;margin:14px 0;font-size:.92em;line-height:1.7;color:#1f4d6b}}
+ .guide b{{color:#123}}
 </style></head><body>
 <div class="wrap">
 <h2>Reminders</h2>
@@ -952,6 +961,13 @@ renderBatches();
  <div class="row"><label>Send reminders at</label><select id="rhour">{hour_opts}</select>
    <span class="hint" style="margin:0">Har din is time par (jab tak system on hai).</span></div>
  <div style="margin-top:10px"><button id="saveset" onclick="saveSettings()">Save time</button><span id="setmsg"></span></div>
+</div>
+
+<div class="guide">
+ <b>Kaise kaam karta hai (3 step):</b>
+ <div>1. Neeche <b>batch</b> banayein - tone (gentle/standard/firm), language aur discount chunein.</div>
+ <div>2. <b>Dashboard</b> me har party ke aage batch select karein.</div>
+ <div>3. ASVA khud us batch ke hisaab se professional reminder bhejta hai. Preview se message dekh lein.</div>
 </div>
 
 <div class="card">
