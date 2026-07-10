@@ -83,7 +83,6 @@
       <div id="statusbtn" onclick="toggleStatus()">
         <span class="dot" id="d-backend"></span>
         <span class="dot" id="d-whatsapp"></span>
-        <span class="dot" id="d-company"></span>
         <span style="margin-left:4px">Status</span>
       </div>
     </div>
@@ -129,12 +128,8 @@
     <div class="view" id="v-setup">
       <div class="setupwrap">
         <div class="setupcol">
-          <h3>Shop number (3001) - customers ko yahi se jaata hai</h3>
+          <h3>Shop WhatsApp - is number se bill aur reminder jaate hain</h3>
           <div class="qrbox" id="qr-shop"><div class="qrwait">Loading...</div></div>
-        </div>
-        <div class="setupcol">
-          <h3>Company number (3002) - 9344110272</h3>
-          <div class="qrbox" id="qr-company"><div class="qrwait">Loading...</div></div>
         </div>
       </div>
     </div>
@@ -144,8 +139,7 @@
       <div class="statuscard">
         <div class="toprow"><h2>Services</h2><button class="closebtn" onclick="toggleStatus()">Close</button></div>
         <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">Backend (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="restart('backend')">Restart</button></div>
-        <div class="srow"><span class="dot" id="s-whatsapp"></span><div class="mid"><div class="sname">WhatsApp - shop number</div><div class="stext" id="st-whatsapp">checking...</div></div><button onclick="restart('whatsapp')">Restart</button></div>
-        <div class="srow"><span class="dot" id="s-company"></span><div class="mid"><div class="sname">Company bot (9344110272)</div><div class="stext" id="st-company">checking...</div></div><button onclick="restart('company')">Restart</button></div>
+        <div class="srow"><span class="dot" id="s-whatsapp"></span><div class="mid"><div class="sname">Shop WhatsApp</div><div class="stext" id="st-whatsapp">checking...</div></div><button onclick="restart('whatsapp')">Restart</button></div>
         <div class="srow"><span class="dot ok"></span><div class="mid"><div class="sname">Tally watcher</div><div class="stext">Running - naye bill 2 min me WhatsApp par.</div></div><button onclick="restart('watcher')">Restart</button></div>
         <label class="auto"><input type="checkbox" id="autostart"> Windows chalu hote hi ASVA apne aap khul jaye</label>
         <div id="log"></div>
@@ -267,12 +261,9 @@ window.asva.onStatus((s) => {
 
   setDot('d-backend', !!s.backend); setDot('s-backend', !!s.backend);
   setDot('d-whatsapp', !!s.whatsapp); setDot('s-whatsapp', !!s.whatsapp);
-  setDot('d-company', !!s.company); setDot('s-company', !!s.company);
   document.getElementById('st-backend').textContent = s.backend ? 'Running.' : 'Start ho raha hai. 1 min baad bhi red rahe to Restart.';
   document.getElementById('st-whatsapp').textContent = waText(s.whatsapp, s.whatsappReachable);
-  document.getElementById('st-company').textContent = waText(s.company, s.companyReachable);
   renderQr('qr-shop', s.whatsapp, s.whatsappReachable, s.whatsappQr, 'shop');
-  renderQr('qr-company', s.company, s.companyReachable, s.companyQr, 'company');
 
   const banner = document.getElementById('dashbanner');
   if (!s.whatsapp) {
