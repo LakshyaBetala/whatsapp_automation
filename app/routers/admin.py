@@ -237,6 +237,8 @@ _UI_EN: list[tuple[str, str]] = [
     ("Batch assign", "Assign batch"),
     ("Selected parties ko is batch me daalein", "Move selected parties to this batch"),
     ("Pehle parties tick karein.", "Tick some parties first."),
+    ("Pehle ", "First "),
+    ("Is batch ka UPI. Khaali = shop default.", "This batch's UPI. Blank = shop default."),
     ("(is party ke reminder ki tone/language/discount)", "(this party's reminder tone/language/discount)"),
     ("Batch: 1 (Standard). Alag batches Reminders tab me banayein.",
      "Batch: 1 (Standard). Create more batches in the Reminders tab."),
