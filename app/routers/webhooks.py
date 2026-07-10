@@ -111,6 +111,9 @@ async def aisensy_inbound(request: Request):
         data = body.get("data") or body
         media_b64 = data.get("media_base64")
         media_type = data.get("media_type") or "image/jpeg"
+        # Which number received this: "shop" (customer-facing) or "bot"
+        # (owner-only ASVA assistant). Defaults to shop for backward compat.
+        channel = data.get("channel") or "shop"
 
         if not sender or (not text and not media_b64):
             log.info("Ignoring webhook with no actionable message")
@@ -132,7 +135,7 @@ async def aisensy_inbound(request: Request):
 
         reply = await bot.handle(
             sender.strip(), (text or "").strip(),
-            media_b64=media_b64, media_type=media_type,
+            media_b64=media_b64, media_type=media_type, channel=channel,
         )
         return {"ok": True, "reply": reply}
 

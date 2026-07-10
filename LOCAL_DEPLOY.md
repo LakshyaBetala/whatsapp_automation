@@ -1,15 +1,27 @@
 # Self-hosting on the spare laptop (i3 HP)
 
-The spare laptop runs **two processes**: the FastAPI backend (port 8000) and
-the WhatsApp Node service (port 3001). The Tally agent (`Asva.exe`)
-runs on the **Tally PC** and posts to this laptop over the LAN. The database
-stays on Supabase (cloud) — the laptop needs internet, but customers/agents
-only talk to the laptop.
+The spare laptop (the **host**) runs **four processes**: the FastAPI backend
+(port 8000) and **two** WhatsApp Node services:
+
+- **3001 = shop number** — sends bills/reminders, receives customer replies (HISAB/PAID)
+- **3002 = ASVA bot number** — owner-only assistant (LIST, BILL, photo bills, EOD digest)
+
+Both WhatsApp accounts link *from the host* (WhatsApp Web is location-independent),
+so bills, reminders and the digest fire even when the shop laptop is off (e.g.
+Sundays). The Tally agent (`Asva.exe`) runs on the **Tally PC** and posts to the
+host. The database stays on Supabase (cloud).
 
 ```
-Tally PC ──HTTP:8000──> i3 laptop ┬─ FastAPI backend ──> Supabase (cloud)
-                                  └─ wa_service (Node) ──> WhatsApp
+Tally PC ──HTTP:8000──> host laptop ┬─ FastAPI backend ──> Supabase (cloud)
+                                    ├─ wa_service :3001 (shop)  ──> WhatsApp
+                                    └─ wa_service :3002 (bot)   ──> WhatsApp
 ```
+
+**If the host is NOT on the shop's LAN** (at home/office), the Tally PC reaches
+it over a private tunnel. Install **Tailscale** on both machines (same account);
+each gets a stable `100.x.y.z` address. The agent's `backend_url` then points at
+the host's Tailscale IP (see "On the Tally PC" below). No router port-forwarding,
+no public exposure.
 
 ## One-time setup on the i3 laptop
 
@@ -32,7 +44,8 @@ Copy-Item .env.example .env
 Edit `.env` and fill in:
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` (Supabase → Settings → API)
 - `PUBLIC_BASE_URL=http://localhost:8000`
-- `OPENWA_URL=http://localhost:3001` (default — both on this laptop)
+- `OPENWA_URL=http://localhost:3001` (shop number — customer-facing sends)
+- `PLATFORM_WA_URL=http://localhost:3002` (bot number — owner digest/alerts)
 - Leave the AiSensy keys empty — sends go through wa_service, not AiSensy.
 
 ### 3. Node deps
@@ -64,17 +77,23 @@ DHCP reservation** in the router so it never changes.
 
 ## Running
 
-Double-click **`START.bat`** — opens two windows (WhatsApp service +
-backend).
+Double-click **`START.bat`** — opens four windows (backend + shop WhatsApp
+:3001 + bot WhatsApp :3002 + Tally watcher). Each auto-restarts if it crashes.
 
-**First run only:** open **`http://localhost:3001/qr`** in a browser and scan
-the QR with the **business WhatsApp number** (WhatsApp → Linked devices).
-The session persists in `wa_service/.wwebjs_auth/` — no re-scan on restarts.
+**First run only — scan two QRs** (WhatsApp → Linked devices):
+- **`http://localhost:3001/qr`** → scan with the **shop's** WhatsApp number
+- **`http://localhost:3002/qr`** → scan with the **ASVA bot** WhatsApp number
+  (a separate account you control — this is the 24/7 owner helpline)
+
+Each session persists in `wa_service/.wwebjs_auth/` (keyed by `SESSION_ID`:
+`default` for shop, `bot` for the bot) — no re-scan on restarts.
 
 Verify:
 - `http://localhost:8000/health` → `{"status":"ok", "supabase_configured":true, ...}`
-- `http://localhost:3001/api/wa/status` → `{"ready":true, ...}`
-- From the Tally PC's browser: `http://<laptop-ip>:8000/health` must load too.
+- `http://localhost:3001/api/wa/status` → `{"ready":true, ...}` (shop)
+- `http://localhost:3002/api/wa/status` → `{"ready":true, ...}` (bot)
+- From the Tally PC's browser: `http://<host-ip>:8000/health` must load too
+  (LAN IP, or the host's Tailscale `100.x.y.z` if remote).
 
 ### Auto-start on boot (Task Scheduler)
 Task Scheduler → Create Task:
@@ -89,7 +108,9 @@ Task Scheduler → Create Task:
    ```json
    "backend_url": "http://192.168.1.50:8000"
    ```
-   (the i3 laptop's IP — the agent refuses to run while the placeholder is set)
+   Use the host's **LAN IP** if both are on the shop network, or the host's
+   **Tailscale IP** (`http://100.x.y.z:8000`) if the host is remote. The agent
+   refuses to run while the placeholder is set.
 3. In TallyPrime: F1 → Settings → Connectivity → act as server, port 9000.
 4. First run: `Asva.exe --import-masters` (pushes all debtors).
 5. Daily (or via Task Scheduler at e.g. 8pm): `Asva.exe --sync`.

@@ -76,12 +76,15 @@ async def handle(
     text: str,
     media_b64: str | None = None,
     media_type: str = "image/jpeg",
+    channel: str = "shop",
 ) -> str:
     """Route an inbound WhatsApp message to the right handler.
 
     Args:
         from_number: Sender's WhatsApp number (E.164 without +, e.g. 919876543210).
         text: Message body, already stripped.
+        channel: Which number received this - "shop" (customer-facing) or
+            "bot" (the ASVA assistant number, which is strictly owner-only).
 
     Returns:
         Reply text to send back (via AiSensy or log in dev mode).
@@ -95,6 +98,22 @@ async def handle(
         "id, business_name, plan, whatsapp_number, upi_vpa, discount_pct, msg_language",
         from_number)
     is_owner = business is not None
+
+    # ── Bot number is OWNER-ONLY ──────────────────────────────────────
+    # The ASVA assistant number serves registered shop owners only. If a
+    # non-owner (a customer or a stranger) messages it, we never run the
+    # customer self-service flow here - we reply to a greeting once so they
+    # are not ghosted, and stay silent otherwise.
+    if channel == "bot" and not is_owner:
+        if upper in _GREETING:
+            team = settings.product_team_number
+            tail = f"\n\nASVA join karne ke liye: {team}" if team else ""
+            return (
+                "Namaste! Yeh ASVA assistant number hai.\n"
+                "Yeh sirf registered ASVA dukaan-maalikon ke liye hai." + tail
+            )
+        log.info("Non-owner %s messaged the bot channel: %s", from_number, text)
+        return ""
 
     if is_owner:
         business_id = business["id"]
@@ -116,6 +135,11 @@ async def handle(
         # ── LIST ──────────────────────────────────────────────────────
         if upper == "LIST":
             return await _handle_list(business_id, business["business_name"])
+
+        # ── BILL <party> <amount> [phone] - add a non-Tally bill by text ─
+        bill_match = re.match(r"BILL\s+(.+)", text.strip(), re.IGNORECASE)
+        if bill_match:
+            return await _handle_text_bill(business, bill_match.group(1).strip())
 
         # ── STOP <name> ──────────────────────────────────────────────
         stop_match = re.match(r"STOP\s+(.+)", upper)
@@ -175,7 +199,8 @@ async def handle(
             "PAID Ramesh : uska payment mark karein\n"
             "TERMS Ramesh 90 : credit period 90 din\n"
             "STOP Ramesh / START Ramesh : reminder band ya chalu\n"
-            "Bill ki photo bhejein : naya bill ban jayega\n\n"
+            "BILL Ramesh 12500 : naya bill (text se)\n"
+            "Bill ki photo bhejein : naya bill (photo se)\n\n"
             "Koi dikkat ho? likhein: TEAM aapki baat\n"
             "(Ramesh ki jagah apni party ka naam likhein.)"
         )
@@ -256,6 +281,35 @@ def _normalize_phone(raw: str | None) -> str | None:
     if len(digits) == 12 and digits.startswith("91") and digits[2] in "6789":
         return digits
     return None
+
+
+def _parse_text_bill(rest: str) -> tuple[str, Decimal, str | None] | None:
+    """Parse a typed bill: 'Ramesh Traders 12500 9876543210'.
+
+    Returns (party_name, amount, phone_or_None). Reads right-to-left: an
+    optional trailing 10/12-digit phone, then the amount (last number), then
+    the party name is everything before it. Returns None if it can't find a
+    valid name + positive amount.
+    """
+    tokens = rest.split()
+    if len(tokens) < 2:
+        return None
+    phone = None
+    if _normalize_phone(tokens[-1]):
+        phone = _normalize_phone(tokens[-1])
+        tokens = tokens[:-1]
+    if len(tokens) < 2:
+        return None
+    try:
+        amount = Decimal(tokens[-1].replace(",", "").replace("₹", ""))
+    except Exception:
+        return None
+    if amount <= 0:
+        return None
+    name = " ".join(tokens[:-1]).strip()
+    if not name:
+        return None
+    return name, amount, phone
 
 
 def _photo_bill_summary(pb: dict) -> str:
@@ -453,6 +507,98 @@ async def _confirm_photo_bill(business: dict) -> str:
     return (
         f"Bill ban gaya ✅\n"
         f"{client['name']}: {inr(Decimal(str(pb['amount'])))} ({invoice_number})\n"
+        f"{sent_note}\n"
+        f"Reminders apne aap chalenge."
+    )
+
+
+async def _handle_text_bill(business: dict, rest: str) -> str:
+    """Owner adds a non-Tally bill by text: BILL <party> <amount> [phone].
+
+    Unlike the photo path there is no confirm step - the typed line is already
+    structured - so the bill is created directly, enters the reminder cadence
+    like any bill, and is sent to the customer if a phone number is on file.
+    """
+    from datetime import timedelta
+    import uuid
+
+    parsed = _parse_text_bill(rest)
+    if not parsed:
+        return (
+            "Bill aise likhein:\n"
+            "BILL Ramesh Traders 12500\n"
+            "BILL Ramesh Traders 12500 9876543210\n\n"
+            "(Pehle party ka naam, phir amount, phir phone number - phone optional hai.)"
+        )
+    party_name, amount, phone = parsed
+    business_id = business["id"]
+    db = require_db()
+
+    # Find or create the client (same fuzzy match as the photo path)
+    client_resp = (
+        db.table("clients").select("id, name, whatsapp_number, credit_days")
+        .eq("business_id", business_id)
+        .ilike("name", f"%{party_name}%")
+        .execute()
+    )
+    if client_resp.data:
+        client = client_resp.data[0]
+        if phone and not client.get("whatsapp_number"):
+            db.table("clients").update({"whatsapp_number": phone}).eq("id", client["id"]).execute()
+            client["whatsapp_number"] = phone
+    else:
+        client = db.table("clients").insert({
+            "business_id": business_id,
+            "name": party_name,
+            "whatsapp_number": phone,
+        }).execute().data[0]
+
+    invoice_date = date.today()
+    credit_days = client.get("credit_days") or 30
+    invoice_number = f"TX-{uuid.uuid4().hex[:6].upper()}"
+    bill = db.table("bills").insert({
+        "business_id": business_id,
+        "client_id": client["id"],
+        "invoice_number": invoice_number,
+        "tally_voucher_number": f"TEXT-{uuid.uuid4().hex[:12]}",
+        "amount": float(amount),
+        "paid_amount": 0.0,
+        "invoice_date": invoice_date.isoformat(),
+        "due_date": (invoice_date + timedelta(days=credit_days)).isoformat(),
+        "status": "pending",
+        "source": "text",
+    }).execute()
+
+    # Send the bill to the customer if we have a number
+    amount_fmt = inr(amount)
+    phone = client.get("whatsapp_number")
+    if phone:
+        vpa = business.get("upi_vpa")
+        pay_link = upi.upi_link(vpa, business.get("business_name", ""), amount, invoice_number) if vpa else ""
+        body = (
+            f"Namaste {client['name']} ji! 🙏\n"
+            f"{business.get('business_name', '')} ki taraf se aapka bill.\n\n"
+            f"Bill number: {invoice_number}\n"
+            f"Amount: {amount_fmt}\n\n"
+            + (f"UPI se payment: {pay_link}\n\n" if pay_link else "")
+            + "Dhanyavaad!"
+        )
+        result = await whatsapp.send_message(
+            business_id=business_id,
+            to_number=phone,
+            message_text=body,
+            plan=Plan(business["plan"]),
+            message_type=MessageType.invoice,
+            client_id=client["id"],
+            bill_id=bill.data[0]["id"],
+        )
+        sent_note = "Customer ko bill bhej diya ✅" if result.get("sent") else "⚠️ Bhejne mein dikkat aayi, baad mein reminder jayega."
+    else:
+        sent_note = "⚠️ Phone number nahi hai, customer ko message NAHI gaya. Number ke saath dobara bhejein."
+
+    return (
+        f"Bill ban gaya ✅\n"
+        f"{client['name']}: {amount_fmt} ({invoice_number})\n"
         f"{sent_note}\n"
         f"Reminders apne aap chalenge."
     )

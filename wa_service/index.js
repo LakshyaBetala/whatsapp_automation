@@ -53,6 +53,11 @@ const PORT = process.env.PORT || 3001;
 // SESSION_ID lets multiple instances run side by side with separate
 // WhatsApp logins (e.g. shop number on 3001, platform number on 3002).
 const SESSION_ID = process.env.SESSION_ID || 'default';
+// WA_CHANNEL tells the backend which number an inbound message hit:
+//   "shop" = the shop's own number (customer-facing: bills, reminders, HISAB/PAID)
+//   "bot"  = the ASVA assistant number (owner-only: LIST, BILL, photo, digest)
+// The backend uses this to keep the bot number strictly owner-only.
+const WA_CHANNEL = process.env.WA_CHANNEL || 'shop';
 
 const app = express();
 app.use(cors());
@@ -175,6 +180,7 @@ client.on('message', async (msg) => {
                 messageId: msg.id ? msg.id._serialized : undefined,
                 media_base64: media_base64,
                 media_type: media_type,
+                channel: WA_CHANNEL,
             },
         });
         const data = resp.json || {};
@@ -268,6 +274,6 @@ app.post('/api/wa/send', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`WhatsApp Background Service running on port ${PORT}`);
+    console.log(`WhatsApp Background Service running on port ${PORT} [channel=${WA_CHANNEL}, session=${SESSION_ID}]`);
     console.log(`Forwarding inbound messages to ${BACKEND_URL}/webhooks/aisensy`);
 });

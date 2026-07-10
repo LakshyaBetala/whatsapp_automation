@@ -33,16 +33,19 @@ function loadConfig() {
     analyticsUrl: token ? `${backend}/admin/analytics${q}` : '',
     accountsUrl: token ? `${backend}/admin/accounts${q}` : '',
     waShopUrl: 'http://localhost:3001/qr',
+    waBotUrl: 'http://localhost:3002/qr',
   };
 }
 const CONFIG = loadConfig();
 
 // ── Child-process supervision ─────────────────────────────────────────────
-// ONE WhatsApp only (the shop's own number). The company/bot number lives on a
-// separate account, so we do not run a second wa_service (3002) here.
+// TWO numbers, two wa_service instances:
+//   whatsapp (3001) = the shop's own number  -> bills, reminders, customer replies
+//   bot      (3002) = the ASVA assistant number -> owner-only (LIST/BILL/photo/digest)
 const SPECS = {
   backend: { cmd: 'python', args: ['-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000'], cwd: REPO, env: {} },
-  whatsapp: { cmd: 'node', args: ['index.js'], cwd: path.join(REPO, 'wa_service'), env: { PORT: '3001' } },
+  whatsapp: { cmd: 'node', args: ['index.js'], cwd: path.join(REPO, 'wa_service'), env: { PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop' } },
+  bot: { cmd: 'node', args: ['index.js'], cwd: path.join(REPO, 'wa_service'), env: { PORT: '3002', SESSION_ID: 'bot', WA_CHANNEL: 'bot' } },
   watcher: { cmd: 'python', args: ['-u', 'tally_agent/agent.py', '--watch'], cwd: REPO, env: {} },
 };
 const services = {}; // name -> { proc, restarts }
@@ -151,12 +154,17 @@ function parseWa(ok, body) {
 
 function pollStatus() {
   const out = {};
-  let pending = 3;
+  let pending = 4;
   const done = () => { if (--pending === 0) sendToWindow('status', out); };
   ping(`${CONFIG.backendUrl}/health`, (ok) => { out.backend = ok; done(); });
   ping('http://localhost:3001/api/wa/status', (ok, b) => {
     const w = parseWa(ok, b);
     out.whatsapp = w.ready; out.whatsappReachable = w.reachable; out.whatsappQr = w.qr;
+    done();
+  });
+  ping('http://localhost:3002/api/wa/status', (ok, b) => {
+    const w = parseWa(ok, b);
+    out.bot = w.ready; out.botReachable = w.reachable; out.botQr = w.qr;
     done();
   });
   // Tally sync freshness for the top bar (label + dot colour + last-sync ISO).

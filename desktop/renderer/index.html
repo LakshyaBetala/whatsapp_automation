@@ -131,6 +131,10 @@
           <h3>Shop WhatsApp - is number se bill aur reminder jaate hain</h3>
           <div class="qrbox" id="qr-shop"><div class="qrwait">Loading...</div></div>
         </div>
+        <div class="setupcol">
+          <h3>ASVA Bot - is number par owner ko digest aur madad milti hai</h3>
+          <div class="qrbox" id="qr-bot"><div class="qrwait">Loading...</div></div>
+        </div>
       </div>
     </div>
 
@@ -140,6 +144,7 @@
         <div class="toprow"><h2>Services</h2><button class="closebtn" onclick="toggleStatus()">Close</button></div>
         <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">Backend (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="restart('backend')">Restart</button></div>
         <div class="srow"><span class="dot" id="s-whatsapp"></span><div class="mid"><div class="sname">Shop WhatsApp</div><div class="stext" id="st-whatsapp">checking...</div></div><button onclick="restart('whatsapp')">Restart</button></div>
+        <div class="srow"><span class="dot" id="s-bot"></span><div class="mid"><div class="sname">ASVA Bot WhatsApp</div><div class="stext" id="st-bot">checking...</div></div><button onclick="restart('bot')">Restart</button></div>
         <div class="srow"><span class="dot ok"></span><div class="mid"><div class="sname">Tally watcher</div><div class="stext">Running - naye bill 2 min me WhatsApp par.</div></div><button onclick="restart('watcher')">Restart</button></div>
         <label class="auto"><input type="checkbox" id="autostart"> Windows chalu hote hi ASVA apne aap khul jaye</label>
         <div id="log"></div>
@@ -264,6 +269,9 @@ window.asva.onStatus((s) => {
   document.getElementById('st-backend').textContent = s.backend ? 'Running.' : 'Start ho raha hai. 1 min baad bhi red rahe to Restart.';
   document.getElementById('st-whatsapp').textContent = waText(s.whatsapp, s.whatsappReachable);
   renderQr('qr-shop', s.whatsapp, s.whatsappReachable, s.whatsappQr, 'shop');
+  setDot('s-bot', !!s.bot);
+  const stbot = document.getElementById('st-bot'); if (stbot) stbot.textContent = waText(s.bot, s.botReachable);
+  renderQr('qr-bot', s.bot, s.botReachable, s.botQr, 'bot');
 
   const banner = document.getElementById('dashbanner');
   if (!s.whatsapp) {
