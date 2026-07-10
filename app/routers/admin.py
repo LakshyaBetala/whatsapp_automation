@@ -287,6 +287,12 @@ _UI_EN: list[tuple[str, str]] = [
     ("Aaj", "Today"),
     ("Sab ho gaye", "All done"),
     ("number nahi hai", "no number"),
+    # ---- Setup wizard ----
+    ("3 chhote step, phir aap live.", "3 quick steps and you are live."),
+    ("Reminder tone", "Reminder tone"),
+    ("Finish setup", "Finish setup"),
+    ('Ho gaya. Ab <b>WhatsApp Setup</b> tab me QR scan karein, phir Dashboard me "Sab ON" karke live ho jayein.',
+     'Done. Now scan the QR in the <b>WhatsApp Setup</b> tab, then press "All ON" on the Dashboard to go live.'),
     # ---- Analytics ----
     ("Collections (last 6 months)", "Collections (last 6 months)"),
     ("Aging (kitne din se baaki)", "Aging (days outstanding)"),
@@ -1933,6 +1939,61 @@ def _inr(n) -> str:
             parts.insert(0, rest)
         s = ",".join(parts) + "," + last3
     return ("Rs " + s)
+
+
+@router.get("/admin/setup", response_class=HTMLResponse)
+async def admin_setup(token: str = Query(...), lang: str = Query("hinglish")):
+    """First-run wizard for a new shop: UPI + language + a starter batch in one
+    screen, then a pointer to scan WhatsApp. Reuses /admin/accounts/save and
+    /admin/batches. Existing shops can ignore it."""
+    biz = _biz_by_token(token)
+    upi_cur = (biz.get("upi_vpa") or "").replace('"', "&quot;")
+    body = f"""
+<h1>ASVA setup</h1>
+<div class="muted">{biz['business_name']} - 3 chhote step, phir aap live.</div>
+
+<div class="card" style="margin-top:20px;max-width:560px">
+ <label>1. UPI ID (reminder me QR + link isi ka jayega)</label>
+ <input id="upi" value="{upi_cur}" placeholder="e.g. rupeshrtc@oksbi">
+ <label>2. Message language</label>
+ <div class="seg" id="lang" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
+   <button type="button" data-v="hinglish" class="on" style="border:0;padding:9px 16px;cursor:pointer">Hinglish</button>
+   <button type="button" data-v="english" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">English</button>
+ </div>
+ <label style="margin-top:16px">3. Reminder tone</label>
+ <div class="seg" id="tone" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
+   <button type="button" data-v="gentle" style="border:0;padding:9px 16px;cursor:pointer">Gentle</button>
+   <button type="button" data-v="standard" class="on" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">Standard</button>
+   <button type="button" data-v="firm" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">Firm</button>
+ </div>
+ <div style="margin-top:20px"><button onclick="finish()">Finish setup</button><span id="msg" class="okmsg"></span></div>
+ <div class="hint" id="donehint" style="display:none;margin-top:14px">
+   Ho gaya. Ab <b>WhatsApp Setup</b> tab me QR scan karein, phir Dashboard me "Sab ON" karke live ho jayein.
+ </div>
+</div>
+<style>.seg button.on{{background:#294d38;color:#fff}}</style>
+<script>
+const TOKEN = {token!r};
+let LANG = 'hinglish', TONE = 'standard';
+document.querySelectorAll('#lang button').forEach(b => b.onclick = () => {{
+  LANG = b.dataset.v; document.querySelectorAll('#lang button').forEach(x => x.classList.toggle('on', x===b)); }});
+document.querySelectorAll('#tone button').forEach(b => b.onclick = () => {{
+  TONE = b.dataset.v; document.querySelectorAll('#tone button').forEach(x => x.classList.toggle('on', x===b)); }});
+async function finish() {{
+  const msg = document.getElementById('msg'); msg.textContent = 'Saving...';
+  try {{
+    await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, upi_vpa: document.getElementById('upi').value}})}});
+    await fetch('/admin/batches', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, batches: [{{name:'Standard', style:TONE, lang:LANG, disc:0, upi:'', line:''}}]}})}});
+    msg.textContent = 'Saved'; document.getElementById('donehint').style.display = 'block';
+  }} catch (e) {{ msg.textContent = 'Save failed'; }}
+}}
+</script>"""
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}</style><div class="wrap">{body}</div>', _is_en(lang)))
 
 
 @router.get("/admin/analytics", response_class=HTMLResponse)
