@@ -664,20 +664,36 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     bills = entry["bills"]
     today = date.today()
     biz_name = business.get("business_name", "")
+    # Professional copy in the business's chosen language (Hinglish default).
+    en = (business.get("msg_language") or "hinglish").strip().lower() == "english"
 
-    lines = [f"Namaste {name}! {biz_name} se payment yaad dilana.", ""]
-    if len(bills) == 1:
-        b = bills[0]
-        days = (today - date.fromisoformat(str(b["invoice_date"]))).days
-        lines.append(f"Bill {b.get('invoice_number') or '-'}: {inr(total)} ({days} din)")
+    def _age(b) -> int:
+        return (today - date.fromisoformat(str(b["invoice_date"]))).days
+
+    if en:
+        lines = [f"Dear {name},", f"A payment reminder from {biz_name}.", ""]
+        if len(bills) == 1:
+            b = bills[0]
+            lines.append(f"Invoice {b.get('invoice_number') or '-'}: {inr(total)} outstanding ({_age(b)} days).")
+        else:
+            lines.append(f"You have {len(bills)} pending invoices:")
+            for b in bills[:4]:
+                lines.append(f"- {b.get('invoice_number') or '-'}: {inr(Decimal(str(b['outstanding'])))} ({_age(b)} days)")
+            if len(bills) > 4:
+                lines.append(f"- and {len(bills) - 4} more")
+            lines.append(f"Total outstanding: {inr(total)}")
     else:
-        lines.append(f"Bills baaki ({len(bills)}):")
-        for b in bills[:4]:
-            days = (today - date.fromisoformat(str(b['invoice_date']))).days
-            lines.append(f"• {b.get('invoice_number') or '-'}: {inr(Decimal(str(b['outstanding'])))} ({days} din)")
-        if len(bills) > 4:
-            lines.append(f"• ...aur {len(bills) - 4} bills")
-        lines.append(f"Total baaki: {inr(total)}")
+        lines = [f"Namaste {name} ji,", f"{biz_name} ki taraf se payment ka vinamra reminder.", ""]
+        if len(bills) == 1:
+            b = bills[0]
+            lines.append(f"Bill {b.get('invoice_number') or '-'} ka {inr(total)} baaki hai ({_age(b)} din).")
+        else:
+            lines.append(f"Aapke {len(bills)} bills baaki hain:")
+            for b in bills[:4]:
+                lines.append(f"- {b.get('invoice_number') or '-'}: {inr(Decimal(str(b['outstanding'])))} ({_age(b)} din)")
+            if len(bills) > 4:
+                lines.append(f"- aur {len(bills) - 4} bills")
+            lines.append(f"Kul baaki: {inr(total)}")
 
     # Early-payment discount: QR + line reflect the discounted amount.
     pay_amount, discount_line = apply_discount(
@@ -687,10 +703,11 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     if vpa:
         link = upi.upi_link(vpa, biz_name, pay_amount, f"{len(bills)} bills")
         qr_b64 = upi.qr_png_base64(link)
-        lines += ["", f"Payment: {link}"]
+        lines += ["", (f"To pay via UPI: {link}" if en else f"UPI se payment: {link}")]
     if discount_line:
         lines += ["", discount_line]
-    lines += ["", "Payment ho gaya ho to PAID reply karein."]
+    lines += ["", ("Once paid, kindly reply PAID. Thank you."
+                   if en else "Payment ho jaye to PAID reply karein. Dhanyavaad.")]
 
     result = await whatsapp.send_template(
         business_id=business["id"],
