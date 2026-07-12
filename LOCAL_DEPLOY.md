@@ -85,8 +85,8 @@ Double-click **`START.bat`** — opens four windows (backend + shop WhatsApp
 - **`http://localhost:3002/qr`** → scan with the **ASVA bot** WhatsApp number
   (a separate account you control — this is the 24/7 owner helpline)
 
-Each session persists in `wa_service/.wwebjs_auth/` (keyed by `SESSION_ID`:
-`default` for shop, `bot` for the bot) — no re-scan on restarts.
+Each session persists in `wa_service/.baileys_auth/session-<SESSION_ID>/`
+(`SESSION_ID` = `default` for shop, `bot` for the bot) — no re-scan on restarts.
 
 Verify:
 - `http://localhost:8000/health` → `{"status":"ok", "supabase_configured":true, ...}`
@@ -114,6 +114,32 @@ Task Scheduler → Create Task:
 3. In TallyPrime: F1 → Settings → Connectivity → act as server, port 9000.
 4. First run: `Asva.exe --import-masters` (pushes all debtors).
 5. Daily (or via Task Scheduler at e.g. 8pm): `Asva.exe --sync`.
+
+## Staying connected + not getting banned (important)
+
+**Docker helps with CRASHES, not BANS.** Running the WhatsApp service in Docker
+(see `docker-compose.yml`, used for the bot laptop) isolates Chromium so it never
+hits the Windows `EBUSY` lockfile crash or clashes with another Chrome. It does
+**nothing** for WhatsApp bans — bans are behavioural. ASVA already ships the
+behaviours that keep the number safe:
+
+- **Warm-up cap** (`DAILY_REMINDER_CAP`, default 25/day) so a fresh backlog does
+  not blast hundreds of messages on day one. Raise it slowly (25 → 50 → 100 → 0).
+- **Human-like pacing**: a random **12-40s gap** between every send
+  (`send_gap_min_s`/`send_gap_max_s`), in the sweep *and* in bulk `REMIND`.
+- **Number validation**: `wa_service` checks a number is actually on WhatsApp
+  before sending (`getNumberId`) and skips it otherwise — sending to non-WhatsApp
+  numbers is a top ban signal. Skips log as `failed`.
+- **Only known contacts**: bills/reminders go to your own customers; the bot
+  answers only registered owners; customer opt-out (STOP / "band karo") is
+  honoured silently.
+- **Keep the linked phone online** — WhatsApp unlinks a device idle ~14 days.
+
+**Shop laptop: keep the desktop app / `START.bat` auto-restart** (do NOT dockerize
+the shop). The Electron supervisor already restarts a crashed `wa_service`, clears
+the lockfile and brings back a QR. Docker there would fight the supervisor and add
+a Docker-Desktop dependency for the shopkeeper. Docker is worth it only on the
+**bot laptop** (yours), which runs `wa_service` standalone.
 
 ## Operational notes
 

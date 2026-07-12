@@ -23,8 +23,11 @@ def test_30_day_term_is_the_authored_cadence():
     pts = kinds(cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30))
     for d in (3, 7, 15, 21, 30):
         assert pts[d] == "nudge"
-    assert pts[37] == "overdue" and pts[44] == "overdue" and pts[51] == "overdue"
-    assert pts[58] == "escalate"
+    # Overdue repeats every 7 days until PAID or 200 days past due -
+    # not just 3 times (the party keeps hearing until they pay).
+    assert pts[37] == "overdue" and pts[44] == "overdue" and pts[58] == "overdue"
+    assert pts[30 + 196] == "overdue"           # last repeat inside the window
+    assert pts[30 + 7 * 29] == "escalate"       # then tell the owner (day 233)
 
 
 def test_90_day_term_scales_up():
@@ -34,7 +37,8 @@ def test_90_day_term_scales_up():
         assert pts[d] == "nudge", (d, pts)
     # Overdue spacing also scales: ~21 days (7 * 90/30), not the old fixed 7.
     assert pts[111] == "overdue"        # 90 + 21
-    assert pts[174] == "escalate"       # 90 + 21*4
+    assert pts[174] == "overdue"        # still repeating inside the window
+    assert pts[90 + 21 * 10] == "escalate"   # window exhausted (day 300)
     assert min(pts) == 9  # no day-3 nagging for a 90-day company
 
 
@@ -60,7 +64,8 @@ def test_one_day_term_goes_straight_to_overdue_track():
     pts = kinds(cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=1, due_offset=1))
     assert pts[1] == "nudge"
     assert pts[8] == "overdue" and pts[15] == "overdue" and pts[22] == "overdue"
-    assert pts[29] == "escalate"
+    assert pts[1 + 196] == "overdue"        # keeps going inside the window
+    assert pts[1 + 7 * 29] == "escalate"    # day 204
 
 
 def test_points_sorted_and_deduped():
@@ -68,6 +73,49 @@ def test_points_sorted_and_deduped():
     days = [d for d, _ in pts]
     assert days == sorted(days)
     assert len(days) == len(set(days))
+
+
+# ── selection-day anchor: overdue track restarts from the day selected ─────
+
+def test_anchor_restarts_overdue_track_from_selection_day():
+    """User spec: party overdue 225 days, selected today -> messages every 7
+    days from today until paid or day 425 (selection + 200), then escalate.
+    Here modelled with a 200-day-old bill: track runs from day 200."""
+    pts = kinds(cadence_points(DEFAULT_CADENCE, 7, 3,
+                               credit_days=30, due_offset=30, overdue_from=200))
+    assert pts[207] == "overdue" and pts[214] == "overdue" and pts[221] == "overdue"
+    assert pts[200 + 196] == "overdue"        # keeps repeating inside window
+    assert pts[200 + 7 * 29] == "escalate"    # ~selection + 200 days (403)
+    assert 37 not in pts        # the old due-date-based overdue points are gone
+
+
+def test_anchor_day_selection_sends_overdue_that_same_day():
+    """On the selection day itself the party IS overdue, so the message that
+    goes out that day is the OVERDUE message - factual, no pretending."""
+    pts = cadence_points(DEFAULT_CADENCE, 7, 3,
+                         credit_days=30, due_offset=30, overdue_from=200)
+    day, kind = latest_reached_point(pts, 200)
+    assert (day, kind) == (200, "overdue")
+    # and 7 days later the next repeat
+    day2, kind2 = latest_reached_point(pts, 207)
+    assert (day2, kind2) == (207, "overdue")
+
+
+def test_no_anchor_means_unchanged_behavior():
+    """overdue_from omitted or equal to the due date = the original math."""
+    a = cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30)
+    b = cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30,
+                       overdue_from=30)
+    assert a == b
+
+
+def test_anchor_before_due_date_is_ignored():
+    """Selecting a party whose bill is NOT yet overdue changes nothing -
+    max(due, anchor) keeps the track on the due date."""
+    a = cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30)
+    b = cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30,
+                       overdue_from=10)
+    assert a == b
 
 
 # ── next-working-day / laptop-off catch-up (via latest_reached_point) ──────

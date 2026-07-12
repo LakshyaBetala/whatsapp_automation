@@ -123,7 +123,7 @@ async def apply_payment(
     biz = biz_resp.data
 
     if client and biz and client.get("whatsapp_number"):
-        lang = Lang(client.get("language", "hi"))
+        lang = Lang(client.get("language") or "hi")
         plan = Plan(biz["plan"])
 
         # Total remaining outstanding for this client

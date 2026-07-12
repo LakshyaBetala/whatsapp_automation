@@ -63,18 +63,17 @@ def apply_discount(amount, pct, language: str = "hinglish"):
 
 # (template_key, lang) -> {"aisensy_name": str, "body": str}
 TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
-    # --- EOD digest -----------------------------------------------------
+    # --- EOD digest (owner-facing -> simple English). The WORTH A CALL
+    # action list + "Send LIST" tail are appended by eod_digest._build_digest.
     ("eod_digest", Lang.hi): {
         "aisensy_name": "eod_digest_hi",
         "body": (
             "{business}\n"
-            "{date} ka hisaab 📋\n\n"
-            "Aaj ke naye bills: {bills_count} (total {bills_total})\n"
-            "Aaj payment aaya: {payers_count} customers se, {payments_total}\n"
-            "Kul baaki: {outstanding_total}\n"
-            "Sabse purana pending: {oldest_name}, {oldest_amount} ({oldest_days} din se)\n\n"
-            "LIST bhejein: poori baaki list\n"
-            "HELP bhejein: saare commands"
+            "Daily summary - {date}\n\n"
+            "New bills today: {bills_count} ({bills_total})\n"
+            "Payments today: {payments_total} (from {payers_count} customers)\n"
+            "Reminders sent today: {reminders_today}\n"
+            "Total to collect: {outstanding_total}"
         ),
     },
     # --- Invoice delivery ----------------------------------------------

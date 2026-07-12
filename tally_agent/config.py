@@ -56,3 +56,42 @@ def load_config() -> dict:
         sys.exit(1)
 
     return config
+
+
+def save_config(config: dict) -> None:
+    """Write config.json back (used by --add-company). Internal keys the
+    agent adds at runtime (tally host/port overrides) are preserved as-is."""
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+def company_entries(config: dict) -> list:
+    """Every Tally company this agent serves, each with its own backend
+    identity. The primary company is the top-level config; extra companies
+    live in config['companies'] = [{company_name, business_id, agent_token}].
+    Returns a list of full per-company config dicts (shared connection
+    settings + that company's identity)."""
+    entries = [{
+        "company_name": config["company_name"],
+        "business_id": config["business_id"],
+        "agent_token": config["agent_token"],
+    }]
+    for extra in (config.get("companies") or []):
+        if not isinstance(extra, dict):
+            continue
+        name = str(extra.get("company_name") or "").strip()
+        if not name or name == config["company_name"]:
+            continue
+        if extra.get("business_id") and extra.get("agent_token"):
+            entries.append({
+                "company_name": name,
+                "business_id": extra["business_id"],
+                "agent_token": extra["agent_token"],
+            })
+    out = []
+    for e in entries:
+        merged = dict(config)
+        merged.update(e)
+        merged.pop("companies", None)
+        out.append(merged)
+    return out

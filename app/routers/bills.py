@@ -132,7 +132,7 @@ async def _generate_and_deliver(bill_id: str) -> None:
         return
 
     try:
-        lang = Lang(client.get("language", "hi"))
+        lang = Lang(client.get("language") or "hi")
         plan = Plan(biz.get("plan", "starter"))
         invoice_num = bill.get("invoice_number") or bill_id[:8]
         amount_str = inr(Decimal(str(bill["amount"])))

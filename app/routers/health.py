@@ -24,6 +24,7 @@ def health():
 
     return {
         "status": "ok",
+        "version": settings.app_version,
         "env": settings.app_env,
         "supabase_configured": settings.supabase_configured,
         "db_reachable": db_ok,

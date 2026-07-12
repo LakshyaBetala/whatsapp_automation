@@ -79,6 +79,25 @@ def _chunked(items: list, size: int = 200):
         yield items[i:i + size]
 
 
+def _sync_company_name(db, business_id, company_name: str) -> None:
+    """The company name on the dashboard comes FROM TALLY, never hard-coded:
+    whatever name the agent reports is written through to the business row.
+    Best-effort - a rename must never fail a sync."""
+    name = (company_name or "").strip()
+    if not name:
+        return
+    try:
+        r = (db.table("businesses").select("business_name")
+             .eq("id", str(business_id)).limit(1).execute())
+        if r.data and (r.data[0].get("business_name") or "") != name:
+            db.table("businesses").update(
+                {"business_name": name, "tally_company_name": name}
+            ).eq("id", str(business_id)).execute()
+            log.info("Business %s renamed from Tally: %s", business_id, name)
+    except Exception:
+        log.exception("Company-name sync failed (continuing)")
+
+
 def _verify_token(business_id: uuid.UUID, agent_token: str):
     db = require_db()
     resp = db.table("businesses").select("agent_token").eq("id", str(business_id)).execute()
@@ -103,6 +122,71 @@ async def pending_refresh(business_id: uuid.UUID, agent_token: str):
     return {"requested": req}
 
 
+class RegisterCompanyPayload(BaseModel):
+    account_token: str      # agent_token of the customer's PRIMARY company
+    company_name: str       # the Tally company to add
+
+
+@router.post("/companies/register")
+async def register_company(payload: RegisterCompanyPayload):
+    """Add another Tally company under an existing customer account.
+
+    Each Tally company gets its OWN businesses row = its own fully isolated
+    data (bills/clients/messages scoped by business_id). Owner contact, plan
+    and payment settings are inherited from the primary company; the bot and
+    digest answer the owner from the OLDEST (primary) company. Idempotent:
+    re-registering the same company returns its existing credentials.
+    """
+    import secrets
+    db = require_db()
+    acct = (db.table("businesses").select(
+        "id, owner_name, business_name, whatsapp_number, plan, msg_language, "
+        "upi_vpa, upi_vpa_2, upi_vpa_3, discount_pct, reminder_hour, "
+        "plan_expires_on, timezone")
+        .eq("agent_token", payload.account_token).order("created_at")
+        .limit(1).execute())
+    if not acct.data:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Invalid account token")
+    src = acct.data[0]
+    name = (payload.company_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="company_name required")
+    if name == (src.get("business_name") or ""):
+        raise HTTPException(status_code=400,
+                            detail="That is already the primary company")
+
+    existing = (db.table("businesses").select("id, agent_token")
+                .eq("whatsapp_number", src["whatsapp_number"])
+                .eq("business_name", name).limit(1).execute())
+    if existing.data:
+        return {"business_id": existing.data[0]["id"],
+                "agent_token": existing.data[0]["agent_token"],
+                "company_name": name, "created": False}
+
+    new_token = secrets.token_urlsafe(32)
+    row = db.table("businesses").insert({
+        "owner_name": src.get("owner_name") or name,
+        "business_name": name,
+        "tally_company_name": name,
+        "whatsapp_number": src["whatsapp_number"],
+        "plan": src.get("plan") or "starter",
+        "msg_language": src.get("msg_language"),
+        "upi_vpa": src.get("upi_vpa"),
+        "upi_vpa_2": src.get("upi_vpa_2"),
+        "upi_vpa_3": src.get("upi_vpa_3"),
+        "discount_pct": src.get("discount_pct"),
+        "reminder_hour": src.get("reminder_hour"),
+        "plan_expires_on": src.get("plan_expires_on"),
+        "timezone": src.get("timezone") or "Asia/Kolkata",
+        "agent_token": new_token,
+        "onboarding_status": "active",
+    }).execute()
+    log.info("Registered sibling company '%s' under %s", name, src["id"])
+    return {"business_id": row.data[0]["id"], "agent_token": new_token,
+            "company_name": name, "created": True}
+
+
 @router.post("/import")
 async def import_outstanding(payload: TallyImportPayload):
     """Bulk import of debtors. Batched: ~6 Supabase round-trips for a
@@ -110,6 +194,7 @@ async def import_outstanding(payload: TallyImportPayload):
     version time out the agent)."""
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
+    _sync_company_name(db, biz, payload.company_name)
 
     clients_created = 0
     credit_balances = 0
@@ -241,6 +326,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     instead of 2 lookups per voucher - Tokyo latency budget."""
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
+    _sync_company_name(db, biz, payload.company_name)
 
     sales_processed = 0
     new_bills = 0
@@ -322,8 +408,11 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                 # never re-sent even across the outstanding-reconcile. The first
                 # sync replays the whole FY, so skip anything older than a few
                 # days to avoid blasting historic invoices at onboarding.
+                # Deliver if the bill is recent. 10-day window (was 3) so a bill
+                # exported while the watcher was down/offline still goes out when
+                # it recovers - but old FY invoices at first onboarding don't.
                 already_sent = bool(bill_row.get("pdf_url"))
-                fresh = invoice_date >= date.today() - timedelta(days=3)
+                fresh = invoice_date >= date.today() - timedelta(days=10)
                 if v.pdf_base64 and not already_sent and fresh and client.get("whatsapp_number"):
                     try:
                         from app.services import pdf as pdf_service
@@ -350,8 +439,12 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     "receipt_date": v.date,
                 }).execute()
 
-                # Find oldest open bills
-                open_bills_resp = db.table("bills").select("id, amount, paid_amount, status").eq("client_id", client_id).in_("status", ["pending", "partial", "overdue"]).order("invoice_date").execute()
+                # Find oldest open TALLY bills. WhatsApp-made bills (source
+                # photo/manual) are excluded: a Tally receipt is money Tally
+                # recorded against Tally bills - letting it pay off a WhatsApp
+                # bill would corrupt both balances. Those are settled via the
+                # dashboard's record-payment or the owner's PAID command.
+                open_bills_resp = db.table("bills").select("id, amount, paid_amount, status").eq("client_id", client_id).eq("source", "tally").in_("status", ["pending", "partial", "overdue"]).order("invoice_date").execute()
 
                 remaining_payment = v.amount
                 for b in open_bills_resp.data:
@@ -462,6 +555,7 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     from collections import defaultdict
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
+    _sync_company_name(db, biz, payload.company_name)
     fy = _fy_start().isoformat()
 
     biz_row = db.table("businesses").select("plan").eq("id", biz).limit(1).execute()

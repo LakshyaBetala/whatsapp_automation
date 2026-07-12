@@ -29,30 +29,23 @@ start "ASVA - Backend" "%~f0" backend
 echo       waiting for backend to come up...
 timeout /t 8 /nobreak >nul
 
-echo [2/4] Shop WhatsApp (port 3001)...
+echo [2/3] Shop WhatsApp (port 3001)...
 start "ASVA - WhatsApp (Shop)" "%~f0" wa
 echo       giving WhatsApp time to load and connect...
 timeout /t 22 /nobreak >nul
 
-echo [3/4] ASVA Bot WhatsApp (port 3002)...
-start "ASVA - WhatsApp (Bot)" "%~f0" bot
-echo       giving the bot number time to load and connect...
-timeout /t 22 /nobreak >nul
-
-echo [4/4] Tally watcher...
+echo [3/3] Tally watcher...
 start "ASVA - Tally Watcher" "%~f0" watch
 
 echo.
-echo Opening QR pages (first-time linking only)...
+echo Opening QR page (first-time linking only)...
 start http://localhost:3001/qr
-start http://localhost:3002/qr
 
 echo.
-echo  Sab chalu! 4 windows khule rahenge - INHE BAND MAT KARO.
+echo  Sab chalu! 3 windows khule rahenge - INHE BAND MAT KARO.
 echo  - Shop QR   : localhost:3001/qr  (shop ka WhatsApp - bill/reminder)
-echo  - Bot QR    : localhost:3002/qr  (ASVA bot - owner assistant/digest)
 echo  - Bill banao Tally mein  -^> customer ko WhatsApp 2 min mein
-echo  - Reminders roz 11 baje  ^| Digest raat 10 baje
+echo  - Reminders roz 11 baje (Digest aapke separate bot number par aayega)
 echo.
 pause
 exit /b
@@ -65,8 +58,11 @@ exit /b 1
 REM ---------------- backend (auto-restart) ----------------
 :run_backend
 title ASVA - Backend
+REM Use the .venv Python built by SETUP.bat (3.11-3.13); fall back to bare python.
+set "PY=python"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
 :loop_backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+"%PY%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 echo.
 echo Backend stopped/crashed. Restarting in 5s... close this window to stop.
 timeout /t 5 /nobreak >nul
@@ -83,26 +79,15 @@ echo WhatsApp service stopped/crashed. Restarting in 5s... close window to stop.
 timeout /t 5 /nobreak >nul
 goto loop_wa
 
-REM ---------------- ASVA Bot WhatsApp 3002 (auto-restart) ----------------
-:run_bot
-title ASVA - WhatsApp (Bot 3002)
-cd /d "%~dp0wa_service"
-set PORT=3002
-set SESSION_ID=bot
-set WA_CHANNEL=bot
-:loop_bot
-node index.js
-echo.
-echo Bot WhatsApp stopped/crashed. Restarting in 5s... close window to stop.
-timeout /t 5 /nobreak >nul
-goto loop_bot
 
 REM ---------------- Tally watcher (auto-restart) ----------------
 :run_watch
 title ASVA - Tally Watcher
 cd /d "%~dp0"
+set "PY=python"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
 :loop_watch
-python -u tally_agent\agent.py --watch
+"%PY%" -u tally_agent\agent.py --watch
 echo.
 echo Tally watcher stopped. Restarting in 10s... close window to stop.
 timeout /t 10 /nobreak >nul

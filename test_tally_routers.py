@@ -234,7 +234,7 @@ def test_receipt_applied_exactly_once(fake_db):
     fake_db.storage["bills"] = [{
         "id": "bill_1", "business_id": biz_id, "client_id": "client_1",
         "tally_voucher_number": "S-1", "amount": 1000.0, "paid_amount": 0.0,
-        "status": "pending", "invoice_date": "2026-06-01",
+        "status": "pending", "invoice_date": "2026-06-01", "source": "tally",
     }]
 
     payload = {
@@ -262,6 +262,44 @@ def test_receipt_applied_exactly_once(fake_db):
     assert len(bill_updates_after) == 1  # no second application
     receipt_rows = [i[1] for i in fake_db.inserts if i[0] == "tally_receipts"]
     assert len(receipt_rows) == 1
+
+
+def test_receipt_never_pays_whatsapp_bills(fake_db):
+    """A Tally receipt is money Tally recorded against Tally bills. It must
+    NEVER be allocated to a WhatsApp-made bill (source photo/manual) - those
+    are settled via PAID or the dashboard's record-payment."""
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
+    fake_db.storage["clients"] = [{"id": "client_1", "business_id": biz_id, "whatsapp_number": None, "credit_days": 30, "tally_ledger_name": "Test Party"}]
+    fake_db.storage["bills"] = [
+        # Older WhatsApp bill would be FIRST in FIFO if not excluded.
+        {"id": "wa_bill", "business_id": biz_id, "client_id": "client_1",
+         "tally_voucher_number": "TEXT-abc", "amount": 500.0, "paid_amount": 0.0,
+         "status": "pending", "invoice_date": "2026-05-01", "source": "manual"},
+        {"id": "tally_bill", "business_id": biz_id, "client_id": "client_1",
+         "tally_voucher_number": "S-2", "amount": 1000.0, "paid_amount": 0.0,
+         "status": "pending", "invoice_date": "2026-06-01", "source": "tally"},
+    ]
+
+    payload = {
+        "business_id": biz_id,
+        "agent_token": "valid_token",
+        "company_name": "TEST",
+        "sync_date": "2026-07-05",
+        "vouchers": [
+            {"voucher_number": "R-10", "voucher_type": "Receipt", "party_name": "Test Party", "amount": 400.0, "date": "2026-07-01"}
+        ]
+    }
+
+    resp = client.post("/tally/sync", json=payload)
+    assert resp.status_code == 200
+    # exactly one bill updated, and with the TALLY bill's amounts
+    flat = [u[1] for u in fake_db.updates if u[0] == "bills"]
+    assert len(flat) == 1
+    assert flat[0]["paid_amount"] == 400.0  # applied to the 1000 tally bill
+    # the WhatsApp bill is untouched
+    wa = fake_db.storage["bills"][0]
+    assert wa["paid_amount"] == 0.0 and wa["status"] == "pending"
 
 
 def test_agent_token_mismatch(fake_db):

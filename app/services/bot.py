@@ -3,8 +3,8 @@
 Handles inbound messages from business owners and their customers.
 Commands are parsed with regex first. Gemini fallback is Phase 3.
 
-# Bot replies are always Hindi - owner language is Hindi by default.
-# Client language (Gujarati, Marathi) is only for outbound reminders.
+# Owner-facing bot replies are simple English (20-70 age audience).
+# Customer-facing messages follow the business/batch language.
 
 Security rule (from CTO audit):
   - PAID from owner number → mark paid immediately
@@ -12,7 +12,9 @@ Security rule (from CTO audit):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import re
 from decimal import Decimal
 
@@ -30,7 +32,7 @@ async def _forward_to_team(business_id: str, business_name: str, from_number: st
     """Forward an owner's support request to the ASVA product team."""
     team = settings.product_team_number
     if not team:
-        return "Aapki baat note kar li. Team jaldi aapse contact karegi."
+        return "Noted. The ASVA team will contact you soon."
     try:
         await whatsapp.send_message(
             business_id=business_id,
@@ -41,7 +43,7 @@ async def _forward_to_team(business_id: str, business_name: str, from_number: st
         )
     except Exception:
         log.exception("Failed to forward support message to team")
-    return "Aapka message ASVA team tak pahuncha diya. Jaldi jawab milega."
+    return "Your message has been sent to the ASVA team.\nYou will get a reply soon."
 
 log = logging.getLogger(__name__)
 
@@ -57,15 +59,32 @@ def _last10(n: str) -> str:
     return d[-10:] if len(d) >= 10 else ""
 
 
+def _send_fail_note(result: dict) -> str:
+    """Turn a whatsapp.send_message failure into a line the owner can act on.
+    Never let a send fail silently - the owner must know it did NOT go."""
+    reason = result.get("reason") or result.get("delivery_status") or "unknown"
+    return {
+        "wa_not_connected": "WhatsApp is not connected. Open ASVA and scan the QR. Message NOT sent.",
+        "wa_service_down": "ASVA is not running on the shop laptop. Start it first. Message NOT sent.",
+        "not_on_whatsapp": "This number is not on WhatsApp. Message NOT sent.",
+        "limit_reached": "This month's message limit is over. Message NOT sent.",
+        "subscription_suspended": "Your subscription has expired. Renew to send. Message NOT sent.",
+    }.get(reason, f"Message NOT sent ({reason}).")
+
+
 def _match_row(db, table: str, select: str, from_number: str):
     """Find a row in `table` whose whatsapp_number matches `from_number`.
-    Exact match first, then a last-10-digit fallback (format drift safety)."""
-    r = db.table(table).select(select).eq("whatsapp_number", from_number).limit(1).execute()
+    Exact match first, then a last-10-digit fallback (format drift safety).
+    Ordered by created_at so a multi-company owner always resolves to the
+    OLDEST (primary) company deterministically."""
+    r = (db.table(table).select(select).eq("whatsapp_number", from_number)
+         .order("created_at").limit(1).execute())
     if r.data:
         return r.data[0]
     last10 = _last10(from_number)
     if last10:
-        r = db.table(table).select(select).like("whatsapp_number", f"%{last10}").limit(1).execute()
+        r = (db.table(table).select(select).like("whatsapp_number", f"%{last10}")
+             .order("created_at").limit(1).execute())
         if r.data:
             return r.data[0]
     return None
@@ -95,7 +114,8 @@ async def handle(
     # ── Identify sender: owner or customer? ───────────────────────────
     business = _match_row(
         db, "businesses",
-        "id, business_name, plan, whatsapp_number, upi_vpa, discount_pct, msg_language",
+        "id, business_name, plan, whatsapp_number, upi_vpa, discount_pct, "
+        "msg_language, reminder_batches, reminder_hour",
         from_number)
     is_owner = business is not None
 
@@ -107,10 +127,10 @@ async def handle(
     if channel == "bot" and not is_owner:
         if upper in _GREETING:
             team = settings.product_team_number
-            tail = f"\n\nASVA join karne ke liye: {team}" if team else ""
+            tail = f"\n\nTo join ASVA, contact: {team}" if team else ""
             return (
-                "Namaste! Yeh ASVA assistant number hai.\n"
-                "Yeh sirf registered ASVA dukaan-maalikon ke liye hai." + tail
+                "Hello! This is the ASVA assistant number.\n"
+                "It works only for registered ASVA shop owners." + tail
             )
         log.info("Non-owner %s messaged the bot channel: %s", from_number, text)
         return ""
@@ -135,6 +155,22 @@ async def handle(
         # ── LIST ──────────────────────────────────────────────────────
         if upper == "LIST":
             return await _handle_list(business_id, business["business_name"])
+
+        # ── DIGEST - today's summary, on demand (same as the nightly one) ─
+        if upper in ("DIGEST", "REPORT", "SUMMARY", "AAJ"):
+            return await _handle_digest(business_id)
+
+        # ── DIGEST 9PM / DIGEST TIME 21 - set the daily summary time ──
+        dt_match = re.match(r"DIGEST(?:\s+TIME)?\s+(\d{1,2})\s*(AM|PM)?$", upper)
+        if dt_match:
+            return await _set_digest_time(
+                business_id, int(dt_match.group(1)), dt_match.group(2))
+
+        # ── MSG <party>: <text> - free-form message to one party ──────
+        msg_match = re.match(r"(?:MSG|MESSAGE|SEND)\s+(.+)", text.strip(),
+                             re.IGNORECASE | re.DOTALL)
+        if msg_match:
+            return await _handle_owner_msg(business, msg_match.group(1).strip())
 
         # ── BILL <party> <amount> [phone] - add a non-Tally bill by text ─
         bill_match = re.match(r"BILL\s+(.+)", text.strip(), re.IGNORECASE)
@@ -187,22 +223,33 @@ async def handle(
                 business_id, business.get("business_name", ""), from_number, team_match.group(1).strip())
 
         # ── HELP / unrecognised ──────────────────────────────────────
-        prefix = "" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START") else "Ye command samajh nahi aaya.\n\n"
+        # Written for 20-70 year old shop owners: simple English, short
+        # lines, generous spacing, only the commands they actually need.
+        # "Ramesh Traders" is clearly marked as an example.
+        prefix = ("" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START")
+                  else "Sorry, I did not understand that.\nHere is what I can do:\n\n")
         return (
             prefix
-            + "Namaste! ASVA aapki udhaari recover karne me madad karta hai.\n\n"
-            "Ye likhkar bhejein:\n"
-            "LIST : poori baaki list\n"
-            "CHECK Ramesh : ek party ka hisaab\n"
-            "REMIND Ramesh : usko abhi reminder\n"
-            "REMIND TOP 5 : sabse bade 5 baaki walon ko\n"
-            "PAID Ramesh : uska payment mark karein\n"
-            "TERMS Ramesh 90 : credit period 90 din\n"
-            "STOP Ramesh / START Ramesh : reminder band ya chalu\n"
-            "BILL Ramesh 12500 : naya bill (text se)\n"
-            "Bill ki photo bhejein : naya bill (photo se)\n\n"
-            "Koi dikkat ho? likhein: TEAM aapki baat\n"
-            "(Ramesh ki jagah apni party ka naam likhein.)"
+            + "Hello! I am ASVA, your business assistant.\n\n"
+            "Type a command, then your party's name.\n"
+            "\"Ramesh Traders\" below is only an EXAMPLE.\n"
+            "Always type your own party's name.\n\n"
+            "SEE YOUR MONEY\n\n"
+            "LIST\nWho owes you, full list\n\n"
+            "CHECK Ramesh Traders\nOne party's full account\n\n"
+            "DIGEST\nToday's summary, right now\n\n"
+            "SEND A REMINDER\n(always goes from your shop number)\n\n"
+            "REMIND Ramesh Traders\nRemind that party now\n\n"
+            "REMIND TOP 5\nRemind your 5 biggest dues\n\n"
+            "ADD A BILL (not in Tally)\n\n"
+            "BILL Ramesh Traders 12500\nNew bill of Rs 12,500\n"
+            "Or just send a PHOTO of the bill.\n\n"
+            "OTHER\n\n"
+            "MSG Ramesh Traders: your goods are ready\nSends your message to that party\n\n"
+            "PAID Ramesh Traders\nMark their payment as received\n\n"
+            "STOP Ramesh Traders\nStop reminders for them\n(START to switch back on)\n\n"
+            "DIGEST 9PM\nChange your daily summary time\n\n"
+            "Any problem? Type TEAM and your message."
         )
 
     # ── Customer message (not owner) ──────────────────────────────────
@@ -217,10 +264,10 @@ async def handle(
         if upper in _GREETING:
             return (
                 "Namaste! Main is dukaan ka WhatsApp assistant hoon.\n\n"
-                "Apna hisaab dekhne ke liye HISAB bhejein.\n"
-                "Payment ki khabar dene ke liye PAID bhejein.\n\n"
-                "Aapka number abhi hamare records me nahi mila. Dukaan se baat "
-                "karne ke liye TEAM likhkar apni baat bhejein."
+                "HISAB bhejein - apna baaki dekhein\n"
+                "PAID bhejein - payment ki khabar dein\n\n"
+                "Aapka number hamare records me nahi mila.\n"
+                "Dukaan se baat karni ho to TEAM likhkar apni baat bhejein."
             )
         log.info("Message from unknown number %s: %s", from_number, text)
         return ""  # stay silent on non-greeting messages from unknown numbers
@@ -252,15 +299,26 @@ async def handle(
                 f"{client['name']} ({from_number}) ne message bheja: {cteam.group(1).strip()}")
         except Exception:
             log.exception("Failed to forward customer message to owner")
-        return "Aapki baat dukaan tak pahuncha di. Jaldi jawab milega."
+        return ("Your message has been passed to the shop. You will get a reply soon."
+                if _biz_is_en(client["business_id"])
+                else "Aapki baat dukaan tak pahuncha di. Jaldi jawab milega.")
 
     if upper in ("MENU", "HELP", "?", "HI", "HELLO"):
+        if _biz_is_en(client["business_id"]):
+            return (
+                f"Hello {client['name']} ji,\n"
+                "I am this shop's assistant.\n\n"
+                "HISAB - see your full balance\n"
+                "PAID - tell us you have paid\n\n"
+                "Any question? Type TEAM and your message.\n"
+                "We will pass it to the shop."
+            )
         return (
-            f"Namaste {client['name']} ji!\n"
+            f"Namaste {client['name']} ji,\n"
             "Main is dukaan ka assistant hoon.\n\n"
-            "HISAB : apna poora baaki dekhein\n"
-            "PAID : payment ki khabar dein\n\n"
-            "Koi sawaal ho to likhein: TEAM aapki baat\n"
+            "HISAB - apna poora baaki dekhein\n"
+            "PAID - payment ki khabar dein\n\n"
+            "Koi sawaal ho to TEAM likhkar apni baat bhejein.\n"
             "Dukaan tak pahuncha denge."
         )
 
@@ -283,54 +341,79 @@ def _normalize_phone(raw: str | None) -> str | None:
     return None
 
 
-def _parse_text_bill(rest: str) -> tuple[str, Decimal, str | None] | None:
+def _amount_token(tok: str) -> Decimal | None:
+    """Parse an amount token ('12500', '1,73,632', '₹500'). None if not one."""
+    try:
+        a = Decimal(str(tok).replace(",", "").replace("₹", ""))
+        return a if a > 0 else None
+    except Exception:
+        return None
+
+
+def _parse_text_bill(rest: str) -> tuple[str, Decimal, str | None, int | None] | None:
     """Parse a typed bill: 'Ramesh Traders 12500 9876543210'.
 
-    Returns (party_name, amount, phone_or_None). Reads right-to-left: an
-    optional trailing 10/12-digit phone, then the amount (last number), then
-    the party name is everything before it. Returns None if it can't find a
-    valid name + positive amount.
+    Returns (party_name, amount, phone_or_None, credit_days_or_None).
+    Reads right-to-left, in any trailing order:
+      - an optional 10/12-digit phone,
+      - an optional credit period 1-365 ('45', '45D', '45DIN', '45DAYS') -
+        only taken when ANOTHER number (the amount) still sits before it, so
+        'BILL Ramesh 300' stays amount=300, never days=300,
+      - then the amount (last remaining number); the party name is the rest.
+    Returns None if it can't find a valid name + positive amount.
     """
     tokens = rest.split()
     if len(tokens) < 2:
         return None
-    phone = None
-    if _normalize_phone(tokens[-1]):
-        phone = _normalize_phone(tokens[-1])
-        tokens = tokens[:-1]
+    phone: str | None = None
+    days: int | None = None
+    changed = True
+    while changed and len(tokens) >= 3:
+        changed = False
+        t = tokens[-1]
+        if phone is None and _normalize_phone(t):
+            phone = _normalize_phone(t)
+            tokens.pop()
+            changed = True
+            continue
+        m = re.fullmatch(r"(\d{1,3})(?:D|DIN|DAYS?)?", t.upper())
+        if (days is None and m and 1 <= int(m.group(1)) <= 365
+                and _amount_token(tokens[-2]) is not None):
+            days = int(m.group(1))
+            tokens.pop()
+            changed = True
     if len(tokens) < 2:
         return None
-    try:
-        amount = Decimal(tokens[-1].replace(",", "").replace("₹", ""))
-    except Exception:
-        return None
-    if amount <= 0:
+    amount = _amount_token(tokens[-1])
+    if amount is None:
         return None
     name = " ".join(tokens[:-1]).strip()
     if not name:
         return None
-    return name, amount, phone
+    return name, amount, phone, days
 
 
 def _photo_bill_summary(pb: dict) -> str:
-    amount = inr(Decimal(str(pb["amount"]))) if pb.get("amount") else "❓ nahi mila"
+    amount = inr(Decimal(str(pb["amount"]))) if pb.get("amount") else "not found"
     lines = [
-        "📸 Bill se yeh mila:",
+        "Read from the photo:",
         "",
-        f"Party: {pb.get('party_name') or '❓ nahi mila'}",
-        f"Phone: {pb.get('phone') or '❓ nahi mila'}",
+        f"Party: {pb.get('party_name') or 'not found'}",
+        f"Phone: {pb.get('phone') or 'not found'}",
         f"Amount: {amount}",
     ]
     if pb.get("bill_number"):
         lines.append(f"Bill no: {pb['bill_number']}")
     lines += [
         "",
-        "Sahi hai? YES bhejein.",
-        "Galti hai? Aise sudhaarein:",
+        "All correct? Send YES.",
+        "",
+        "To fix a mistake, send one of these:",
         "NAAM Ramesh Traders",
         "PHONE 9876543210",
         "AMOUNT 12500",
-        "Ya CANCEL bhejein.",
+        "",
+        "To drop it, send CANCEL.",
     ]
     return "\n".join(lines)
 
@@ -354,15 +437,16 @@ async def _handle_photo_bill(business: dict, media_b64: str, media_type: str) ->
 
     if not ocr.is_configured():
         return (
-            "Photo bill feature abhi setup nahi hua hai.\n"
-            "(GEMINI_API_KEY chahiye. Free milta hai aistudio.google.com se.)"
+            "Photo bills are not set up yet.\n"
+            "(Needs GEMINI_API_KEY - free at aistudio.google.com.)"
         )
 
     extract = await ocr.extract_bill(media_b64, media_type)
     if extract is None or not extract.readable:
         return (
-            "Photo saaf nahi aayi, padh nahi paya. 🙏\n"
-            "Thodi roshni mein, seedha upar se photo lekar dobara bhejein."
+            "Could not read the photo clearly.\n\n"
+            "Please take it again in good light,\n"
+            "straight from above, and send once more."
         )
 
     db = require_db()
@@ -387,7 +471,7 @@ async def _handle_photo_bill(business: dict, media_b64: str, media_type: str) ->
 async def _correct_photo_bill(business_id: str, field: str, value: str) -> str:
     pb = await _latest_pending_photo_bill(business_id)
     if not pb:
-        return "Koi photo bill pending nahi hai. Pehle bill ki photo bhejein."
+        return "No photo bill is waiting. Send the bill photo first."
 
     db = require_db()
     if field == "NAAM":
@@ -396,7 +480,7 @@ async def _correct_photo_bill(business_id: str, field: str, value: str) -> str:
     elif field == "PHONE":
         phone = _normalize_phone(value)
         if not phone:
-            return "Phone number sahi nahi laga. 10 digit ka mobile number likhein, jaise: PHONE 9876543210"
+            return "That phone number does not look right.\nSend a 10 digit mobile number, like:\nPHONE 9876543210"
         db.table("photo_bills").update({"phone": phone}).eq("id", pb["id"]).execute()
         pb["phone"] = phone
     elif field == "AMOUNT":
@@ -404,19 +488,19 @@ async def _correct_photo_bill(business_id: str, field: str, value: str) -> str:
             amt = float(value.replace(",", "").replace("₹", "").strip())
             assert amt > 0
         except (ValueError, AssertionError):
-            return "Amount samajh nahi aaya. Sirf number likhein, jaise: AMOUNT 12500"
+            return "Could not read that amount.\nSend numbers only, like:\nAMOUNT 12500"
         db.table("photo_bills").update({"amount": amt}).eq("id", pb["id"]).execute()
         pb["amount"] = amt
 
-    return "Update ho gaya. ✅\n\n" + _photo_bill_summary(pb)
+    return "Updated.\n\n" + _photo_bill_summary(pb)
 
 
 async def _cancel_photo_bill(business_id: str) -> str:
     pb = await _latest_pending_photo_bill(business_id)
     if not pb:
-        return "Koi photo bill pending nahi tha."
+        return "No photo bill was waiting."
     require_db().table("photo_bills").update({"status": "cancelled"}).eq("id", pb["id"]).execute()
-    return "Theek hai, woh bill cancel kar diya."
+    return "OK, that bill is cancelled."
 
 
 async def _confirm_photo_bill(business: dict) -> str:
@@ -425,11 +509,11 @@ async def _confirm_photo_bill(business: dict) -> str:
     business_id = business["id"]
     pb = await _latest_pending_photo_bill(business_id)
     if not pb:
-        return "Koi photo bill pending nahi hai. Pehle bill ki photo bhejein."
+        return "No photo bill is waiting. Send the bill photo first."
     if not pb.get("party_name"):
-        return "Party ka naam nahi hai. Pehle bhejein: NAAM Ramesh Traders"
+        return "The party name is missing. First send:\nNAAM Ramesh Traders"
     if not pb.get("amount"):
-        return "Amount nahi hai. Pehle bhejein: AMOUNT 12500"
+        return "The amount is missing. First send:\nAMOUNT 12500"
 
     db = require_db()
 
@@ -475,7 +559,7 @@ async def _confirm_photo_bill(business: dict) -> str:
     ).eq("id", pb["id"]).execute()
 
     # Send the bill (original photo attached) to the customer
-    sent_note = "⚠️ Phone number nahi hai, isliye customer ko message NAHI gaya."
+    sent_note = "No phone number, so the customer did NOT get the bill."
     phone = client.get("whatsapp_number")
     if phone:
         amount_fmt = inr(Decimal(str(pb["amount"])))
@@ -502,13 +586,14 @@ async def _confirm_photo_bill(business: dict) -> str:
             image_media_type=pb.get("image_type") or "image/jpeg",
             template_name="photo_bill_hi",
         )
-        sent_note = "Customer ko bill bhej diya ✅" if result.get("sent") else "⚠️ Bhejne mein dikkat aayi, baad mein reminder jayega."
+        sent_note = ("Bill sent to the customer." if result.get("sent")
+                     else "Could not send it right now. Reminders will still go automatically.")
 
     return (
-        f"Bill ban gaya ✅\n"
+        f"Bill created.\n\n"
         f"{client['name']}: {inr(Decimal(str(pb['amount'])))} ({invoice_number})\n"
-        f"{sent_note}\n"
-        f"Reminders apne aap chalenge."
+        f"{sent_note}\n\n"
+        f"Reminders will run automatically."
     )
 
 
@@ -525,12 +610,13 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
     parsed = _parse_text_bill(rest)
     if not parsed:
         return (
-            "Bill aise likhein:\n"
+            "To add a bill, type it like this:\n\n"
             "BILL Ramesh Traders 12500\n"
-            "BILL Ramesh Traders 12500 9876543210\n\n"
-            "(Pehle party ka naam, phir amount, phir phone number - phone optional hai.)"
+            "BILL Ramesh Traders 12500 45 (45 days credit)\n"
+            "BILL Ramesh Traders 12500 9876543210 (with phone)\n\n"
+            "First the party name, then the amount."
         )
-    party_name, amount, phone = parsed
+    party_name, amount, phone, days = parsed
     business_id = business["id"]
     db = require_db()
 
@@ -554,7 +640,9 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
         }).execute().data[0]
 
     invoice_date = date.today()
-    credit_days = client.get("credit_days") or 30
+    # Priority: days typed in THIS command > the party's saved credit_days > 30.
+    credit_days = days or client.get("credit_days") or 30
+    due_date = invoice_date + timedelta(days=credit_days)
     invoice_number = f"TX-{uuid.uuid4().hex[:6].upper()}"
     bill = db.table("bills").insert({
         "business_id": business_id,
@@ -564,9 +652,11 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
         "amount": float(amount),
         "paid_amount": 0.0,
         "invoice_date": invoice_date.isoformat(),
-        "due_date": (invoice_date + timedelta(days=credit_days)).isoformat(),
+        "due_date": due_date.isoformat(),
         "status": "pending",
-        "source": "text",
+        # 'manual' = typed by the owner (bills_source_check allows only
+        # tally/photo/manual - 'text' violates the constraint).
+        "source": "manual",
     }).execute()
 
     # Send the bill to the customer if we have a number
@@ -592,15 +682,21 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
             client_id=client["id"],
             bill_id=bill.data[0]["id"],
         )
-        sent_note = "Customer ko bill bhej diya ✅" if result.get("sent") else "⚠️ Bhejne mein dikkat aayi, baad mein reminder jayega."
+        if result.get("queued"):
+            sent_note = "Bill is in the queue. It will reach the customer from your shop number."
+        elif result.get("sent"):
+            sent_note = "Bill sent to the customer."
+        else:
+            sent_note = _send_fail_note(result)
     else:
-        sent_note = "⚠️ Phone number nahi hai, customer ko message NAHI gaya. Number ke saath dobara bhejein."
+        sent_note = "No phone number, so the customer did NOT get the bill."
 
     return (
-        f"Bill ban gaya ✅\n"
+        f"Bill created.\n\n"
         f"{client['name']}: {amount_fmt} ({invoice_number})\n"
-        f"{sent_note}\n"
-        f"Reminders apne aap chalenge."
+        f"Due: {due_date.strftime('%d-%m-%Y')} ({credit_days} days credit)\n"
+        f"{sent_note}\n\n"
+        f"Reminders will run automatically."
     )
 
 
@@ -617,7 +713,7 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     )
 
     if not bills_resp.data:
-        return f"{business_name}: koi outstanding nahi hai. Sab clear! 🎉"
+        return f"{business_name}: nothing pending. All clear!"
 
     # Group by client
     client_totals: dict[str, dict] = {}
@@ -636,12 +732,12 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     )
 
     grand_total = sum(c["total"] for c in client_totals.values())
-    lines = [f"{business_name} ki baaki list:\n"]
+    lines = [f"{business_name} - who owes you:\n"]
     for i, (name, data) in enumerate(sorted_clients[:20], 1):
         lines.append(f"{i}. {name}: {inr(data['total'])} ({data['count']} bills)")
 
     if len(sorted_clients) > 20:
-        lines.append(f"\n...aur {len(sorted_clients) - 20} aur hain")
+        lines.append(f"\n...and {len(sorted_clients) - 20} more")
 
     lines.append(f"\nTotal: {inr(grand_total)}")
     return "\n".join(lines)
@@ -660,21 +756,22 @@ async def _handle_stop(business_id: str, client_name: str) -> str:
     )
 
     if not clients_resp.data:
-        return f"'{client_name}' naam ka koi client nahi mila. Exact naam likhein."
+        return f"'{client_name}' - no party found with that name. Type the exact name."
 
     if len(clients_resp.data) > 1:
         names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+        return f"'{client_name}' matches more than one party: {names}. Type the full name."
 
     client = clients_resp.data[0]
     if not client["reminders_enabled"]:
-        return f"{client['name']} ke reminders pehle se band hain."
+        return f"{client['name']}'s reminders are already off."
 
     db.table("clients").update({"reminders_enabled": False}).eq(
         "id", client["id"]
     ).execute()
 
-    return f"{client['name']} ke reminders band kar diye. Chalu karne ke liye START {client['name']} bhejein."
+    return (f"{client['name']}'s reminders are now OFF.\n"
+            f"To start again, send: START {client['name']}")
 
 
 async def _handle_start(business_id: str, client_name: str) -> str:
@@ -689,21 +786,24 @@ async def _handle_start(business_id: str, client_name: str) -> str:
     )
 
     if not clients_resp.data:
-        return f"'{client_name}' naam ka koi client nahi mila. Exact naam likhein."
+        return f"'{client_name}' - no party found with that name. Type the exact name."
 
     if len(clients_resp.data) > 1:
         names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+        return f"'{client_name}' matches more than one party: {names}. Type the full name."
 
     client = clients_resp.data[0]
     if client["reminders_enabled"]:
-        return f"{client['name']} ke reminders pehle se chalu hain."
+        return f"{client['name']}'s reminders are already on."
 
-    db.table("clients").update({"reminders_enabled": True}).eq(
+    # Selection day = today: the overdue track restarts from the day the
+    # owner switches a party ON (see reminder_anchor in the sweep).
+    db.table("clients").update(
+        {"reminders_enabled": True, "reminder_anchor": date.today().isoformat()}).eq(
         "id", client["id"]
     ).execute()
 
-    return f"{client['name']} ke reminders chalu kar diye. ✅"
+    return f"{client['name']}'s reminders are now ON."
 
 
 async def _handle_check(business_id: str, client_name: str) -> str:
@@ -721,10 +821,10 @@ async def _handle_check(business_id: str, client_name: str) -> str:
         .execute()
     )
     if not clients_resp.data:
-        return f"'{client_name}' naam ka koi client nahi mila. Exact naam likhein."
+        return f"'{client_name}' - no party found with that name. Type the exact name."
     if len(clients_resp.data) > 1:
         names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+        return f"'{client_name}' matches more than one party: {names}. Type the full name."
 
     client = clients_resp.data[0]
     bills_resp = (
@@ -741,7 +841,7 @@ async def _handle_check(business_id: str, client_name: str) -> str:
     from datetime import date as _date
     lines = [f"{client['name']}"]
     if not open_bills:
-        lines.append("Koi outstanding nahi, sab clear ✅")
+        lines.append("Nothing pending. All clear.")
     else:
         total = Decimal(0)
         for b in open_bills[:8]:
@@ -751,17 +851,17 @@ async def _handle_check(business_id: str, client_name: str) -> str:
             if b.get("due_date"):
                 days = (_date.today() - _date.fromisoformat(str(b["due_date"]))).days
                 if days > 0:
-                    overdue = f" ({days} din overdue)"
+                    overdue = f" ({days} days late)"
             lines.append(f"• {b.get('invoice_number') or '-'}: {inr(amt)}{overdue}")
         if len(open_bills) > 8:
             rest = sum(Decimal(str(b["outstanding"])) for b in open_bills[8:])
             total += rest
-            lines.append(f"• ...aur {len(open_bills) - 8} bills: {inr(rest)}")
-        lines.append(f"Total baaki: {inr(total)}")
+            lines.append(f"• ...and {len(open_bills) - 8} more bills: {inr(rest)}")
+        lines.append(f"Total due: {inr(total)}")
 
     phone = client.get("whatsapp_number")
-    lines.append(f"WhatsApp: {phone if phone else '❌ number nahi hai'}")
-    lines.append(f"Reminders: {'chalu' if client.get('reminders_enabled', True) else 'band'}")
+    lines.append(f"WhatsApp: {phone if phone else 'number missing'}")
+    lines.append(f"Reminders: {'ON' if client.get('reminders_enabled', True) else 'OFF'}")
 
     # Last sync time - proof of freshness
     sync_resp = (
@@ -773,7 +873,7 @@ async def _handle_check(business_id: str, client_name: str) -> str:
         .execute()
     )
     if sync_resp.data:
-        lines.append(f"Tally se milaya: {str(sync_resp.data[0]['synced_at'])[:16]}")
+        lines.append(f"Last Tally sync: {str(sync_resp.data[0]['synced_at'])[:16]}")
     return "\n".join(lines)
 
 
@@ -814,7 +914,7 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     name = client.get("name", "Customer")
     phone = client.get("whatsapp_number")
     if not phone:
-        return False, f"{name}: ❌ number nahi hai"
+        return False, f"{name}: no phone number"
 
     total = entry["total"]
     bills = entry["bills"]
@@ -880,61 +980,195 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
         message_type=MessageType.reminder,
         client_id=client.get("id"),
         bill_id=bills[0]["id"],
-        language=Lang(client.get("language", "hi")),
+        language=Lang(client.get("language") or "hi"),
         message_text="\n".join(lines),
         image_base64=qr_b64,
         image_filename="payment_qr.png",
     )
+    if result.get("queued"):
+        return True, f"{name}: {inr(total)} ({len(bills)} bills) - in queue, goes from your shop number"
     if result.get("sent"):
-        return True, f"{name}: {inr(total)} ({len(bills)} bills) bheja ✅"
-    return False, f"{name}: ❌ nahi gaya ({result.get('reason') or result.get('delivery_status')})"
+        return True, f"{name}: {inr(total)} ({len(bills)} bills) - sent"
+    return False, f"{name}: {_send_fail_note(result)}"
+
+
+async def _bulk_remind(business: dict, entries: list[dict], n: int, header: str) -> str:
+    """Send up to n consolidated reminders with human-like pacing between
+    sends (bursts are the main WhatsApp ban trigger). Shared by REMIND
+    TOP/OLDEST/BATCH. Reports every party's outcome, including failures."""
+    results = []
+    sent_count = 0
+    for entry in entries:
+        if sent_count >= n:
+            break
+        if not entry["client"].get("reminders_enabled", True):
+            continue
+        if not entry["client"].get("whatsapp_number"):
+            continue
+        # Only pause between actual sends, not before the first.
+        if sent_count > 0:
+            await asyncio.sleep(random.uniform(settings.send_gap_min_s, settings.send_gap_max_s))
+        ok, line = await _send_consolidated_reminder(business, entry)
+        results.append(line)
+        if ok:
+            sent_count += 1
+    if not results:
+        return "No one to remind. Parties need a WhatsApp number and reminders ON."
+    return header + "\n" + "\n".join(results)
+
+
+def _batch_label(i: int, b: dict) -> str:
+    lang = "English" if b["lang"] == "english" else "Hindi"
+    return f"{i + 1}. {b['name']} ({lang}, {b['hour']:02d}:00)"
 
 
 async def _handle_remind(business: dict, arg: str) -> str:
-    """REMIND <naam> | REMIND TOP [n] | REMIND OLDEST [n] - the owner
-    chooses exactly who gets nudged and in which order."""
+    """REMIND <naam> | REMIND TOP [n] | REMIND OLDEST [n] | REMIND BATCH 1[,2]
+    - the owner chooses exactly who gets nudged and in which order."""
+    from app.services.batches import get_batches
+
     business_id = business["id"]
     agg = await _open_bills_by_client(business_id)
     if not agg:
-        return "Koi outstanding bill nahi hai. Sab clear! 🎉"
+        return "No pending bills. All clear!"
 
+    # ── REMIND BATCH 1  /  REMIND BATCH 1,2 ──────────────────────────
+    bmatch = re.match(r"BATCH(?:ES)?\s*([\d,\s]+)$", arg)
+    if bmatch:
+        batches = get_batches(business)
+        try:
+            want = sorted({int(x) for x in re.split(r"[\s,]+", bmatch.group(1).strip()) if x})
+        except ValueError:
+            want = []
+        if not want or any(i < 1 or i > len(batches) for i in want):
+            listing = "\n".join(_batch_label(i, b) for i, b in enumerate(batches))
+            return ("That batch number is not right. Type it like:\n"
+                    "REMIND BATCH 1 or REMIND BATCH 1,2\n\nYour batches:\n" + listing)
+        idxs = {i - 1 for i in want}
+        entries = [e for e in agg.values()
+                   if int(e["client"].get("reminder_batch") or 0) in idxs]
+        if not entries:
+            return ("Batch " + ",".join(map(str, want)) +
+                    " has no pending parties.")
+        entries.sort(key=lambda e: e["total"], reverse=True)
+        cap = settings.daily_reminder_cap
+        header = "Batch " + ",".join(map(str, want)) + (
+            f" - reminders to {len(entries)} parties:" if len(entries) <= cap
+            else f" - {len(entries)} parties, first {cap} today:")
+        return await _bulk_remind(business, entries, min(len(entries), cap), header)
+
+    # ── REMIND TOP [n] / REMIND OLDEST [n] ───────────────────────────
     bulk = re.match(r"(TOP|OLDEST|OLD)\s*(\d+)?$", arg)
     if bulk:
         n = min(int(bulk.group(2) or 5), 20)
         entries = list(agg.values())
         if bulk.group(1) == "TOP":
             entries.sort(key=lambda e: e["total"], reverse=True)  # biggest first
-            header = f"Top {n} outstanding walon ko reminder:"
+            header = f"Reminders to your top {n} dues:"
         else:
             entries.sort(key=lambda e: e["oldest_days"], reverse=True)  # oldest first
-            header = f"Sabse purane {n} ko reminder:"
-
-        results = []
-        sent_count = 0
-        for entry in entries:
-            if sent_count >= n:
-                break
-            if not entry["client"].get("reminders_enabled", True):
-                continue
-            if not entry["client"].get("whatsapp_number"):
-                continue
-            ok, line = await _send_consolidated_reminder(business, entry)
-            results.append(line)
-            if ok:
-                sent_count += 1
-        if not results:
-            return "Kisi ke paas WhatsApp number nahi hai ya reminders band hain."
-        return header + "\n" + "\n".join(results)
+            header = f"Reminders to the {n} oldest dues:"
+        return await _bulk_remind(business, entries, n, header)
 
     # Single party by name
     matches = [e for e in agg.values() if arg.lower() in (e["client"].get("name") or "").lower()]
     if not matches:
-        return f"'{arg}' ka koi outstanding nahi mila. CHECK {arg} se dekh sakte hain."
+        return f"No pending bills for '{arg}'. Try: CHECK {arg}"
     if len(matches) > 1:
         names = ", ".join(e["client"].get("name", "?") for e in matches[:5])
-        return f"'{arg}' se kai clients mile: {names}. Poora naam likhein."
+        return f"'{arg}' matches more than one party: {names}. Type the full name."
     ok, line = await _send_consolidated_reminder(business, matches[0])
-    return ("Reminder bhej diya:\n" if ok else "") + line
+    return ("Reminder sent:\n" if ok else "") + line
+
+
+def _fmt_hour12(h: int) -> str:
+    """23 -> '11 PM', 9 -> '9 AM', 0 -> '12 AM'."""
+    ampm = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12} {ampm}"
+
+
+async def _set_digest_time(business_id: str, hour: int, ampm: str | None) -> str:
+    """DIGEST 9PM - the owner sets their daily summary time from WhatsApp."""
+    if ampm == "PM" and hour < 12:
+        hour += 12
+    elif ampm == "AM" and hour == 12:
+        hour = 0
+    if not 0 <= hour <= 23:
+        return ("That time did not work.\n\n"
+                "Type it like this: DIGEST 9PM")
+    require_db().table("businesses").update(
+        {"digest_hour": hour}).eq("id", business_id).execute()
+    return (f"Done.\n\n"
+            f"Your daily summary will now come at {_fmt_hour12(hour)} every day.")
+
+
+async def _handle_digest(business_id: str) -> str:
+    """DIGEST - today's summary on demand (same numbers as the nightly one).
+    Comes back as the bot's reply, so it works even if outbound sends are
+    down."""
+    from app.jobs import eod_digest
+    try:
+        p = await eod_digest.preview(business_id)
+    except Exception:
+        log.exception("On-demand digest failed for %s", business_id)
+        return "Could not build the summary. Please send DIGEST again in a minute."
+    if not p.get("would_send"):
+        return "Today's summary: no new bills and no payments. All quiet."
+    return p.get("rendered_message") or "The summary came back empty. Please try again in a minute."
+
+
+async def _handle_owner_msg(business: dict, rest: str) -> str:
+    """MSG <party>: <text> - owner sends a free-form WhatsApp message to one
+    party through ASVA. Colon separates name from message; without a colon
+    the first word is taken as the name."""
+    if ":" in rest:
+        name_part, msg_part = rest.split(":", 1)
+    else:
+        parts = rest.split(None, 1)
+        if len(parts) < 2:
+            return ("To send a message, type it like this:\n\n"
+                    "MSG Ramesh Traders: your goods are ready\n\n"
+                    "(Name, then a colon, then your message.)")
+        name_part, msg_part = parts
+    name_part = name_part.strip()
+    msg_part = msg_part.strip()
+    if not name_part or not msg_part:
+        return ("To send a message, type it like this:\n\n"
+                "MSG Ramesh Traders: your goods are ready")
+
+    db = require_db()
+    matches = (
+        db.table("clients")
+        .select("id, name, whatsapp_number")
+        .eq("business_id", business["id"])
+        .ilike("name", f"%{name_part}%")
+        .limit(6)
+        .execute()
+    ).data or []
+    if not matches:
+        return f"'{name_part}' - no party found with that name."
+    if len(matches) > 1:
+        names = ", ".join(c["name"] for c in matches[:5])
+        return (f"'{name_part}' se kai clients mile: {names}.\n"
+                f"Type the full name, like: MSG {matches[0]['name']}: your message")
+    client = matches[0]
+    if not client.get("whatsapp_number"):
+        return f"{client['name']} has no WhatsApp number saved. Cannot send."
+
+    result = await whatsapp.send_message(
+        business_id=business["id"],
+        to_number=client["whatsapp_number"],
+        message_text=msg_part,
+        plan=Plan(business["plan"]),
+        message_type=MessageType.bot_reply,
+        client_id=client["id"],
+    )
+    if result.get("queued"):
+        return f"Message for {client['name']} is in the queue. It will go from your shop number."
+    if result.get("sent"):
+        return f"Message sent to {client['name']}."
+    return f"{client['name']}: {_send_fail_note(result)}"
 
 
 async def _handle_paid_owner(
@@ -951,11 +1185,11 @@ async def _handle_paid_owner(
     )
 
     if not clients_resp.data:
-        return f"'{client_name}' naam ka koi client nahi mila."
+        return f"'{client_name}' - no party found with that name."
 
     if len(clients_resp.data) > 1:
         names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+        return f"'{client_name}' matches more than one party: {names}. Type the full name."
 
     client = clients_resp.data[0]
 
@@ -972,7 +1206,7 @@ async def _handle_paid_owner(
     )
 
     if not bill_resp.data:
-        return f"{client['name']} ka koi outstanding bill nahi hai."
+        return f"{client['name']} has no pending bill."
 
     outstanding = Decimal(str(bill_resp.data[0]["outstanding"]))
     result = await payments_service.apply_payment(
@@ -984,10 +1218,10 @@ async def _handle_paid_owner(
 
     if result.get("applied"):
         return (
-            f"{client['name']} ka {inr(outstanding)} payment mark ho gaya. "
+            f"Payment of {inr(outstanding)} marked for {client['name']}.\n"
             f"{result['bills_affected']} bill(s) updated."
         )
-    return f"Payment apply nahi ho paya: {result.get('reason', 'unknown error')}"
+    return f"Could not apply the payment: {result.get('reason', 'unknown error')}"
 
 
 async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
@@ -995,7 +1229,7 @@ async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
     cadence scales with it automatically (90 din -> nudges at 9/21/45/
     63/90), and open bills' due dates are recomputed."""
     if not 1 <= days <= 365:
-        return "Credit period 1 se 365 din ke beech hona chahiye."
+        return "Credit days must be between 1 and 365."
     db = require_db()
     clients_resp = (
         db.table("clients")
@@ -1005,10 +1239,10 @@ async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
         .execute()
     )
     if not clients_resp.data:
-        return f"'{client_name}' naam ka koi client nahi mila. Exact naam likhein."
+        return f"'{client_name}' - no party found with that name. Type the exact name."
     if len(clients_resp.data) > 1:
         names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' se kai clients mile: {names}. Poora naam likhein."
+        return f"'{client_name}' matches more than one party: {names}. Type the full name."
 
     client = clients_resp.data[0]
     db.table("clients").update({"credit_days": days}).eq("id", client["id"]).execute()
@@ -1032,14 +1266,25 @@ async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
         updated += 1
 
     return (
-        f"{client['name']} ka credit period ab {days} din hai. ✅\n"
-        f"{updated} khule bills ki due date update ho gayi.\n"
-        f"Reminders ab {days} din ke hisaab se jayenge."
+        f"{client['name']}'s credit period is now {days} days.\n"
+        f"{updated} open bills got a new due date.\n"
+        f"Reminders will follow the new period."
     )
 
 
+def _biz_is_en(business_id: str) -> bool:
+    """Does this business message its customers in English?"""
+    try:
+        r = (require_db().table("businesses").select("msg_language")
+             .eq("id", business_id).limit(1).execute())
+        return bool(r.data) and (r.data[0].get("msg_language") or "") == "english"
+    except Exception:
+        return False
+
+
 async def _customer_statement(client: dict) -> str:
-    """A customer asked HISAB: their own bills, personalised to their number."""
+    """A customer asked HISAB: their own bills, in the shop's message language.
+    Short lines, generous spacing - readable at any age."""
     db = require_db()
     bills_resp = (
         db.table("bills")
@@ -1051,15 +1296,20 @@ async def _customer_statement(client: dict) -> str:
         .execute()
     )
     open_bills = bills_resp.data or []
+    en = _biz_is_en(client["business_id"])
     if not open_bills:
-        return (
-            f"Namaste {client['name']} ji! 🙏\n"
-            "Aapka koi bill baaki nahi hai. Sab clear! ✅\n"
-            "Dhanyavaad."
-        )
+        if en:
+            return (f"Hello {client['name']} ji,\n\n"
+                    "You have no pending bills.\n"
+                    "All clear. Thank you!")
+        return (f"Namaste {client['name']} ji,\n\n"
+                "Aapka koi bill baaki nahi hai.\n"
+                "Sab clear. Dhanyavaad!")
 
     total = Decimal(0)
-    lines = [f"Namaste {client['name']} ji! Aapka hisaab:\n"]
+    lines = ([f"Hello {client['name']} ji,", "Your account with us:", ""]
+             if en else
+             [f"Namaste {client['name']} ji,", "Aapka hisaab:", ""])
     for b in open_bills[:6]:
         amt = Decimal(str(b["outstanding"]))
         total += amt
@@ -1068,9 +1318,14 @@ async def _customer_statement(client: dict) -> str:
     if len(open_bills) > 6:
         rest = sum(Decimal(str(b["outstanding"])) for b in open_bills[6:])
         total += rest
-        lines.append(f"...aur {len(open_bills) - 6} bills: {inr(rest)}")
-    lines.append(f"\nKul baaki: {inr(total)}")
-    lines.append("\nPayment ho gaya ho to PAID reply karein. Dhanyavaad! 🙏")
+        lines.append((f"...and {len(open_bills) - 6} more bills: {inr(rest)}") if en
+                     else (f"...aur {len(open_bills) - 6} bills: {inr(rest)}"))
+    if en:
+        lines += ["", f"Total due: {inr(total)}", "",
+                  "If you have already paid, reply PAID.", "Thank you!"]
+    else:
+        lines += ["", f"Kul baaki: {inr(total)}", "",
+                  "Payment ho gaya ho to PAID reply karein.", "Dhanyavaad!"]
     return "\n".join(lines)
 
 
@@ -1085,12 +1340,15 @@ async def _handle_customer_optout(client: dict, from_number: str) -> str:
     try:
         await whatsapp.notify_owner(
             client["business_id"],
-            f"{client['name']} ({from_number}) ne reminder band karne ko kaha. "
-            f"ASVA ne unke reminders pause kar diye. Chalu karna ho to dashboard me tick karein.")
+            f"{client['name']} ({from_number}) asked to stop reminders. "
+            f"ASVA has paused them. To resume, tick the party on the Dashboard.")
     except Exception:
         log.exception("opt-out owner notify failed")
-    return ("Theek hai, aapko ab payment reminder nahi bhejenge. "
-            "Zaroorat pade to dukaan se baat kar sakte hain. Dhanyavaad.")
+    if _biz_is_en(client["business_id"]):
+        return ("OK. We will not send you payment reminders now.\n"
+                "You can always talk to the shop directly. Thank you.")
+    return ("Theek hai, aapko ab payment reminder nahi bhejenge.\n"
+            "Zaroorat ho to dukaan se baat kar sakte hain. Dhanyavaad.")
 
 
 async def _handle_paid_customer(client: dict) -> str:
@@ -1108,12 +1366,13 @@ async def _handle_paid_customer(client: dict) -> str:
     # still exists as a fallback.
     await whatsapp.notify_owner(
         business_id,
-        f"{client['name']} ne 'PAID' bola hai. Paisa aaya ho to Tally me receipt "
-        f"entry kar dein. Dashboard sync se apne aap update ho jayega (partial "
-        f"payment bhi sahi dikhega). Ya yahan 'PAID {client['name']}' bhej ke turant mark karein.",
+        f"{client['name']} says PAID. If the money has come, enter the receipt "
+        f"in Tally - ASVA updates automatically. Or send PAID {client['name']} "
+        f"here to mark it right now.",
     )
 
-    return (
-        "Shukriya! Aapka payment note kar liya hai. "
-        "Business owner ko inform kar diya gaya hai. 🙏"
-    )
+    if _biz_is_en(business_id):
+        return ("Thank you! We have noted your payment.\n"
+                "The shop has been informed.")
+    return ("Shukriya! Aapka payment note kar liya hai.\n"
+            "Dukaan ko inform kar diya hai.")

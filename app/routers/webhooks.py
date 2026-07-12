@@ -28,9 +28,39 @@ from fastapi.responses import PlainTextResponse
 from app.config import settings
 from app.db import require_db
 from app.services import bot
+from app.services.bot import _match_row
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+def _record_inbound(db, sender: str, message_id: str) -> None:
+    """Persist the inbound messageId so the dedup check above actually works.
+
+    Without this row, WhatsApp redelivering the same message (e.g. Baileys
+    re-upserting history after a reconnect) would re-run the command - and a
+    replayed PAID or BILL writes real data twice. Recorded AFTER successful
+    handling on purpose: a crash mid-command SHOULD be reprocessed.
+    Best-effort: never let bookkeeping break the webhook.
+    """
+    try:
+        biz = _match_row(db, "businesses", "id", sender)
+        business_id = biz["id"] if biz else None
+        if not business_id:
+            client = _match_row(db, "clients", "business_id", sender)
+            business_id = client["business_id"] if client else None
+        if not business_id:
+            return  # unknown sender: bot ignored it anyway, nothing to replay
+        db.table("messages").insert({
+            "business_id": business_id,
+            "type": "bot_reply",
+            "template_name": "inbound",
+            "aisensy_message_id": message_id,
+            "delivery_status": "received",
+            "cost": 0,
+        }).execute()
+    except Exception:
+        log.warning("Could not record inbound messageId=%s", message_id, exc_info=True)
 
 
 def _extract(body: dict) -> tuple[str | None, str | None, str | None]:
@@ -137,6 +167,8 @@ async def aisensy_inbound(request: Request):
             sender.strip(), (text or "").strip(),
             media_b64=media_b64, media_type=media_type, channel=channel,
         )
+        if message_id:
+            _record_inbound(require_db(), sender.strip(), message_id)
         return {"ok": True, "reply": reply}
 
     except Exception:

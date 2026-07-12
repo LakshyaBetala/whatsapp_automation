@@ -14,39 +14,62 @@ let tray = null;
 app.isQuitting = false;
 
 // ── Config: token + backend URL come from Asva/config.json ────────────────
+// Multi-company: the primary company is the top-level token; extra Tally
+// companies (added via `agent --add-company`) live in config.companies[].
+// Each has its OWN token = its own isolated data. The renderer shows a
+// dropdown when there is more than one.
+function pageUrls(backend, token) {
+  const q = `?token=${encodeURIComponent(token)}`;
+  return {
+    dashboardUrl: `${backend}/admin${q}`,
+    remindersUrl: `${backend}/admin/reminders${q}`,
+    analyticsUrl: `${backend}/admin/analytics${q}`,
+    accountsUrl: `${backend}/admin/accounts${q}`,
+  };
+}
 function loadConfig() {
   let token = '';
   let backend = 'http://localhost:8000';
+  let companies = [];
   try {
     const c = JSON.parse(fs.readFileSync(path.join(REPO, 'Asva', 'config.json'), 'utf8'));
     token = c.agent_token || '';
     if (c.backend_url) backend = c.backend_url.replace(/\/+$/, '');
+    const primaryName = c.company_name || c.business_name || 'Company 1';
+    if (token) companies.push({ name: primaryName, token });
+    for (const extra of (c.companies || [])) {
+      if (extra && extra.agent_token && extra.company_name
+          && extra.company_name !== primaryName) {
+        companies.push({ name: extra.company_name, token: extra.agent_token });
+      }
+    }
   } catch (e) {
     // config missing/invalid - dashboard tab will show a helpful message
   }
-  const q = token ? `?token=${encodeURIComponent(token)}` : '';
+  const base = token ? pageUrls(backend, token) : {
+    dashboardUrl: '', remindersUrl: '', analyticsUrl: '', accountsUrl: '',
+  };
   return {
     token,
     backendUrl: backend,
-    dashboardUrl: token ? `${backend}/admin${q}` : '',
-    remindersUrl: token ? `${backend}/admin/reminders${q}` : '',
-    analyticsUrl: token ? `${backend}/admin/analytics${q}` : '',
-    accountsUrl: token ? `${backend}/admin/accounts${q}` : '',
+    companies: companies.map((co) => ({ name: co.name, ...pageUrls(backend, co.token) })),
+    ...base,
     waShopUrl: 'http://localhost:3001/qr',
-    waBotUrl: 'http://localhost:3002/qr',
   };
 }
 const CONFIG = loadConfig();
 
 // ── Child-process supervision ─────────────────────────────────────────────
-// TWO numbers, two wa_service instances:
+// Use the .venv Python that SETUP.bat built (3.11-3.13). A bare `python` on the
+// machine may be 3.14, which has no pydantic-core wheel and fails to import.
+const VENV_PY = path.join(REPO, '.venv', 'Scripts', 'python.exe');
+const PY = fs.existsSync(VENV_PY) ? VENV_PY : 'python';
+// ONE number, one wa_service instance:
 //   whatsapp (3001) = the shop's own number  -> bills, reminders, customer replies
-//   bot      (3002) = the ASVA assistant number -> owner-only (LIST/BILL/photo/digest)
 const SPECS = {
-  backend: { cmd: 'python', args: ['-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000'], cwd: REPO, env: {} },
+  backend: { cmd: PY, args: ['-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000'], cwd: REPO, env: {} },
   whatsapp: { cmd: 'node', args: ['index.js'], cwd: path.join(REPO, 'wa_service'), env: { PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop' } },
-  bot: { cmd: 'node', args: ['index.js'], cwd: path.join(REPO, 'wa_service'), env: { PORT: '3002', SESSION_ID: 'bot', WA_CHANNEL: 'bot' } },
-  watcher: { cmd: 'python', args: ['-u', 'tally_agent/agent.py', '--watch'], cwd: REPO, env: {} },
+  watcher: { cmd: PY, args: ['-u', 'tally_agent/agent.py', '--watch'], cwd: REPO, env: {} },
 };
 const services = {}; // name -> { proc, restarts }
 const logs = {};     // name -> ring buffer of recent output lines
@@ -154,17 +177,12 @@ function parseWa(ok, body) {
 
 function pollStatus() {
   const out = {};
-  let pending = 4;
+  let pending = 3;
   const done = () => { if (--pending === 0) sendToWindow('status', out); };
   ping(`${CONFIG.backendUrl}/health`, (ok) => { out.backend = ok; done(); });
   ping('http://localhost:3001/api/wa/status', (ok, b) => {
     const w = parseWa(ok, b);
     out.whatsapp = w.ready; out.whatsappReachable = w.reachable; out.whatsappQr = w.qr;
-    done();
-  });
-  ping('http://localhost:3002/api/wa/status', (ok, b) => {
-    const w = parseWa(ok, b);
-    out.bot = w.ready; out.botReachable = w.reachable; out.botQr = w.qr;
     done();
   });
   // Tally sync freshness for the top bar (label + dot colour + last-sync ISO).

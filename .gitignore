@@ -8,6 +8,7 @@ env/
 # Secrets
 .env
 *.env
+.env.*
 !.env.example
 # PyInstaller (agent build artifacts)
 tally_agent/build/

@@ -73,13 +73,15 @@
 <div id="app">
   <div id="side">
     <div id="brand"><img src="logo.png" alt="ASVA"><span class="wm">ASVA<small>RECOVERY CONTROL</small></span></div>
-    <button class="nav on" data-v="dash">Dashboard<small>Parties, baaki aur bills</small></button>
-    <button class="nav" data-v="reminders">Reminders<small>Timing, chhutti, discount</small></button>
-    <button class="nav" data-v="analytics">Analytics<small>Business ke numbers</small></button>
-    <button class="nav" data-v="accounts">Accounts<small>UPI aur bank details</small></button>
-    <button class="nav" data-v="setup">WhatsApp Setup<small>Dono number connect karein</small></button>
+    <select id="cosel" title="Switch company" style="display:none;margin:0 12px 12px;padding:8px;border-radius:6px;background:#123524;color:#dfe9e2;border:1px solid #2c5c42;width:calc(100% - 24px);font-size:.9rem"></select>
+    <button class="nav on" data-v="dash">Dashboard<small>Parties, dues and bills</small></button>
+    <button class="nav" data-v="reminders">Reminders<small>Batches, time and holidays</small></button>
+    <button class="nav" data-v="analytics">Analytics<small>Your business numbers</small></button>
+    <button class="nav" data-v="accounts">Accounts<small>UPI and bank details</small></button>
+    <button class="nav" data-v="setup">WhatsApp Setup<small>Connect your number</small></button>
     <div class="side-foot">
-      <button class="nav" id="reloadbtn" onclick="reloadData()" style="color:#9fb7a6;font-size:.85rem">Reload data</button>
+      <button class="nav" id="reloadbtn" onclick="reloadData()" style="color:#9fb7a6;font-size:.85rem"
+        title="Fetches fresh data from Tally now (2-3 min)">Tally refresh<small>Fresh data from Tally</small></button>
       <div id="statusbtn" onclick="toggleStatus()">
         <span class="dot" id="d-backend"></span>
         <span class="dot" id="d-whatsapp"></span>
@@ -92,8 +94,8 @@
     <div id="topbar">
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
       <div class="langtoggle">
-        <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
         <button id="lang-en" onclick="setLang('english')">EN</button>
+        <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
       </div>
     </div>
     <div id="maincontent">
@@ -102,7 +104,7 @@
         <div id="dashbanner" class="banner"></div>
         <div class="grow">
           <webview id="wv-dash" src="about:blank"></webview>
-          <div class="overlay" id="dashov">Starting ASVA. Backend boot ho raha hai (~15 sec). Window khula rehne dein.</div>
+          <div class="overlay" id="dashov">Starting ASVA... about 15 seconds. Keep this window open.</div>
         </div>
       </div>
     </div>
@@ -126,14 +128,10 @@
     </div>
 
     <div class="view" id="v-setup">
-      <div class="setupwrap">
-        <div class="setupcol">
-          <h3>Shop WhatsApp - is number se bill aur reminder jaate hain</h3>
+      <div class="setupwrap" style="justify-content:center">
+        <div class="setupcol" style="max-width:600px;border-right:0;width:100%">
+          <h3>Shop WhatsApp - bills and reminders go from this number</h3>
           <div class="qrbox" id="qr-shop"><div class="qrwait">Loading...</div></div>
-        </div>
-        <div class="setupcol">
-          <h3>ASVA Bot - is number par owner ko digest aur madad milti hai</h3>
-          <div class="qrbox" id="qr-bot"><div class="qrwait">Loading...</div></div>
         </div>
       </div>
     </div>
@@ -144,8 +142,7 @@
         <div class="toprow"><h2>Services</h2><button class="closebtn" onclick="toggleStatus()">Close</button></div>
         <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">Backend (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="restart('backend')">Restart</button></div>
         <div class="srow"><span class="dot" id="s-whatsapp"></span><div class="mid"><div class="sname">Shop WhatsApp</div><div class="stext" id="st-whatsapp">checking...</div></div><button onclick="restart('whatsapp')">Restart</button></div>
-        <div class="srow"><span class="dot" id="s-bot"></span><div class="mid"><div class="sname">ASVA Bot WhatsApp</div><div class="stext" id="st-bot">checking...</div></div><button onclick="restart('bot')">Restart</button></div>
-        <div class="srow"><span class="dot ok"></span><div class="mid"><div class="sname">Tally watcher</div><div class="stext">Running - naye bill 2 min me WhatsApp par.</div></div><button onclick="restart('watcher')">Restart</button></div>
+        <div class="srow"><span class="dot ok"></span><div class="mid"><div class="sname">Tally watcher</div><div class="stext">Running - new Tally bills reach WhatsApp in ~2 min.</div></div><button onclick="restart('watcher')">Restart</button></div>
         <label class="auto"><input type="checkbox" id="autostart"> Windows chalu hote hi ASVA apne aap khul jaye</label>
         <div id="log"></div>
       </div>
@@ -168,7 +165,7 @@ function restart(name) { window.asva.restartService(name); }
 
 // ── UI language (persisted on this laptop) ────────────────────────────
 const WV = { 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
-function currentLang() { return localStorage.getItem('asva_lang') || 'hinglish'; }
+function currentLang() { return localStorage.getItem('asva_lang') || 'english'; }
 function urlWithLang(url) { if (!url) return url; return url + (url.includes('?') ? '&' : '?') + 'lang=' + encodeURIComponent(currentLang()); }
 function applyLangButtons() {
   const en = currentLang() === 'english';
@@ -198,44 +195,82 @@ function reloadAll() {
 // Top-bar / sidebar "Reload data": force an immediate Tally refresh, then reload
 // the webviews once the sync lands (so the dashboard re-renders with fresh data).
 let awaitingSync = false, syncBaseline = null, lastSyncedAtSeen = null;
+const RELOAD_LABEL = 'Tally refresh<small>Fresh data from Tally</small>';
+function setReloadLabel(html) {
+  const b = document.getElementById('reloadbtn');
+  if (b) b.innerHTML = html;
+}
 async function reloadData() {
-  const btn = document.getElementById('reloadbtn');
   let res = {};
   try { res = await window.asva.tallyReload(); } catch (e) {}
   if (res && res.ok === false && res.cooldown) {
-    if (btn) btn.textContent = res.detail || 'Thodi der baad';
-    setTimeout(() => { if (btn) btn.textContent = 'Reload data'; }, 4000);
+    setReloadLabel(res.detail || 'Try again in a few minutes');
+    setTimeout(() => setReloadLabel(RELOAD_LABEL), 4000);
     return;
   }
   awaitingSync = true; syncBaseline = lastSyncedAtSeen;
-  if (btn) btn.textContent = 'Syncing...';
-  setTimeout(() => { if (awaitingSync) { awaitingSync = false; if (btn) btn.textContent = 'Reload data'; } }, 180000);
+  setReloadLabel('Getting data from Tally...');
+  setTimeout(() => { if (awaitingSync) { awaitingSync = false; setReloadLabel(RELOAD_LABEL); } }, 180000);
 }
+async function asvaRelink() {
+  if (!confirm('Get a fresh QR? The old link will be removed and you scan once again.')) return;
+  try { await fetch('http://localhost:3001/api/wa/relink', { method: 'POST' }); } catch (e) {}
+}
+const RELINK_HELP =
+  '<div style="margin-top:14px;font-size:.85rem;color:#787774;max-width:340px;text-align:left">' +
+  'Phone says "could not link device"?<br>' +
+  '1. On the phone: Linked Devices &rarr; old ASVA entry &rarr; <b>Log out</b>.<br>' +
+  '2. Press Re-link below and scan the fresh QR.<br>' +
+  '<button onclick="asvaRelink()" style="margin-top:8px;padding:7px 14px;cursor:pointer;' +
+  'border:1px solid #EAEAEA;background:#fff;border-radius:6px">Re-link (fresh QR)</button></div>';
+
 function renderQr(boxId, ready, reachable, qr, label) {
   const el = document.getElementById(boxId);
   if (ready) { el.innerHTML = '<div class="qrok">WhatsApp connected</div>'; return; }
   if (qr) {
-    el.innerHTML = '<div class="qrsteps"><b>Is number ka QR scan karo:</b>' +
-      '<ol><li>Us phone pe WhatsApp kholo</li><li>Menu &rarr; <b>Linked Devices</b></li>' +
-      '<li><b>Link a Device</b> &rarr; neeche QR scan karo</li></ol></div>' +
-      '<img class="qrimg" src="' + qr + '">';
+    el.innerHTML = '<div class="qrsteps"><b>Scan this QR with the shop WhatsApp:</b>' +
+      '<ol><li>Open WhatsApp on that phone</li><li>Menu &rarr; <b>Linked Devices</b></li>' +
+      '<li><b>Link a Device</b> &rarr; scan the QR below</li></ol></div>' +
+      '<img class="qrimg" src="' + qr + '">' + RELINK_HELP;
   } else if (reachable) {
-    el.innerHTML = '<div class="qrwait">QR ban raha hai... 5 sec me aayega.</div>';
+    el.innerHTML = '<div class="qrwait">Getting a fresh QR... a few seconds.</div>';
   } else {
-    el.innerHTML = '<div class="qrwait">WhatsApp service start ho rahi hai.<br><br>' +
-      '1 min baad bhi na aaye to Status &rarr; is service ka Restart dabao.</div>';
+    el.innerHTML = '<div class="qrwait">WhatsApp service is starting.<br><br>' +
+      'Still nothing after 1 min? Open Status and press Restart on it.</div>';
   }
 }
 function waText(ready, reachable) {
-  if (ready) return 'Connected. Messages ja sakte hain.';
-  if (reachable) return 'Not scanned. WhatsApp Setup me QR scan karo.';
-  return 'Start ho raha hai...';
+  if (ready) return 'Connected. Messages can go.';
+  if (reachable) return 'Not linked yet. Scan the QR in WhatsApp Setup.';
+  return 'Starting...';
 }
 
 applyLangButtons();
+// ── Multi-company: each Tally company has its own token/data; switching
+// simply points every page at that company's URLs. ──
+function applyCompany(i) {
+  const co = CONFIG.companies && CONFIG.companies[i];
+  if (!co) return;
+  CONFIG.dashboardUrl = co.dashboardUrl;
+  CONFIG.remindersUrl = co.remindersUrl;
+  CONFIG.analyticsUrl = co.analyticsUrl;
+  CONFIG.accountsUrl = co.accountsUrl;
+  Object.entries(WV).forEach(([id, key]) => {
+    const w = document.getElementById(id), url = CONFIG[key];
+    if (w && url) { loaded[id] = true; w.src = urlWithLang(url); }
+  });
+}
+
 (async () => {
   CONFIG = await window.asva.getConfig();
-  if (!CONFIG.dashboardUrl) document.getElementById('dashov').textContent = 'config.json me agent_token nahi mila.';
+  if (!CONFIG.dashboardUrl) document.getElementById('dashov').textContent = 'agent_token missing in config.json.';
+  const sel = document.getElementById('cosel');
+  if (sel && CONFIG.companies && CONFIG.companies.length > 1) {
+    sel.innerHTML = CONFIG.companies.map(
+      (co, i) => `<option value="${i}">${co.name}</option>`).join('');
+    sel.style.display = 'block';
+    sel.onchange = () => applyCompany(parseInt(sel.value, 10));
+  }
   const cb = document.getElementById('autostart');
   cb.checked = await window.asva.getAutostart();
   cb.onchange = async () => { cb.checked = await window.asva.setAutostart(cb.checked); };
@@ -260,23 +295,20 @@ window.asva.onStatus((s) => {
   }
   if (awaitingSync && s.lastSyncedAt && s.lastSyncedAt !== syncBaseline) {
     awaitingSync = false;
-    const btn = document.getElementById('reloadbtn'); if (btn) btn.textContent = 'Reload data';
+    setReloadLabel(RELOAD_LABEL);
     reloadAll();
   }
 
   setDot('d-backend', !!s.backend); setDot('s-backend', !!s.backend);
   setDot('d-whatsapp', !!s.whatsapp); setDot('s-whatsapp', !!s.whatsapp);
-  document.getElementById('st-backend').textContent = s.backend ? 'Running.' : 'Start ho raha hai. 1 min baad bhi red rahe to Restart.';
+  document.getElementById('st-backend').textContent = s.backend ? 'Running.' : 'Starting. Still red after 1 min? Press Restart.';
   document.getElementById('st-whatsapp').textContent = waText(s.whatsapp, s.whatsappReachable);
   renderQr('qr-shop', s.whatsapp, s.whatsappReachable, s.whatsappQr, 'shop');
-  setDot('s-bot', !!s.bot);
-  const stbot = document.getElementById('st-bot'); if (stbot) stbot.textContent = waText(s.bot, s.botReachable);
-  renderQr('qr-bot', s.bot, s.botReachable, s.botQr, 'bot');
 
   const banner = document.getElementById('dashbanner');
   if (!s.whatsapp) {
     banner.className = 'banner warn';
-    banner.innerHTML = 'Shop WhatsApp connected nahi hai - reminders abhi nahi jaayenge. "WhatsApp Setup" me QR scan karo.';
+    banner.innerHTML = 'Shop WhatsApp is not connected - reminders cannot go. Scan the QR in "WhatsApp Setup".';
   } else { banner.className = 'banner'; }
 
   if (s.backend) {

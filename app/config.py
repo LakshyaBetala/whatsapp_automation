@@ -32,6 +32,10 @@ class Settings(BaseSettings):
 
     # --- App ---
     app_env: str = "development"
+    # Release version of THIS build. Bump on every shipped zip. The dashboard
+    # compares it against the newest row in app_releases (Supabase) and shows
+    # an update banner when a newer version exists - Tally-style update notice.
+    app_version: str = "1.2.0"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
@@ -52,6 +56,23 @@ class Settings(BaseSettings):
     eod_digest_minute: int = 0
     reminder_sweep_hour: int = 10
     reminder_sweep_minute: int = 0
+
+    # --- Selective job control (per-deployment) ---
+    # Bot host sets ENABLE_REMINDER_SWEEP=false (reminders go from the shop number).
+    # Father's laptop sets ENABLE_EOD_DIGEST=false (digest comes from the bot number).
+    enable_eod_digest: bool = True
+    enable_reminder_sweep: bool = True
+    enable_subscription_check: bool = True
+
+    # --- Cross-laptop send queue (wa_outbox) ---
+    # Rule: a PARTY only ever hears from the SMB owner's own shop number, never
+    # the bot number. The bot deployment sets SEND_VIA_OUTBOX=true so its
+    # customer-facing sends (REMIND/MSG/BILL/PAID confirm) are queued in
+    # Supabase; the shop deployment (ENABLE_OUTBOX_SEND=true) delivers the
+    # queue from the shop number every minute. Owner-facing sends (digest,
+    # alerts, bot replies) stay direct on the bot number.
+    send_via_outbox: bool = False       # true ONLY on the bot laptop
+    enable_outbox_send: bool = True     # false ONLY on the bot laptop
 
     # --- AI (optional) ---
     gemini_api_key: str = ""

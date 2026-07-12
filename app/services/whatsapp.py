@@ -126,8 +126,47 @@ async def send_message(
         payload["media_type"] = image_media_type or "image/png"
         payload["media_name"] = image_filename or "image.png"
 
+    # ── 2a. Bot deployment: queue customer-facing sends for the SHOP number ─
+    # A party must only ever hear from the SMB owner's own number. The bot
+    # laptop cannot reach the shop laptop's WhatsApp (they share only
+    # Supabase), so the fully-built payload goes into wa_outbox; the shop
+    # deployment's outbox job delivers it from the shop number within ~1 min.
+    # Owner-facing sends (channel="platform") skip this and go out directly.
+    if settings.send_via_outbox and channel == "shop":
+        msg_row = (
+            db.table("messages")
+            .insert({
+                "business_id": business_id,
+                "client_id": client_id,
+                "bill_id": bill_id,
+                "type": message_type.value,
+                "reminder_day": reminder_day,
+                "template_name": template_name,
+                "language": language.value,
+                "delivery_status": "queued",
+                "cost": 0,
+            })
+            .execute()
+        )
+        db_id = msg_row.data[0]["id"] if msg_row.data else None
+        db.table("wa_outbox").insert({
+            "business_id": business_id,
+            "message_db_id": db_id,
+            "payload": payload,
+        }).execute()
+        log.info("Queued WhatsApp send to %s via wa_outbox (shop number delivers)", to_number)
+        return {
+            "sent": False,
+            "queued": True,
+            "message_id": None,
+            "delivery_status": "queued",
+            "reason": None,
+            "db_id": db_id,
+        }
+
     openwa_message_id = None
     delivery_status = "sent"
+    fail_reason: Optional[str] = None
 
     base_url = settings.openwa_url
     if channel == "platform" and settings.platform_wa_url:
@@ -145,6 +184,17 @@ async def send_message(
     except Exception as exc:
         log.error("OpenWA send failed for %s: %s", to_number, exc)
         delivery_status = "failed"
+        # Classify WHY so the bot can tell the owner something actionable
+        # instead of a silent/anonymous failure.
+        err = str(exc).lower()
+        if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+            fail_reason = "wa_service_down"      # Node service not running
+        elif "503" in err or "not ready" in err:
+            fail_reason = "wa_not_connected"     # service up, QR not scanned / WA disconnected
+        elif "not_on_whatsapp" in err:
+            fail_reason = "not_on_whatsapp"      # number has no WhatsApp account
+        else:
+            fail_reason = "send_failed"
 
     # ── 3. Log to messages table ──────────────────────────────────────
     msg_row = (
@@ -168,6 +218,7 @@ async def send_message(
         "sent": delivery_status == "sent",
         "message_id": openwa_message_id,
         "delivery_status": delivery_status,
+        "reason": fail_reason,
         "db_id": msg_row.data[0]["id"] if msg_row.data else None,
     }
 

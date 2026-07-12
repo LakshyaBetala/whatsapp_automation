@@ -1,8 +1,10 @@
-"""EOD 9pm digest - sends daily business summary to the owner.
+"""Daily digest - sends the owner one simple end-of-day summary.
 
-Runs at 9 PM IST daily via APScheduler.  Queries 5 metrics for each
-business, skips if all are zero (saves ₹0.145), appends a stale-sync
-warning if Tally has not synced today, then sends via whatsapp.send_template.
+Runs HOURLY via APScheduler; each business sends once its OWN hour
+(businesses.digest_hour, owner-settable from the bot with "DIGEST 9PM";
+default settings.eod_digest_hour) is reached, with per-day dedup - so a
+laptop that was off at the digest hour still delivers the digest the next
+hour it is on. Skips if all metrics are zero.
 """
 from __future__ import annotations
 
@@ -10,6 +12,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan, PLAN_LIMITS
 from app.services import whatsapp
@@ -167,9 +170,43 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
             last_sync_resp.data[0]["synced_at"].replace("Z", "+00:00")
         )
         if last_synced.astimezone(IST).date() != today:
-            stale_warning = "\n\nAaj Tally sync nahi hua. Data purana ho sakta hai."
+            stale_warning = "\n\nNote: Tally did not sync today. Figures may be old."
     else:
-        stale_warning = "\n\nTally sync kabhi nahi hua. Pehle agent install karein."
+        stale_warning = "\n\nNote: Tally has never synced. Please start ASVA on the shop laptop."
+
+    # ── "Worth a call": top overdue PARTIES (aggregated), the action list ─
+    action_lines = ""
+    try:
+        od_resp = (
+            db.table("bills")
+            .select("outstanding, due_date, client_id, clients(name)")
+            .eq("business_id", business_id)
+            .eq("status", "overdue")
+            .execute()
+        )
+        per_party: dict = {}
+        for b in od_resp.data or []:
+            out = Decimal(str(b.get("outstanding") or 0))
+            if out <= 0:
+                continue
+            e = per_party.setdefault(b["client_id"], {
+                "name": (b.get("clients") or {}).get("name", "-"),
+                "total": Decimal(0), "late": 0})
+            e["total"] += out
+            if b.get("due_date"):
+                try:
+                    e["late"] = max(e["late"], (today - date.fromisoformat(str(b["due_date"]))).days)
+                except (TypeError, ValueError):
+                    pass
+        top = sorted(per_party.values(), key=lambda e: e["total"], reverse=True)[:3]
+        if top:
+            lines = []
+            for i, e in enumerate(top, 1):
+                late = f" ({e['late']} days late)" if e["late"] > 0 else ""
+                lines.append(f"{i}. {e['name']}: {inr(e['total'])}{late}")
+            action_lines = "\n\nWORTH A CALL\n" + "\n".join(lines)
+    except Exception:
+        log.exception("Worth-a-call list failed - digest continues")
 
     # ── Build template params ─────────────────────────────────────────
     biz_name = business.get("business_name") or "Business"
@@ -187,6 +224,7 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
         "oldest_days": str(oldest_days),
         "stale_warning": stale_warning,
         "reminders_today": reminders_today,
+        "action_lines": action_lines,
         # Flat list for AiSensy templateParams (order must match approved template)
         "_template_params": [
             biz_name,
@@ -207,19 +245,38 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
 # Scheduled job
 # ======================================================================
 
+async def _digest_sent_today(db, business_id: str, today: date) -> bool:
+    """Per-day dedup: has this business already received today's digest?"""
+    utc_start, utc_end = _today_utc_range_for_ist(today)
+    resp = (
+        db.table("messages")
+        .select("id", count="exact")
+        .eq("business_id", business_id)
+        .eq("type", MessageType.eod_digest.value)
+        .gte("sent_at", utc_start)
+        .lt("sent_at", utc_end)
+        .limit(1)
+        .execute()
+    )
+    return bool(resp.data)
+
+
 async def run() -> None:
-    """Scheduled at 9 PM IST daily. Sends EOD digest to all active owners."""
+    """Runs hourly. Sends each business its digest once its own digest_hour
+    is reached today (catch-up friendly: a laptop off at the hour sends the
+    digest the next hour it is on; per-day dedup stops doubles)."""
     db = require_db()
-    today = _today_ist()
+    now_ist = datetime.now(IST)
+    today = now_ist.date()
 
     biz_resp = (
         db.table("businesses")
-        .select("id, business_name, whatsapp_number, plan, eod_enabled, plan_expires_on")
+        .select("id, business_name, whatsapp_number, plan, eod_enabled, "
+                "plan_expires_on, digest_hour")
         .eq("eod_enabled", True)
         .execute()
     )
     businesses = biz_resp.data or []
-    log.info("EOD digest - processing %d businesses", len(businesses))
 
     from app.services import subscription as subs
 
@@ -228,6 +285,14 @@ async def run() -> None:
 
     for biz in businesses:
         try:
+            dh = biz.get("digest_hour")
+            dh = settings.eod_digest_hour if dh is None else int(dh)
+            if now_ist.hour < dh:
+                skipped += 1
+                continue
+            if await _digest_sent_today(db, biz["id"], today):
+                skipped += 1
+                continue
             sub_status = subs.effective_status(biz.get("plan_expires_on"))
             if sub_status == "suspended":
                 skipped += 1
@@ -249,45 +314,17 @@ async def run() -> None:
                 bills_total=params["bills_total"],
                 payers_count=params["payers_count"],
                 payments_total=params["payments_total"],
+                reminders_today=params["reminders_today"],
                 outstanding_total=params["outstanding_total"],
-                oldest_name=params["oldest_name"],
-                oldest_amount=params["oldest_amount"],
-                oldest_days=params["oldest_days"],
             )
-
-            # ── "Kal kya karna hai" action list: top overdue parties ──
-            action_lines = ""
-            try:
-                top_resp = (
-                    db.table("bills")
-                    .select("outstanding, due_date, clients(name, whatsapp_number)")
-                    .eq("business_id", biz["id"])
-                    .eq("status", "overdue")
-                    .order("outstanding", desc=True)
-                    .limit(3)
-                    .execute()
-                )
-                if top_resp.data:
-                    from app.services.templates import inr as _inr
-                    from datetime import date as _date
-                    lines = ["\n\n📞 Kal inko call karein:"]
-                    for i, b in enumerate(top_resp.data, 1):
-                        nm = (b.get("clients") or {}).get("name", "-")
-                        amt = _inr(b["outstanding"])
-                        days = ""
-                        if b.get("due_date"):
-                            days = f" ({( _date.today() - _date.fromisoformat(str(b['due_date'])) ).days} din)"
-                        lines.append(f"{i}. {nm}: {amt}{days}")
-                    action_lines = "\n".join(lines)
-            except Exception:
-                log.exception("Action list build failed - digest continues")
+            action_lines = params.get("action_lines", "")
 
             renewal_note = ""
             if sub_status == "grace":
                 left = subs.GRACE_DAYS + (subs.days_left(biz.get("plan_expires_on")) or 0)
                 renewal_note = (
-                    f"\n\n⚠️ Subscription khatam ho gaya hai. {left} din mein renew "
-                    f"nahi kiya to reminders band ho jayenge."
+                    f"\n\nYour ASVA subscription has expired. Renew within "
+                    f"{left} days or reminders will stop."
                 )
 
             await whatsapp.send_template(
@@ -299,7 +336,9 @@ async def run() -> None:
                 plan=Plan(biz["plan"]),
                 message_type=MessageType.eod_digest,
                 language=Lang.hi,
-                message_text=rendered_body + (stale_warning or "") + action_lines + renewal_note,
+                message_text=(rendered_body + action_lines
+                              + "\n\nSend LIST to see who owes you."
+                              + (stale_warning or "") + renewal_note),
                 channel="platform",
             )
             sent += 1
@@ -346,12 +385,12 @@ async def preview(business_id: str) -> dict:
         bills_total=params["bills_total"],
         payers_count=params["payers_count"],
         payments_total=params["payments_total"],
+        reminders_today=params["reminders_today"],
         outstanding_total=params["outstanding_total"],
-        oldest_name=params["oldest_name"],
-        oldest_amount=params["oldest_amount"],
-        oldest_days=params["oldest_days"],
     )
 
+    rendered += params.get("action_lines", "")
+    rendered += "\n\nSend LIST to see who owes you."
     stale_warning = params.get("stale_warning", "")
     if stale_warning:
         rendered += stale_warning
