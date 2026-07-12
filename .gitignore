@@ -22,6 +22,7 @@ generated/
 Thumbs.db
 .vscode/
 .idea/
+.claude/
 # Ignore large binary and output files
 build/
 dist/
@@ -57,3 +58,4 @@ agent.log
 # WhatsApp session data (Chromium profiles — machine-local, contains auth)
 wa_service/.wwebjs_auth/
 wa_service/.wwebjs_cache/
+wa_service/.baileys_auth/
