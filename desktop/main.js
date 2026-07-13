@@ -5,6 +5,7 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 
@@ -218,11 +219,32 @@ function parseWa(ok, body) {
   }
 }
 
+// ── License heartbeat ─────────────────────────────────────────────────────
+// Report this shop as alive to the central Command Center: machine + build
+// version (so the operator sees who's on an old version) and pull back the
+// subscription state. Liveness is ALSO covered by /tally/sync every ~60s; this
+// adds the version/machine and keeps last_seen fresh even if Tally is closed.
+let SERVER_VERSION = '';
+function sendHeartbeat() {
+  if (!CONFIG.token) return;
+  try {
+    httpPostJson(`${CONFIG.backendUrl}/license/heartbeat`, {
+      agent_token: CONFIG.token,
+      machine_id: os.hostname(),
+      agent_version: SERVER_VERSION || undefined,
+    }, () => { /* fire and forget */ });
+  } catch (e) { /* never let a heartbeat crash the app */ }
+}
+
 function pollStatus() {
   const out = {};
   let pending = 3;
   const done = () => { if (--pending === 0) sendToWindow('status', out); };
-  ping(`${CONFIG.backendUrl}/health`, (ok) => { out.backend = ok; done(); });
+  ping(`${CONFIG.backendUrl}/health`, (ok, b) => {
+    out.backend = ok;
+    if (ok) { try { const v = JSON.parse(b).version; if (v) SERVER_VERSION = v; } catch (e) {} }
+    done();
+  });
   ping('http://localhost:3001/api/wa/status', (ok, b) => {
     const w = parseWa(ok, b);
     out.whatsapp = w.ready; out.whatsappReachable = w.reachable; out.whatsappQr = w.qr;
@@ -323,6 +345,9 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     pollStatus();
     setInterval(pollStatus, 5000);
+    // Heartbeat once the backend is up, then every 30 min.
+    setTimeout(sendHeartbeat, 25000);
+    setInterval(sendHeartbeat, 30 * 60 * 1000);
   });
   app.on('window-all-closed', () => { /* keep running in tray */ });
   app.on('before-quit', () => stopAll());

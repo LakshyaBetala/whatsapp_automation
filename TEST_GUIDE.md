@@ -96,6 +96,29 @@ box (modal), so it must work in the app.
 | Your digest hour (default 10 PM; change with `DIGEST 9PM` on the bot) | Daily summary arrives on the owner phone FROM THE BOT number |
 | Any time | Customer replies (HISAB / PAID) get answered on the shop number |
 
+## 7a. Command Center + subscriptions (operator only)
+
+The Command Center is YOUR cockpit - it reads the shared database, so it shows
+EVERY shop centrally. It is gated by `ADMIN_API_KEY` (set it in the server
+`.env`; while empty, the page is off).
+
+1. Open `http://<host>:8000/ops` - a key prompt appears. Enter `ADMIN_API_KEY`.
+2. You see KPI cards (businesses, online, active/grace/suspended, messages this
+   month, failed today, outdated) and a table with every business: status pill,
+   plan, expiry, days left, last seen (green dot = agent seen in the last 5 min),
+   agent version, messages used, failed sends today.
+3. **Renew +1 mo** on a row - its expiry jumps forward 30 days (stacks on
+   remaining days if still active). The row flips to active.
+4. **Suspend** on a row - status goes suspended; that shop's WhatsApp sends stop
+   immediately (server-side). **Renew** brings it back.
+5. Change the **plan** dropdown - the tier changes without touching the expiry.
+6. Leave it open - it refreshes every 30 s. Start a shop's ASVA app and within a
+   minute its dot goes green and its version appears (via /tally/sync + the
+   desktop heartbeat).
+
+Note: a suspended shop still SYNCS Tally (read-only, so its numbers stay
+correct), but sends/reminders/digest/OCR stop until renewed.
+
 ## 7b. Missed-hour catch-up (laptop off at the send hour)
 
 1. Keep the shop laptop OFF over a batch's send hour (e.g. 11:00), switch
