@@ -146,6 +146,7 @@ def build_ops_data(db) -> dict:
         "server_time": now.isoformat(),
         "server_version": settings.app_version,
         "latest_version": latest_ver,
+        "public_url": settings.public_base_url,
         "totals": tot,
         "businesses": rows,
     }
@@ -242,10 +243,55 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .muted{color:#7c9787;font-size:.82rem}
  select.pl{font:inherit;font-size:.82rem;background:#0f1713;color:#cfe6d8;border:1px solid #2c5c42;border-radius:6px;padding:5px}
  #msg{color:#46d67e;font-size:.85rem;min-height:18px;margin:8px 0}
+ .add{font:inherit;font-size:.85rem;font-weight:700;border:0;background:#0a7d33;color:#fff;border-radius:7px;padding:8px 14px;cursor:pointer}
+ .add:hover{background:#0c8f3b}.add:active{transform:scale(.97)}
+ .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;z-index:50;overflow:auto}
+ .modal.show{display:flex}
+ .card{background:#17211b;border:1px solid #24332a;border-radius:14px;padding:24px;margin:60px 16px;width:100%;max-width:440px}
+ .card h3{margin:0 0 4px;font-size:1.1rem}.card p.sub{margin:0 0 16px;color:#8fae9c;font-size:.85rem}
+ .fld{margin-bottom:13px}.fld label{display:block;font-size:.75rem;color:#8fae9c;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+ .fld input,.fld select{width:100%;box-sizing:border-box;font:inherit;background:#0f1713;color:#e8efe9;border:1px solid #2c5c42;border-radius:8px;padding:9px 11px}
+ .row2{display:flex;gap:10px}.row2>*{flex:1}
+ .modal .go{width:100%;margin-top:6px;font:inherit;font-weight:700;border:0;border-radius:8px;background:#0a7d33;color:#fff;padding:11px;cursor:pointer}
+ .modal .go:active{transform:scale(.98)}
+ .modal .x{float:right;color:#8fae9c;cursor:pointer;font-size:1.3rem;line-height:1;background:none;border:0}
+ .err{color:#ff6a5c;font-size:.85rem;min-height:16px;margin-top:4px}
+ .result .kv{margin:9px 0}.result .kv .l{font-size:.72rem;color:#8fae9c;text-transform:uppercase;letter-spacing:.05em}
+ .result .kv .v{font-family:'SF Mono',Consolas,monospace;font-size:.9rem;color:#cfe6d8;word-break:break-all;background:#0f1713;border:1px solid #24332a;border-radius:7px;padding:8px 10px;margin-top:3px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+ .copy{font:inherit;font-size:.72rem;border:1px solid #2c5c42;background:#123524;color:#cfe6d8;border-radius:5px;padding:3px 8px;cursor:pointer;flex:none}
+ .warnbox{background:#3a2f10;color:#f0d79a;border-radius:8px;padding:9px 11px;font-size:.8rem;margin:12px 0}
 </style></head><body>
 <div class="top">
   <h1>ASVA Command Center</h1>
-  <div class="meta"><span id="clock"></span> &middot; server v<span id="sv"></span></div>
+  <div class="meta"><button class="add" onclick="openAdd()">+ Add business</button>
+    &nbsp;&nbsp;<span id="clock"></span> &middot; server v<span id="sv"></span></div>
+</div>
+
+<div class="modal" id="addModal">
+ <div class="card" id="addCard">
+  <button class="x" onclick="closeAdd()">&times;</button>
+  <h3>Onboard a shop</h3>
+  <p class="sub">Creates the business, its licence key and a private agent token.</p>
+  <div class="fld"><label>Shop / business name</label><input id="f_biz" placeholder="Rishab Trading Company"></div>
+  <div class="fld"><label>Owner name</label><input id="f_owner" placeholder="Owner"></div>
+  <div class="fld"><label>WhatsApp number (10-digit)</label><input id="f_wa" inputmode="numeric" placeholder="9876543210"></div>
+  <div class="row2">
+   <div class="fld"><label>Plan</label><select id="f_plan"></select></div>
+   <div class="fld"><label>Paid months</label><input id="f_months" type="number" min="1" max="60" value="1"></div>
+  </div>
+  <div class="err" id="addErr"></div>
+  <button class="go" id="addGo" onclick="doAdd()">Create business</button>
+ </div>
+ <div class="card result" id="addResult" style="display:none">
+  <button class="x" onclick="closeAdd()">&times;</button>
+  <h3>Shop created</h3>
+  <p class="sub" id="r_name"></p>
+  <div class="warnbox">Copy the agent token now. It is shown only once and is what the shop's app uses to log in to this server.</div>
+  <div class="kv"><div class="l">Licence key</div><div class="v"><span id="r_lk"></span><button class="copy" onclick="cp('r_lk')">Copy</button></div></div>
+  <div class="kv"><div class="l">Agent token (secret)</div><div class="v"><span id="r_tok"></span><button class="copy" onclick="cp('r_tok')">Copy</button></div></div>
+  <div class="kv"><div class="l">Shop config.json (paste on the shop laptop)</div><div class="v"><span id="r_cfg"></span><button class="copy" onclick="cp('r_cfg')">Copy</button></div></div>
+  <button class="go" onclick="closeAdd()">Done</button>
+ </div>
 </div>
 <div class="wrap">
   <div id="msg"></div>
@@ -265,12 +311,14 @@ const KEY = new URLSearchParams(location.search).get('key') || '';
 const inr = n => (n||0).toLocaleString('en-IN');
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Basic',growth:'Growth',pro:'Pro',max:'Max'};
+let PUBLIC_URL='';
 
 async function load(){
   try{
     const r = await fetch('/ops/data?key='+encodeURIComponent(KEY));
     if(!r.ok){document.getElementById('msg').textContent='Session error - reload with the key.';return;}
     const d = await r.json();
+    PUBLIC_URL = d.public_url || '';
     document.getElementById('sv').textContent = d.server_version;
     const t = d.totals;
     const K=[['businesses','Businesses',''],['online','Online','good'],
@@ -321,6 +369,49 @@ async function suspend(id,name){
   const x=await post('/license/suspend',{admin_key:KEY,business_id:id});
   flash(x.ok?'Suspended':(x.j.detail||'Suspend failed')); load();
 }
+// ── Add business ──────────────────────────────────────────────────────────
+function openAdd(){
+  document.getElementById('f_plan').innerHTML =
+    PLANS.map(p=>'<option value="'+p+'">'+PLABEL[p]+'</option>').join('');
+  document.getElementById('addErr').textContent='';
+  ['f_biz','f_owner','f_wa'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f_months').value='1';
+  document.getElementById('addCard').style.display='';
+  document.getElementById('addResult').style.display='none';
+  document.getElementById('addModal').classList.add('show');
+  document.getElementById('f_biz').focus();
+}
+function closeAdd(){document.getElementById('addModal').classList.remove('show');}
+async function doAdd(){
+  const wa=document.getElementById('f_wa').value.replace(/\D/g,'');
+  const body={admin_key:KEY,
+    owner_name:document.getElementById('f_owner').value.trim(),
+    business_name:document.getElementById('f_biz').value.trim(),
+    whatsapp_number:wa,
+    plan:document.getElementById('f_plan').value,
+    months:parseFloat(document.getElementById('f_months').value)||1};
+  if(!body.business_name){document.getElementById('addErr').textContent='Enter a shop name.';return;}
+  if(wa.length<10){document.getElementById('addErr').textContent='Enter a 10-digit WhatsApp number.';return;}
+  const btn=document.getElementById('addGo');btn.disabled=true;btn.textContent='Creating...';
+  const x=await post('/license/create-business',body);
+  btn.disabled=false;btn.textContent='Create business';
+  if(!x.ok){document.getElementById('addErr').textContent=x.j.detail||'Could not create.';return;}
+  const cfg=JSON.stringify({backend_url:PUBLIC_URL||'https://YOUR-SERVER-URL',
+    agent_token:x.j.agent_token},null,2);
+  document.getElementById('r_name').textContent=x.j.business_name+' - '+PLABEL[x.j.plan]+', paid till '+x.j.plan_expires_on;
+  document.getElementById('r_lk').textContent=x.j.license_key;
+  document.getElementById('r_tok').textContent=x.j.agent_token;
+  document.getElementById('r_cfg').textContent=cfg;
+  document.getElementById('addCard').style.display='none';
+  document.getElementById('addResult').style.display='';
+  load();
+}
+function cp(id){
+  const t=document.getElementById(id).textContent;
+  navigator.clipboard.writeText(t).then(()=>flash('Copied'),()=>flash('Copy failed - select manually'));
+}
+document.getElementById('addModal').addEventListener('click',function(e){if(e.target===this)closeAdd();});
+
 setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString();},1000);
 load(); setInterval(load,30000);
 </script></body></html>"""

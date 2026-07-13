@@ -88,6 +88,47 @@ async def status(token: str):
     return lic.build_heartbeat(db, biz)
 
 
+class CreateBizPayload(BaseModel):
+    admin_key: str
+    owner_name: str
+    whatsapp_number: str
+    business_name: Optional[str] = None
+    plan: str = "starter"
+    months: float = 1                 # first paid cycle length (30-day cycles)
+
+
+@router.post("/create-business")
+async def create_business(payload: CreateBizPayload):
+    """OPS ONLY: onboard a new shop. Creates the business row and mints its
+    agent_token + licence key + first paid cycle, and returns them so the
+    operator can drop the token into the new shop's config. The agent_token is
+    a SECRET shown once here - it is never exposed by any read endpoint."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    try:
+        biz = lic.create_business(
+            db, owner_name=payload.owner_name, whatsapp_number=payload.whatsapp_number,
+            business_name=payload.business_name, plan=payload.plan, months=payload.months)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        log.exception("create_business failed")
+        raise HTTPException(status_code=409,
+                            detail="Could not create - is that WhatsApp number already used?")
+    log.info("Onboarded business %s (%s)", biz.get("id"), biz.get("business_name"))
+    return {
+        "ok": True,
+        "business_id": biz["id"],
+        "business_name": biz.get("business_name") or "",
+        "owner_name": biz.get("owner_name") or "",
+        "whatsapp_number": biz.get("whatsapp_number") or "",
+        "agent_token": biz["agent_token"],       # secret, shown once
+        "license_key": biz["license_key"],
+        "plan": biz["plan"],
+        "plan_expires_on": str(biz.get("plan_expires_on"))[:10],
+    }
+
+
 class RenewPayload(BaseModel):
     admin_key: str
     # Identify the business by ONE of these (agent_token is easiest from config).
