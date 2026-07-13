@@ -1,0 +1,83 @@
+;;=========================================================================
+;;  ASVA  -  "Send to ASVA"  one-click bill button        (TallyPrime)
+;;=========================================================================
+;;  Adds a button to the voucher screen. One click exports the CURRENT
+;;  sales invoice as a PDF into the ASVA pickup folder:
+;;
+;;          C:\ASVA\bills\Sales_<VoucherNumber>.pdf
+;;
+;;  The ASVA agent watches that folder, matches the file to the voucher by
+;;  its number, and sends the exact Tally invoice to the party on WhatsApp
+;;  automatically. Native PDF export - no Adobe / PDF printer needed.
+;;
+;;  (ASVA also accepts ANY .pdf whose name simply CONTAINS the voucher
+;;   number, so the exact file name is forgiving.)
+;;
+;;  ----------------------------  INSTALL  (one time)  ---------------------
+;;  1. Keep this file at:   C:\ASVA\ASVA_SendBill.tdl
+;;  2. In TallyPrime:       press  F1 (Help)  ->  TDL & Add-On  ->
+;;                          F4 (Manage Local TDLs)
+;;       - "Load TDLs on Startup"            : Yes
+;;       - "List of TDL Configuration Files" : C:\ASVA\ASVA_SendBill.tdl
+;;  3. Press Ctrl+A to accept, then restart TallyPrime.
+;;
+;;  ----------------------------  HOW TO USE  ------------------------------
+;;  Make a sales invoice as usual. On the button panel (right side) you will
+;;  see  "Send to ASVA"  -  CLICK IT WITH THE MOUSE.  A short "saved for
+;;  ASVA" message confirms it. Done.
+;;
+;;  (Make sure the ASVA app is running - it creates the C:\ASVA\bills folder
+;;   and does the WhatsApp sending. The bill reaches the party in ~1 minute.)
+;;
+;;  ---------------------------  ABOUT THE SHORTCUT  -----------------------
+;;  The button is clicked with the MOUSE - that can never clash with any
+;;  Tally or add-on shortcut, on any version. As a convenience it ALSO has
+;;  the keyboard shortcut  Ctrl + Shift + W  - deliberately chosen because
+;;  Tally's own keys and other add-ons use single Alt/Ctrl + letter or the
+;;  F-keys, so the "Ctrl + Shift + letter" space is left free. If you ever
+;;  want to change or remove the shortcut, edit (or delete) the one "Key:"
+;;  line below - the mouse button keeps working either way.
+;;=========================================================================
+
+
+;; --- Add the clickable button to the voucher screen ---------------------
+;;  NOTE on safety with other add-ons: "Add: Button" is ADDITIVE - Tally
+;;  merges it in alongside any buttons other TDLs add, so this never removes
+;;  or breaks another add-on. The only real clash risk between add-ons is two
+;;  of them using the SAME definition name, so every name below is prefixed
+;;  "ASVAWA..." (per Tally's own best practice) to keep it unique.
+[#Form: Voucher]
+    Add : Button : ASVAWABillButton
+
+[Button: ASVAWABillButton]
+    Title  : "Send to ASVA"
+    Key    : Ctrl + Shift + W
+    Action : Call : ASVAWAExportBillFunc
+
+
+;; --- OPTIONAL: export automatically every time you SAVE a sales voucher,
+;;     so you never even click the button. To turn this ON, delete the two
+;;     ";;" marks at the start of the next two lines and restart Tally.
+;; [#Form: Voucher]
+;;     On : Form Accept : Yes : Call : ASVAWAExportBillFunc
+
+
+;; --- The export function: current voucher -> PDF in C:\ASVA\bills --------
+[Function: ASVAWAExportBillFunc]
+    ;; Voucher number made file-safe (a "/" in a number would create folders).
+    Local Formula : ASVAWAVchNo : $$StringFindAndReplace:$$String:$VoucherNumber:"/":"-"
+
+    ;; 1. destination folder ASVA watches
+    10 : SET : SVExportLocation : "C:\ASVA\bills"
+    ;; 2. native PDF (no printer needed)
+    20 : SET : SVExportFormat   : $$SysName:PDF
+    ;; 3. base file name -> Sales_<number>
+    30 : SET : SVPrintFileName  : "Sales_" + @ASVAWAVchNo
+    ;; 4. add the correct extension (.pdf) for the chosen format
+    40 : SET : SVPrintFileName  : $$MakeExportName:##SVPrintFileName:##SVExportFormat
+    ;; 5. prepend the folder -> C:\ASVA\bills\Sales_<number>.pdf
+    50 : SET : SVPrintFileName  : ##SVExportLocation + "\" + ##SVPrintFileName
+    ;; 6. export THIS voucher (the current report) as the PDF
+    60 : EXPORT REPORT : . : TRUE
+    ;; 7. friendly confirmation
+    70 : MSGBOX : "ASVA" : "Bill saved for ASVA. It will reach the party on WhatsApp shortly."

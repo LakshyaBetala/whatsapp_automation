@@ -223,33 +223,39 @@ async def handle(
                 business_id, business.get("business_name", ""), from_number, team_match.group(1).strip())
 
         # ── HELP / unrecognised ──────────────────────────────────────
-        # Written for 20-70 year old shop owners: simple English, short
-        # lines, generous spacing, only the commands they actually need.
-        # "Ramesh Traders" is clearly marked as an example.
+        # For 20-70 year old shop owners: 7 commands, one simple example each,
+        # clear separators, plain words. "Ramesh" is only an example name.
         prefix = ("" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START")
                   else "Sorry, I did not understand that.\nHere is what I can do:\n\n")
+        line = "------------------------"
         return (
             prefix
-            + "Hello! I am ASVA, your business assistant.\n\n"
-            "Type a command, then your party's name.\n"
-            "\"Ramesh Traders\" below is only an EXAMPLE.\n"
-            "Always type your own party's name.\n\n"
-            "SEE YOUR MONEY\n\n"
-            "LIST\nWho owes you, full list\n\n"
-            "CHECK Ramesh Traders\nOne party's full account\n\n"
-            "DIGEST\nToday's summary, right now\n\n"
-            "SEND A REMINDER\n(always goes from your shop number)\n\n"
-            "REMIND Ramesh Traders\nRemind that party now\n\n"
-            "REMIND TOP 5\nRemind your 5 biggest dues\n\n"
-            "ADD A BILL (not in Tally)\n\n"
-            "BILL Ramesh Traders 12500\nNew bill of Rs 12,500\n"
-            "Or just send a PHOTO of the bill.\n\n"
-            "OTHER\n\n"
-            "MSG Ramesh Traders: your goods are ready\nSends your message to that party\n\n"
-            "PAID Ramesh Traders\nMark their payment as received\n\n"
-            "STOP Ramesh Traders\nStop reminders for them\n(START to switch back on)\n\n"
-            "DIGEST 9PM\nChange your daily summary time\n\n"
-            "Any problem? Type TEAM and your message."
+            + "ASVA - your collection helper.\n"
+            "Type a command with your party's name.\n"
+            "(Below \"Ramesh\" is only an example.)\n\n"
+            f"{line}\n"
+            "LIST\n"
+            "See everyone who owes you.\n"
+            f"{line}\n"
+            "CHECK Ramesh\n"
+            "See one party's balance.\n"
+            f"{line}\n"
+            "REMIND Ramesh\n"
+            "Send a payment reminder now.\n"
+            f"{line}\n"
+            "BILL Ramesh 12500\n"
+            "Add a new bill. Or send a photo of it.\n"
+            f"{line}\n"
+            "PAID Ramesh\n"
+            "Mark a payment as received.\n"
+            f"{line}\n"
+            "STOP Ramesh\n"
+            "Stop reminders. START to resume.\n"
+            f"{line}\n"
+            "DIGEST\n"
+            "Get today's summary now.\n"
+            f"{line}\n\n"
+            "Need help? Type: TEAM your message"
         )
 
     # ── Customer message (not owner) ──────────────────────────────────

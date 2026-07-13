@@ -27,6 +27,9 @@
   #topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; background: #fff; border-bottom: 1px solid #EAEAEA; font-size: .84rem; color: #787774; flex-shrink: 0; }
   #topbar .tstat { display: flex; align-items: center; gap: 8px; min-width: 0; }
   #topbar .tstat b { color: #2F3437; font-weight: 600; }
+  #pagereload { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
+  #pagereload:hover { background: #eef3ef; }
+  #pagereload:active { transform: scale(.97); }
   .langtoggle { display: inline-flex; flex-shrink: 0; }
   .langtoggle button { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; cursor: pointer; font-size: .78rem; font-weight: 600; }
   .langtoggle button:first-child { border-radius: 6px 0 0 6px; }
@@ -93,9 +96,12 @@
   <div id="main">
     <div id="topbar">
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
-      <div class="langtoggle">
-        <button id="lang-en" onclick="setLang('english')">EN</button>
-        <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="pagereload" onclick="reloadActive()" title="Refresh this page">&#8635; Reload</button>
+        <div class="langtoggle">
+          <button id="lang-en" onclick="setLang('english')">EN</button>
+          <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
+        </div>
       </div>
     </div>
     <div id="maincontent">
@@ -191,6 +197,13 @@ function reloadAll() {
     const w = document.getElementById(id);
     try { if (w && w.reload && loaded[id]) w.reload(); } catch (e) {}
   });
+}
+// Top-bar Reload: re-render only the page the user is looking at (the app's
+// single reload button - the in-page one is hidden inside the app).
+function reloadActive() {
+  const view = document.querySelector('.view.on');
+  const w = view && view.querySelector('webview');
+  try { if (w && w.reload) w.reload(); } catch (e) {}
 }
 // Top-bar / sidebar "Reload data": force an immediate Tally refresh, then reload
 // the webviews once the sync lands (so the dashboard re-renders with fresh data).

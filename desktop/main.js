@@ -109,14 +109,57 @@ function startService(name) {
   proc.stdout.on('data', push);
   proc.stderr.on('data', push);
   proc.on('error', (e) => push(Buffer.from(`[${name}] ${e.message}\n`)));
+  services[name].startedAt = Date.now();
+  if (name === 'watcher') watcherSyncSeenAt = Date.now(); // give a fresh window
   proc.on('exit', (code) => {
     push(Buffer.from(`\n[${name} stopped, code ${code}]\n`));
     services[name].proc = null;
     if (!app.isQuitting) {
       services[name].restarts = (services[name].restarts || 0) + 1;
-      setTimeout(() => startService(name), 4000); // auto-restart like START.bat
+      // Quick-crash backoff: a process that dies within 15s of starting is
+      // looping on a real error - back off up to 30s so we don't spin at 4s
+      // forever (and the log stays readable). A healthy long run resets it.
+      const ranMs = Date.now() - (services[name].startedAt || 0);
+      const quick = ranMs < 15000;
+      const delay = quick ? Math.min(4000 * services[name].restarts, 30000) : 4000;
+      if (!quick) services[name].restarts = 0;
+      setTimeout(() => startService(name), delay);
     }
   });
+}
+
+// ── Watcher stall watchdog ────────────────────────────────────────────────
+// The Tally watcher posts a heartbeat every ~60s (even with no new data), so
+// the backend's last_synced_at advances whenever the watcher is alive AND
+// reaching Tally. If it STOPS advancing while the backend is up and the
+// watcher process is still running, the watcher has hung (the "synced 15h ago
+// while Tally was on" bug) - kill it so it respawns fresh. Bounded to at most
+// one restart per cooldown so a legitimately-off Tally doesn't cause churn.
+let watcherSyncValue = null;      // last last_synced_at we saw
+let watcherSyncSeenAt = Date.now(); // wall time it last CHANGED
+let watcherLastKick = 0;          // wall time we last restarted it
+const SYNC_STALL_MS = 7 * 60 * 1000;
+const WATCHER_KICK_COOLDOWN_MS = 10 * 60 * 1000;
+
+function noteSyncValue(lastSyncedAt) {
+  if (lastSyncedAt && lastSyncedAt !== watcherSyncValue) {
+    watcherSyncValue = lastSyncedAt;
+    watcherSyncSeenAt = Date.now();
+  }
+}
+
+function maybeKickStalledWatcher(backendOk) {
+  if (!backendOk || !CONFIG.token) return;   // backend down / no company: not the watcher
+  const proc = services.watcher && services.watcher.proc;
+  if (!proc) return;                          // already (re)starting
+  const now = Date.now();
+  if (now - watcherSyncSeenAt < SYNC_STALL_MS) return;        // sync is fresh
+  if (now - watcherLastKick < WATCHER_KICK_COOLDOWN_MS) return; // one kick per cooldown
+  watcherLastKick = now;
+  watcherSyncSeenAt = now;   // give the fresh watcher a full window before judging again
+  sendToWindow('log', { name: 'watcher',
+    line: '\n[watchdog] Tally sync stalled 7+ min - restarting the Tally watcher.\n' });
+  try { proc.kill(); } catch (e) { /* exit handler respawns it */ }
 }
 
 function startAll() { Object.keys(SPECS).forEach(startService); }
@@ -193,7 +236,10 @@ function pollStatus() {
     if (ok) { try { const d = JSON.parse(b);
       out.tallyLabel = d.tally_label; out.tallyColor = d.tally_color;
       out.lastSyncedLabel = d.last_synced_label; out.lastSyncedAt = d.last_synced_at;
+      noteSyncValue(d.last_synced_at);
     } catch (e) {} }
+    // ok here means the backend answered sync-status = backend is up.
+    maybeKickStalledWatcher(ok);
     done();
   });
 }

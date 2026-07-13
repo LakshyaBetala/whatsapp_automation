@@ -418,8 +418,10 @@ _NAV_CSS = """
  .topnav .sp{flex:1}
  .topnav a.lang{border:1px solid #EAEAEA;color:#1f6c9f;font-size:.85rem}
  .topnav .ver{color:#b5b5b0;font-size:.72rem;padding:0 4px;align-self:center}
- /* Inside the desktop app the sidebar already navigates + switches language */
- .in-app .topnav a.pg,.in-app .topnav a.lang:not(.keep),.in-app .topnav .brand{display:none}
+ /* Inside the desktop app the sidebar navigates and the app's own top bar
+    carries Tally status + reload + language, so the whole in-page nav is
+    hidden - no redundant strip on top of every page. */
+ .in-app .topnav{display:none}
  .upbanner{background:#e1f3fe;border:1px solid #bfe2f7;color:#1f6c9f;border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:.92rem}
  :focus-visible{outline:2px solid #0a7d33;outline-offset:2px}
 """
@@ -815,6 +817,20 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
   </div>
 </div>
 
+<div class="modal" id="paymodal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modalbox">
+    <h3>Record payment</h3>
+    <div id="payparty" style="font-weight:700;margin-bottom:10px"></div>
+    <label style="font-weight:600;display:block;margin-bottom:5px">Amount received (Rs)</label>
+    <input id="payamt" type="text" inputmode="numeric" placeholder="10000"
+      style="width:100%;padding:11px 12px;font-size:1em;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box">
+    <div style="margin-top:18px;text-align:right">
+      <button onclick="document.getElementById('paymodal').classList.remove('show')">Cancel</button>
+      <button id="paysave" style="background:#0a7d33;color:#fff;border:0">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const TOKEN = {token!r};
 
@@ -893,26 +909,29 @@ async function sendNow(btn) {{
 }}
 document.querySelectorAll('.sendbtn').forEach(b => b.onclick = () => sendNow(b));
 
-async function recordPayment(btn) {{
-  const amt = prompt('Kitna payment mila? (Rs me)');
-  if (amt === null) return;
-  const n = parseFloat(amt);
-  if (!(n > 0)) {{ alert('Sahi amount likhein.'); return; }}
-  btn.disabled = true; btn.textContent = '...';
+// Record payment via an in-page modal (prompt() does not work in the app).
+let PAY_CID = null;
+function recordPayment(btn) {{
+  PAY_CID = btn.dataset.cid;
+  document.getElementById('payparty').textContent = btn.dataset.party || '';
+  document.getElementById('payamt').value = '';
+  document.getElementById('paymodal').classList.add('show');
+  setTimeout(() => document.getElementById('payamt').focus(), 40);
+}}
+async function savePayment() {{
+  const n = parseFloat(String(document.getElementById('payamt').value).replace(/[,₹\\s]/g, ''));
+  if (!(n > 0)) {{ alert('Enter a valid amount, e.g. 10000'); return; }}
+  const btn = document.getElementById('paysave'); btn.disabled = true; btn.textContent = '...';
   try {{
     const r = await fetch('/admin/record-payment', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify({{token: TOKEN, client_id: btn.dataset.cid, amount: n}})}});
+      body: JSON.stringify({{token: TOKEN, client_id: PAY_CID, amount: n}})}});
     const d = await r.json();
-    if (r.ok && d.applied > 0) {{
-      btn.textContent = '✓ ₹' + d.applied;
-      setTimeout(() => location.reload(), 1200);
-    }} else {{
-      btn.textContent = '✗'; btn.disabled = false;
-      alert(d.detail || 'Kuch apply nahi hua.');
-      setTimeout(() => {{ btn.textContent = '₹ Pay'; }}, 2000);
-    }}
-  }} catch (e) {{ btn.textContent = '✗'; btn.disabled = false; }}
+    if (r.ok && d.applied > 0) {{ location.reload(); return; }}
+    btn.disabled = false; btn.textContent = 'Save';
+    alert(d.detail || 'Nothing was applied.');
+  }} catch (e) {{ btn.disabled = false; btn.textContent = 'Save'; alert('Could not save. Please try again.'); }}
 }}
+document.getElementById('paysave').onclick = savePayment;
 document.querySelectorAll('.paybtn').forEach(b => b.onclick = () => recordPayment(b));
 
 // ── "Who gets a reminder today" dry run (nothing is sent) ──────────────
@@ -2502,11 +2521,57 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 <h2>Payments received (Tally)</h2>
 <div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>{pay_rows}</table></div>
 
+<div class="modal" id="billmodal" onclick="if(event.target===this)closeM('billmodal')">
+  <div class="modalbox">
+    <h3 id="bm_title">Add bill</h3>
+    <label>Amount (Rs)</label>
+    <input id="bm_amt" type="text" inputmode="numeric" placeholder="12500">
+    <label>Bill number (leave empty = automatic)</label>
+    <input id="bm_inv" type="text" placeholder="e.g. INV-105">
+    <div class="mbtns">
+      <button class="ntbtn" onclick="closeM('billmodal')">Cancel</button>
+      <button id="bm_save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="partymodal" onclick="if(event.target===this)closeM('partymodal')">
+  <div class="modalbox">
+    <h3>Edit party</h3>
+    <label>Party name</label>
+    <input id="pm_name" type="text" maxlength="120" placeholder="Ramesh Traders">
+    <label>WhatsApp number (10 digits, leave empty = none)</label>
+    <input id="pm_phone" type="text" inputmode="numeric" placeholder="9876543210">
+    <div class="mbtns">
+      <button class="ntbtn" onclick="closeM('partymodal')">Cancel</button>
+      <button id="pm_save">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const TOKEN = {token!r};
 const CID = {client_id!r};
+const LANG = {lang!r};
 const PNAME = {json.dumps(c["name"] or "")};
+const PPHONE = {json.dumps(pphone_display)};
 let REM_ON = {str(bool(rem_on)).lower()};
+function openM(id) {{ document.getElementById(id).classList.add('show'); }}
+function closeM(id) {{ document.getElementById(id).classList.remove('show'); }}
+function ntNum(s) {{
+  const a = parseFloat(String(s).replace(/[,₹\\s]/g, ''));
+  return (a > 0) ? a : null;
+}}
+// POST helper: reload on success, show the server's real reason on failure.
+async function ntPost(url, body) {{
+  try {{
+    const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify(body)}});
+    if (r.ok) {{ location.reload(); return; }}
+    const d = await r.json().catch(() => ({{}}));
+    alert(d.detail || 'Could not save. Please try again.');
+  }} catch (e) {{ alert('Could not save. Please try again.'); }}
+}}
 async function assignBatch() {{
   const sel = document.getElementById('pbatch'); if (!sel) return;
   sel.disabled = true;
@@ -2529,35 +2594,62 @@ async function toggleRem() {{
   }} catch (e) {{ alert('Nahi ho paya.'); }}
   btn.disabled = false; btn.textContent = REM_ON ? 'Reminder OFF karein' : 'Reminder ON karein';
 }}
-// ── Non-Tally bill add / edit / delete (Tally bills stay Tally's) ──
-function ntNum(s) {{
-  const a = parseFloat(String(s).replace(/[,₹\\s]/g, ''));
-  return (a > 0) ? a : null;
+// ── Non-Tally bill add / edit (in-page modal - prompt() is unusable in the app) ──
+let BM_MODE = 'add', BM_ID = null;
+function ntAdd() {{
+  BM_MODE = 'add'; BM_ID = null;
+  document.getElementById('bm_title').textContent = 'Add bill (non Tally)';
+  document.getElementById('bm_amt').value = '';
+  document.getElementById('bm_inv').value = '';
+  openM('billmodal');
+  setTimeout(() => document.getElementById('bm_amt').focus(), 40);
 }}
-async function ntPost(url, body) {{
-  try {{
-    const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify(body)}});
-    if (r.ok) {{ location.reload(); return; }}
-    const d = await r.json().catch(() => ({{}}));
-    alert(d.detail || 'Nahi ho paya. Phir se try karein.');
-  }} catch (e) {{ alert('Nahi ho paya. Phir se try karein.'); }}
+function ntEdit(btn) {{
+  BM_MODE = 'edit'; BM_ID = btn.dataset.id;
+  document.getElementById('bm_title').textContent = 'Edit bill';
+  document.getElementById('bm_amt').value = btn.dataset.amt;
+  document.getElementById('bm_inv').value = btn.dataset.inv;
+  openM('billmodal');
+  setTimeout(() => document.getElementById('bm_amt').focus(), 40);
 }}
-async function ntAdd() {{
-  const amt = prompt('Naya bill - amount (Rs):', ''); if (amt === null) return;
-  const a = ntNum(amt); if (!a) {{ alert('Sirf number likhein, jaise 12500'); return; }}
-  const inv = prompt('Bill number (khaali chhodo to auto):', ''); if (inv === null) return;
-  await ntPost('/admin/nt-bill/add', {{token: TOKEN, client_id: CID, amount: a, invoice_number: inv || ''}});
+async function saveBill() {{
+  const a = ntNum(document.getElementById('bm_amt').value);
+  if (!a) {{ alert('Enter numbers only, e.g. 12500'); return; }}
+  const inv = document.getElementById('bm_inv').value.trim();
+  if (BM_MODE === 'add') {{
+    await ntPost('/admin/nt-bill/add', {{token: TOKEN, client_id: CID, amount: a, invoice_number: inv}});
+  }} else {{
+    await ntPost('/admin/nt-bill/edit', {{token: TOKEN, bill_id: BM_ID, amount: a, invoice_number: inv}});
+  }}
 }}
-async function ntEdit(btn) {{
-  const amt = prompt('Bill amount (Rs):', btn.dataset.amt); if (amt === null) return;
-  const a = ntNum(amt); if (!a) {{ alert('Sirf number likhein, jaise 12500'); return; }}
-  const inv = prompt('Bill number:', btn.dataset.inv); if (inv === null) return;
-  await ntPost('/admin/nt-bill/edit', {{token: TOKEN, bill_id: btn.dataset.id, amount: a, invoice_number: inv}});
-}}
+document.getElementById('bm_save').onclick = saveBill;
 async function ntDel(btn) {{
-  if (!confirm('Bill ' + (btn.dataset.inv || '') + ' DELETE karein? Wapas nahi aayega.')) return;
+  if (!confirm('Delete bill ' + (btn.dataset.inv || '') + '? This cannot be undone.')) return;
   await ntPost('/admin/nt-bill/delete', {{token: TOKEN, bill_id: btn.dataset.id}});
+}}
+// ── Non-Tally party edit / delete ──
+function editParty() {{
+  document.getElementById('pm_name').value = PNAME;
+  document.getElementById('pm_phone').value = PPHONE;
+  openM('partymodal');
+  setTimeout(() => document.getElementById('pm_name').focus(), 40);
+}}
+async function saveParty() {{
+  const name = document.getElementById('pm_name').value.trim();
+  const phone = document.getElementById('pm_phone').value.trim();
+  if (!name) {{ alert('Enter the party name.'); return; }}
+  await ntPost('/admin/party/edit', {{token: TOKEN, client_id: CID, name: name, whatsapp_number: phone}});
+}}
+const _pmSave = document.getElementById('pm_save'); if (_pmSave) _pmSave.onclick = saveParty;
+async function delParty() {{
+  if (!confirm('Delete party "' + PNAME + '" and ALL its bills? This cannot be undone.')) return;
+  try {{
+    const r = await fetch('/admin/party/delete', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID}})}});
+    if (r.ok) {{ location.href = '/admin?token=' + encodeURIComponent(TOKEN) + '&lang=' + encodeURIComponent(LANG); return; }}
+    const d = await r.json().catch(() => ({{}}));
+    alert(d.detail || 'Could not delete. Please try again.');
+  }} catch (e) {{ alert('Could not delete. Please try again.'); }}
 }}
 </script>"""
     extra = """
@@ -2569,6 +2661,15 @@ async function ntDel(btn) {{
  .ntbtn.ntdel{color:#fff;background:#c0392b;border-color:#c0392b;font-weight:600}
  .ntbtn.ntdel:hover{background:#a93226}
  .ntbtn.ntadd{margin-left:10px;font-weight:600;color:#0a7d33;vertical-align:middle}
+ .pactions{display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap}
+ .pactions .ntbtn{padding:7px 14px;font-size:.9em}
+ .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
+ .modal.show{display:flex}
+ .modalbox{background:#fff;max-width:420px;width:100%;border-radius:14px;padding:20px 22px;box-sizing:border-box}
+ .modalbox h3{margin:0 0 4px}
+ .modalbox label{display:block;font-size:.78rem;color:#787774;margin:14px 0 5px;text-transform:uppercase;letter-spacing:.04em}
+ .modalbox input{font:inherit;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;width:100%;box-sizing:border-box}
+ .mbtns{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
  .tag{font-size:.75rem;border-radius:9999px;padding:2px 9px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
  .tag.ok{background:#edf3ec;color:#346538}
  .tag.warn{background:#fbf3db;color:#956400}

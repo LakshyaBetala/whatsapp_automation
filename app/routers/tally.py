@@ -411,19 +411,29 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                 # Deliver if the bill is recent. 10-day window (was 3) so a bill
                 # exported while the watcher was down/offline still goes out when
                 # it recovers - but old FY invoices at first onboarding don't.
+                # pdf_url doubles as the "already delivered" marker.
                 already_sent = bool(bill_row.get("pdf_url"))
                 fresh = invoice_date >= date.today() - timedelta(days=10)
                 if v.pdf_base64 and not already_sent and fresh and client.get("whatsapp_number"):
+                    # Upload to Storage for the dashboard link (best-effort), but
+                    # DELIVER using the base64 we already hold - so a storage
+                    # hiccup can never stop the send. Mark delivered BEFORE the
+                    # background send so a slow send can't double-fire next tick.
+                    url = None
                     try:
                         from app.services import pdf as pdf_service
                         url = await pdf_service.upload_pdf_base64(
                             bill_row["id"], v.voucher_number, v.pdf_base64)
-                        db.table("bills").update({"pdf_url": url}).eq("id", bill_row["id"]).execute()
-                        bill_row["pdf_url"] = url
-                        background_tasks.add_task(_generate_and_deliver, bill_row["id"])
-                        delivered.append(v.voucher_number)
                     except Exception as e:
-                        log.warning("Tally PDF upload/deliver failed for %s: %s", v.voucher_number, e)
+                        log.warning("Tally PDF storage upload failed for %s (delivering anyway): %s",
+                                    v.voucher_number, e)
+                    marker = url or "sent"
+                    db.table("bills").update({"pdf_url": marker}).eq("id", bill_row["id"]).execute()
+                    bill_row["pdf_url"] = marker
+                    background_tasks.add_task(
+                        _generate_and_deliver, bill_row["id"], v.pdf_base64,
+                        f"Invoice_{v.voucher_number}.pdf")
+                    delivered.append(v.voucher_number)
 
             elif v.voucher_type.lower() == "receipt":
                 # Idempotency: every sync sends the full FY (Tally ignores
