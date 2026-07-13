@@ -1,27 +1,48 @@
-# ASVA HOST SETUP (the always-on i3 laptop)
+# ASVA HOST SETUP (the always-on i3 laptop = the server)
 
 This laptop is the **server**. It runs the backend, the scheduler (reminders +
 digest), the Command Center, and the shop's WhatsApp session. Because the shop's
 WhatsApp lives here, reminders go out even on Sundays when the shop's own laptop
 is off. Each shop laptop runs only the thin Tally agent and points at this host.
 
-You do this **once**. After that the host just stays on.
+Your i3 has a broken screen, so this guide sets it up to run **headless** - you
+do everything from your main laptop. You do this once. After that the host just
+stays on and you watch it from `api.tryasva.com/ops`.
 
 ---
 
-## What you need
+## The domain map (one domain, tryasva.com does everything)
 
-- The i3 laptop, plugged in, on your home/office internet.
-- Python 3.11+ and Node 18+ installed.
-- A domain name on Cloudflare (about Rs 800/year). Needed for a **stable**
-  public URL. No domain yet? See "Quick test URL" at the bottom to trial it free.
+| URL | What |
+|---|---|
+| `tryasva.com` / `www.tryasva.com` | your landing / marketing page (separate, Cloudflare Pages) |
+| `api.tryasva.com` | the backend on this i3 host (via Cloudflare Tunnel) |
+| `api.tryasva.com/ops` | the Command Center (health + subscriptions + Add business) |
+| `link.tryasva.com` | the WhatsApp QR page, to link a shop from your own laptop |
 
 ---
+
+## 0. Control the headless i3 from your main laptop
+
+Set this up FIRST so the broken screen never matters again.
+
+1. On the i3 (while the screen is still partly usable, or plug in an external
+   monitor once), install **Chrome Remote Desktop**:
+   `https://remotedesktop.google.com/access` -> "Set up remote access". Sign in
+   with your Google account, set a name and a PIN.
+2. On your main laptop, open the same page and sign in with the same account.
+   The i3 appears - click it, enter the PIN, and you now see the i3's screen in
+   a browser tab. Everything below you do through that tab.
+3. Set the i3 to **log in automatically** (so it comes back after a power cut):
+   `Win+R` -> `netplwiz` -> untick "Users must enter a user name and password".
+
+(Chrome Remote Desktop is free, needs no port setup, and reconnects on its own.
+Windows Remote Desktop also works if you prefer it.)
 
 ## 1. Put ASVA on the host
 
 1. Unzip `ASVA_server.zip` to `C:\ASVA`.
-2. Open PowerShell in `C:\ASVA` and set up the backend once:
+2. In PowerShell in `C:\ASVA`, set up the backend once:
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
@@ -29,103 +50,99 @@ You do this **once**. After that the host just stays on.
    ```
 3. Set up the WhatsApp service once:
    ```powershell
-   cd wa_service
-   npm install
-   cd ..
+   cd wa_service ; npm install ; cd ..
    ```
-4. Open `.env` and confirm these (the build already set them):
-   - `ADMIN_API_KEY=` is filled in (this is your Command Center key - keep it secret).
-   - `ENABLE_REMINDER_SWEEP=true`, `ENABLE_EOD_DIGEST=true`.
-   - `SEND_VIA_OUTBOX=false` (WhatsApp is here, so it sends directly).
-   - After step 3 below, set `PUBLIC_BASE_URL=https://asva.YOURDOMAIN.com`.
+4. Open `.env` - the build already set `ADMIN_API_KEY` (your Command Center key,
+   keep it secret), `PUBLIC_BASE_URL=https://api.tryasva.com`, the scheduler ON,
+   and `SEND_VIA_OUTBOX=false`. Nothing to change.
 
 ## 2. Never let it sleep
 
-Right-click `KEEP_AWAKE.bat` -> **Run as administrator**. This stops the laptop
-sleeping or hibernating, and keeps it running with the lid closed. Keep it plugged in.
+Right-click `KEEP_AWAKE.bat` -> **Run as administrator**. Stops the laptop
+sleeping/hibernating and keeps it running with the lid closed. Keep it plugged in.
 
-## 3. Give the host a public URL (Cloudflare Tunnel, free)
+## 3. The tunnel: point api.tryasva.com at this host (free)
 
-1. Install cloudflared: download `cloudflared-windows-amd64.exe` from Cloudflare,
-   rename it to `cloudflared.exe`, put it in `C:\ASVA`.
-2. Add your domain to Cloudflare (free plan) and point its nameservers to Cloudflare.
+1. Download `cloudflared-windows-amd64.exe` from Cloudflare, rename it to
+   `cloudflared.exe`, put it in `C:\ASVA`.
+2. Move tryasva.com onto Cloudflare: add the site in the Cloudflare dashboard
+   (free plan) and change the domain's nameservers at your registrar to the two
+   Cloudflare gives you. Wait until Cloudflare shows the domain "Active".
 3. In PowerShell in `C:\ASVA`:
    ```powershell
    .\cloudflared.exe tunnel login
    .\cloudflared.exe tunnel create asva
-   .\cloudflared.exe tunnel route dns asva asva.YOURDOMAIN.com
+   .\cloudflared.exe tunnel route dns asva api.tryasva.com
+   .\cloudflared.exe tunnel route dns asva link.tryasva.com
    ```
-4. Create `C:\Users\<you>\.cloudflared\config.yml`:
+4. Create `C:\Users\<you>\.cloudflared\config.yml` (use the credentials
+   filename the `create` step printed):
    ```yaml
    tunnel: asva
-   credentials-file: C:\Users\<you>\.cloudflared\asva.json
+   credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
    ingress:
-     - hostname: asva.YOURDOMAIN.com
+     - hostname: api.tryasva.com
        service: http://localhost:8000
+     - hostname: link.tryasva.com
+       service: http://localhost:3001
      - service: http_status:404
    ```
-   (The `create` step printed the real credentials filename - use that.)
-5. Put `https://asva.YOURDOMAIN.com` into `.env` as `PUBLIC_BASE_URL` and save.
 
 ## 4. Start everything
 
 - Double-click **`HOST_START.bat`** -> backend (8000) + shop WhatsApp (3001).
-- Double-click **`TUNNEL.bat`** -> the public URL.
+- Double-click **`TUNNEL.bat`** -> `api.tryasva.com` goes live.
 
-First time only, link the shop's WhatsApp: open `http://localhost:3001/qr` in a
-browser on the host and scan it with the **shop owner's** phone. That session
-now stays online here 24/7, so Sunday reminders send.
+Link the shop's WhatsApp (once): from your **main laptop or phone**, open
+`https://link.tryasva.com/qr` and scan it with the **shop owner's** phone. That
+session now stays online on the host, so Sunday reminders send.
 
-## 5. Autostart on boot
+## 5. Autostart on boot (so a power cut self-heals)
 
-So the host recovers after a power cut, add both to Startup:
-
-1. Press `Win + R`, type `shell:startup`, Enter.
+1. On the i3: `Win+R` -> `shell:startup` -> Enter.
 2. Put shortcuts to `HOST_START.bat` and `TUNNEL.bat` in that folder.
 
-Now a reboot brings the whole server back on its own.
+Combined with auto-login (step 0.3) and Keep Awake, a reboot brings the whole
+server back with no screen needed.
 
-## 6. Open the Command Center
+## 6. Your control panel
 
-From any browser (yours, your phone):
+From any browser (main laptop, phone):
 ```
-https://asva.YOURDOMAIN.com/ops?key=YOUR_ADMIN_API_KEY
+https://api.tryasva.com/ops?key=YOUR_ADMIN_API_KEY
 ```
-You see every shop: online/offline, plan, days to expiry, messages this month,
-version, failed sends. From here you **Add business**, **Renew**, **Suspend**,
-or change a plan. This is your control panel for access to every business.
+Every shop at a glance: online/offline, plan, days to expiry, messages this
+month, version, failed sends. **+ Add business**, **Renew**, **Suspend**, change
+plan. This is where you run access for every business.
+
+Health check:
+- `https://api.tryasva.com/health` -> ok.
+- `https://link.tryasva.com/qr` -> "connected".
+- A shop shows "online" in `/ops` within a minute of running its agent.
 
 ---
 
-## Onboarding a shop (from the Command Center)
+## Onboarding a shop
 
-1. Click **+ Add business**. Enter the shop name, owner name, the shop's
-   WhatsApp number, the plan, and how many months they paid.
-2. It shows a **licence key** and a secret **agent token**, plus a ready
-   `config.json`. Copy that config.
-3. On the shop's laptop, unzip `ASVA_shop_client.zip`, open `SHOP_AGENT_SETUP.md`,
-   paste the config, and run `AGENT_ONLY.bat`. That shop is now live.
+1. In `/ops`, click **+ Add business**: shop name, owner, WhatsApp number, plan,
+   months paid.
+2. It shows a **licence key** + secret **agent token** + a ready `config.json`
+   (already using `https://api.tryasva.com`). Copy it.
+3. On the shop's laptop, unzip `ASVA_shop_client.zip`, follow `SHOP_AGENT_SETUP.md`,
+   paste the config, run `AGENT_ONLY.bat`. Live.
 
-Access control is server-side: every send is checked against the subscription
-here before it goes. If a shop does not pay, it drops to a 3-day grace and then
-sends stop automatically until you Renew. The shop laptop cannot bypass this.
+Access is enforced server-side: every send is checked against the subscription
+here before it goes. No pay -> 3-day grace -> sends stop until you Renew. The
+shop laptop cannot bypass it.
 
 ---
 
-## Quick test URL (no domain, for trying it out)
+## No domain moved onto Cloudflare yet? (trial in 2 minutes)
 
-Skip step 3. Instead run:
+Skip step 3 and run:
 ```powershell
 .\cloudflared.exe tunnel --url http://localhost:8000
 ```
-It prints a random `https://something.trycloudflare.com` URL. Use that as
-`backend_url` on the shop and as your `/ops` address. It **changes every time**
-you restart the tunnel, so it is only for testing - buy the domain before you
-put a real shop on it.
-
-## Health check
-
-- Backend up: open `https://asva.YOURDOMAIN.com/health` -> should say ok.
-- WhatsApp linked: `http://localhost:3001/qr` on the host shows "connected".
-- A shop is reporting in: it appears "online" in `/ops` within a minute of
-  running its agent.
+It prints a random `https://xxxx.trycloudflare.com` URL - use it as the shop's
+`backend_url` and your `/ops` address to test. It changes every restart, so
+switch to `api.tryasva.com` before a real shop goes on it.

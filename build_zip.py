@@ -122,6 +122,7 @@ def _server_env(admin_key: str) -> str:
     shop WhatsApp session running here (not queued)."""
     forced = {
         "ADMIN_API_KEY": admin_key,
+        "PUBLIC_BASE_URL": "https://api.tryasva.com",
         "ENABLE_REMINDER_SWEEP": "true",
         "ENABLE_EOD_DIGEST": "true",
         "ENABLE_SUBSCRIPTION_CHECK": "true",
@@ -147,7 +148,7 @@ def _client_config_template() -> str:
     """A clean config.json for a shop laptop - operator fills the 3 values from
     the Add Business screen. No real tokens ever ship in a generic build."""
     return json.dumps({
-        "backend_url": "https://asva.YOURDOMAIN.com",
+        "backend_url": "https://api.tryasva.com",
         "business_id": "PASTE_FROM_ADD_BUSINESS",
         "agent_token": "PASTE_FROM_ADD_BUSINESS",
         "company_name": "YOUR TALLY COMPANY NAME",
