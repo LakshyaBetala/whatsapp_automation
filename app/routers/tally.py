@@ -531,30 +531,6 @@ class TallyOutstandingsPayload(BaseModel):
     ledger_balances: dict[str, float] = {}
 
 
-async def _send_payment_confirmation(business_id, plan_name, client, delta, remaining):
-    """Background: tell a customer 'received Rs X, Rs Y remaining' when Tally
-    shows their balance dropped (i.e. a payment was recorded)."""
-    from app.services import whatsapp
-    from app.services.templates import render, inr
-    from app.models import Lang, MessageType, Plan
-    try:
-        lang = Lang(client.get("language") or "hi")
-    except Exception:
-        lang = Lang.hi
-    try:
-        _, body = render(
-            "payment_confirmation", lang,
-            client=client.get("name", "Customer"),
-            paid_amount=inr(delta), outstanding=inr(remaining))
-        await whatsapp.send_message(
-            business_id=business_id, to_number=client["whatsapp_number"],
-            message_text=body, plan=Plan(plan_name),
-            message_type=MessageType.payment_confirmation,
-            client_id=client["id"], language=lang, channel="shop")
-    except Exception:
-        log.exception("payment confirmation send failed for %s", client.get("name"))
-
-
 @router.post("/outstandings")
 async def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: BackgroundTasks):
     """Make Tally's bill-by-bill OUTSTANDING the source of truth.
@@ -695,13 +671,12 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
         except Exception as e:
             errors.append(f"mark-paid {len(idchunk)} failed: {e}")
 
-    # Customer payment confirmations (bounded, only if they have a number).
+    # Payments detected via Tally update the ledger SILENTLY. We deliberately do
+    # NOT message the customer "received Rs X" - that fired on every refresh a
+    # balance moved and felt like spam ("paid Rs 500" to everyone, repeatedly).
+    # The owner records the receipt in Tally; the dashboard reflects it. The only
+    # payment-related customer message is the "Thank you" reply when THEY send PAID.
     confirmations = 0
-    for cid, delta, remaining in payments[:30]:
-        cl = clients_by_id.get(cid)
-        if cl and cl.get("whatsapp_number"):
-            background_tasks.add_task(_send_payment_confirmation, biz, plan_name, cl, delta, remaining)
-            confirmations += 1
 
     # Stamp the sync so the dashboard's "last synced" is fresh every cycle (the
     # /sync endpoint only logs when there are vouchers; this runs every refresh).
