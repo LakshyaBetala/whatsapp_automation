@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     admin_api_key: str = ""
     # 30-day billing cycle: one paid "month" = this many days.
     subscription_cycle_days: int = 30
+    # Days AFTER expiry that sends still go (owner is warned) before the account
+    # is suspended. Like a paid app: pay -> access continues; lapse -> a short
+    # grace, then cut off. Max 3.
+    subscription_grace_days: int = 3
 
     # --- Sending safety ---
     # Max customer reminders per business per day. Backlog drips out over

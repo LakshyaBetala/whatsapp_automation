@@ -14,6 +14,26 @@ let mainWindow = null;
 let tray = null;
 app.isQuitting = false;
 
+// ── Anti-blank-screen hardening ───────────────────────────────────────────
+// Budget shop laptops have flaky GPU drivers; hardware-accelerated Electron
+// often paints a WHITE/BLACK blank window there. Software rendering is a hair
+// slower but rock-solid, which is what a till machine needs. This is the single
+// biggest fix for "the app goes blank".
+app.disableHardwareAcceleration();
+// Don't let a crashed GPU process take the window down - keep painting.
+app.commandLine.appendSwitch('disable-gpu-compositing');
+// A renderer that crashes should be relaunched, not left blank.
+process.on('uncaughtException', (e) => console.error('[main] uncaughtException:', (e && e.message) || e));
+process.on('unhandledRejection', (e) => console.error('[main] unhandledRejection:', (e && e.message) || e));
+
+// Any webview whose render process dies gets reloaded automatically (belt-and-
+// suspenders alongside the per-webview handlers in the renderer).
+app.on('web-contents-created', (e, contents) => {
+  const kick = () => { try { if (!contents.isDestroyed()) contents.reload(); } catch (_) {} };
+  contents.on('render-process-gone', kick);
+  contents.on('unresponsive', kick);
+});
+
 // ── Config: token + backend URL come from Asva/config.json ────────────────
 // Multi-company: the primary company is the top-level token; extra Tally
 // companies (added via `agent --add-company`) live in config.companies[].
@@ -287,7 +307,23 @@ function createWindow() {
     },
   });
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  const loadUI = () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  loadUI();
+  // If the whole UI process dies or hangs (the "everything goes blank" case),
+  // rebuild it automatically instead of leaving a blank window.
+  mainWindow.webContents.on('render-process-gone', (e, details) => {
+    console.error('[main] renderer gone:', details && details.reason, '- reloading UI');
+    setTimeout(() => { try { if (!mainWindow.isDestroyed()) loadUI(); } catch (_) {} }, 800);
+  });
+  mainWindow.webContents.on('unresponsive', () => {
+    console.error('[main] renderer unresponsive - reloading UI');
+    try { mainWindow.webContents.forcefullyCrashRenderer(); } catch (_) {}
+  });
+  // A failed initial load (rare) retries rather than sitting blank.
+  mainWindow.webContents.on('did-fail-load', (e, code) => {
+    if (code === -3) return; // aborted (normal on fast reloads)
+    setTimeout(() => { try { if (!mainWindow.isDestroyed()) loadUI(); } catch (_) {} }, 1500);
+  });
   mainWindow.on('close', (e) => {
     if (!app.isQuitting) { e.preventDefault(); mainWindow.hide(); } // hide to tray
   });
@@ -300,6 +336,10 @@ function createTray() {
   tray.setToolTip('ASVA - running');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open ASVA', click: () => mainWindow && mainWindow.show() },
+    {
+      label: 'Reload window (if blank)',
+      click: () => { try { mainWindow && mainWindow.reload(); mainWindow && mainWindow.show(); } catch (e) {} },
+    },
     {
       label: 'Restart all services',
       click: () => Object.keys(SPECS).forEach((n) => {

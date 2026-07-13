@@ -11,14 +11,14 @@ def test_active_before_expiry():
     assert effective_status(TODAY, TODAY) == "active"  # expiry day itself
 
 
-def test_grace_window_is_five_days():
-    assert GRACE_DAYS == 5
+def test_grace_window_is_three_days():
+    assert GRACE_DAYS == 3
     assert effective_status(TODAY - timedelta(days=1), TODAY) == "grace"
-    assert effective_status(TODAY - timedelta(days=4), TODAY) == "grace"
+    assert effective_status(TODAY - timedelta(days=2), TODAY) == "grace"
 
 
 def test_suspended_after_grace():
-    assert effective_status(TODAY - timedelta(days=5), TODAY) == "suspended"
+    assert effective_status(TODAY - timedelta(days=3), TODAY) == "suspended"
     assert effective_status(TODAY - timedelta(days=90), TODAY) == "suspended"
 
 

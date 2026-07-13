@@ -189,8 +189,33 @@ function setLang(l) {
   });
 }
 
+// ── Webview auto-recovery ─────────────────────────────────────────────────
+// A webview whose render process dies (low RAM, driver hiccup) shows a BLANK
+// pane with no recovery. Wire every webview so it reloads itself when its
+// process crashes, and retries a failed load a few seconds later. This is what
+// makes "the tab went blank" self-heal instead of needing an app restart.
+const _failTries = {};
+function hardenWebview(w) {
+  if (!w || w._hardened) return;
+  w._hardened = true;
+  const recover = () => { try { if (w.src && w.src !== 'about:blank') w.reload(); } catch (e) {} };
+  w.addEventListener('crashed', recover);
+  w.addEventListener('render-process-gone', recover);
+  w.addEventListener('unresponsive', recover);
+  w.addEventListener('did-fail-load', (e) => {
+    if (e.errorCode === -3) return;              // aborted (normal on reload)
+    const n = (_failTries[w.id] = (_failTries[w.id] || 0) + 1);
+    if (n > 8) return;                            // give up after ~40s of failures
+    setTimeout(recover, 5000);                    // backend probably still booting
+  });
+  w.addEventListener('did-finish-load', () => { _failTries[w.id] = 0; });
+}
+function hardenAllWebviews() {
+  document.querySelectorAll('webview').forEach(hardenWebview);
+}
+
 function loadPage(id, url) {
-  if (url && !loaded[id]) { loaded[id] = true; document.getElementById(id).src = urlWithLang(url); }
+  if (url && !loaded[id]) { loaded[id] = true; const w = document.getElementById(id); hardenWebview(w); w.src = urlWithLang(url); }
 }
 function reloadAll() {
   ['wv-dash', 'wv-reminders', 'wv-analytics', 'wv-accounts'].forEach(id => {
@@ -274,6 +299,7 @@ function applyCompany(i) {
   });
 }
 
+hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 (async () => {
   CONFIG = await window.asva.getConfig();
   if (!CONFIG.dashboardUrl) document.getElementById('dashov').textContent = 'agent_token missing in config.json.';
