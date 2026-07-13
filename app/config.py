@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Release version of THIS build. Bump on every shipped zip. The dashboard
     # compares it against the newest row in app_releases (Supabase) and shows
     # an update banner when a newer version exists - Tally-style update notice.
-    app_version: str = "1.3.0"
+    app_version: str = "1.4.0"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
