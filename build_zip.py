@@ -92,63 +92,56 @@ def _walk():
                 yield ap, rel
 
 
-def _shop_env() -> str:
-    """The shop .env: same as the working .env but with a couple of keys forced
-    blank on a distributed shop laptop:
-      - PLATFORM_WA_URL: no bot here -> digest/alerts fall back to the shop number
-      - ADMIN_API_KEY: the Command Center (/ops) reads the SHARED database, so it
-        must NEVER be enabled on a shop laptop - only on the operator's own
-        machine. Blanking it here keeps /ops OFF on every shipped shop install."""
-    blanks = ("PLATFORM_WA_URL", "ADMIN_API_KEY")
-    src = os.path.join(ROOT, ".env")
-    out = []
-    seen = set()
-    for line in open(src, encoding="utf-8").read().splitlines():
-        key = line.strip().split("=", 1)[0].strip()
-        if key in blanks:
-            out.append(f"{key}=")
-            seen.add(key)
-        else:
-            out.append(line)
-    for k in blanks:
-        if k not in seen:
-            out.append(f"{k}=")
-    return "\n".join(out) + "\n"
-
-
-def _server_env(admin_key: str) -> str:
-    """The host .env: the working .env plus the values that make this box the
-    server - Command Center ON, scheduler ON, sends go out directly from the
-    shop WhatsApp session running here (not queued)."""
-    forced = {
-        "ADMIN_API_KEY": admin_key,
-        "PUBLIC_BASE_URL": "https://api.tryasva.com",
-        "ENABLE_REMINDER_SWEEP": "true",
-        "ENABLE_EOD_DIGEST": "true",
-        "ENABLE_SUBSCRIPTION_CHECK": "true",
-        "SEND_VIA_OUTBOX": "false",     # WhatsApp is here -> send directly
-        "ENABLE_OUTBOX_SEND": "true",   # also drain any queued sends
-    }
-    # Keys we surface (blank) if absent so the operator sees where to fill them,
-    # but never overwrite a real value they already set.
-    ensure = {"OPERATOR_UPI_ID": "", "OPERATOR_UPI_NAME": "ASVA"}
+def _env_transform(overrides: dict, ensure: dict | None = None) -> str:
+    """The working .env with each key in `overrides` forced to the given value,
+    and any key in `ensure` appended (blank/default) only if it is absent -
+    never overwriting a real value the operator already set."""
+    ensure = ensure or {}
     src = os.path.join(ROOT, ".env")
     out, seen = [], set()
     for line in open(src, encoding="utf-8").read().splitlines():
         key = line.strip().split("=", 1)[0].strip()
-        if key in forced:
-            out.append(f"{key}={forced[key]}")
-            seen.add(key)
-        else:
-            out.append(line)
-            seen.add(key)
-    for k, v in forced.items():
-        if k not in seen:
-            out.append(f"{k}={v}")
-    for k, v in ensure.items():
+        out.append(f"{key}={overrides[key]}" if key in overrides else line)
+        seen.add(key)
+    for k, v in {**overrides, **ensure}.items():
         if k not in seen:
             out.append(f"{k}={v}")
     return "\n".join(out) + "\n"
+
+
+def _shop_env() -> str:
+    """Shop laptop (e.g. father's): runs the shop's OWN WhatsApp (scanned by the
+    shopkeeper, port 3001) and DELIVERS the host-queued customer sends from that
+    number. The always-on i3 host owns timing (reminders, digest, subscription),
+    so those jobs are OFF here - otherwise both boxes would send. Command Center
+    is OFF (it reads the shared DB; operator machine only)."""
+    return _env_transform({
+        "ENABLE_REMINDER_SWEEP": "false",     # host computes + queues reminders
+        "ENABLE_EOD_DIGEST": "false",         # host bot sends the owner digest
+        "ENABLE_SUBSCRIPTION_CHECK": "false",  # host runs the subscription clock
+        "SEND_VIA_OUTBOX": "false",           # this IS the shop number -> direct
+        "ENABLE_OUTBOX_SEND": "true",         # drain the host's queue from here
+        "PLATFORM_WA_URL": "",                # owner alerts come from the host bot
+        "ADMIN_API_KEY": "",                  # never a Command Center on a shop
+    })
+
+
+def _server_env(admin_key: str) -> str:
+    """i3 host = server + bot. The always-on backend owns timing (reminders,
+    digest, subscription) and the Command Center. Customer sends are QUEUED
+    (send_via_outbox) for the shop to deliver from its own number; the host has
+    no shop number, so it does NOT drain the queue. Owner-facing messages (digest,
+    alerts, bot replies) go via the BOT WhatsApp on :3002 (you scan that one)."""
+    return _env_transform({
+        "ADMIN_API_KEY": admin_key,
+        "PUBLIC_BASE_URL": "https://api.tryasva.com",
+        "PLATFORM_WA_URL": "http://localhost:3002",  # the bot number (owner-facing)
+        "ENABLE_REMINDER_SWEEP": "true",
+        "ENABLE_EOD_DIGEST": "true",
+        "ENABLE_SUBSCRIPTION_CHECK": "true",
+        "SEND_VIA_OUTBOX": "true",            # queue customer sends for the shop
+        "ENABLE_OUTBOX_SEND": "false",        # no shop number here to deliver
+    }, ensure={"OPERATOR_UPI_ID": "", "OPERATOR_UPI_NAME": "ASVA"})
 
 
 def _client_config_template() -> str:
