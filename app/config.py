@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # is suspended. Like a paid app: pay -> access continues; lapse -> a short
     # grace, then cut off. Max 3.
     subscription_grace_days: int = 3
+    # Direct-UPI billing: where shops pay you. When set, renewal notices carry
+    # the amount + this UPI id + a tap-to-pay upi:// link, so "pay directly"
+    # feels hands-off. You confirm payment and click Renew in the Command Center.
+    operator_upi_id: str = ""            # e.g. yourname@okhdfc
+    operator_upi_name: str = "ASVA"      # payee name shown in the UPI app
 
     # --- Sending safety ---
     # Max customer reminders per business per day. Backlog drips out over

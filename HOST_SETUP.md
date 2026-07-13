@@ -54,7 +54,10 @@ Windows Remote Desktop also works if you prefer it.)
    ```
 4. Open `.env` - the build already set `ADMIN_API_KEY` (your Command Center key,
    keep it secret), `PUBLIC_BASE_URL=https://api.tryasva.com`, the scheduler ON,
-   and `SEND_VIA_OUTBOX=false`. Nothing to change.
+   and `SEND_VIA_OUTBOX=false`. Set one thing: `OPERATOR_UPI_ID=yourvpa@bank`
+   (and `OPERATOR_UPI_NAME=ASVA`). Then renewal reminders carry the amount +
+   your UPI + a tap-to-pay link, so shops pay you directly; you confirm and
+   click **Renew** in the Command Center.
 
 ## 2. Never let it sleep
 

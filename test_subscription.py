@@ -1,6 +1,7 @@
 """Unit tests for the subscription lifecycle (server-side license)."""
 from datetime import date, timedelta
 
+from app.services import subscription as subs
 from app.services.subscription import effective_status, days_left, GRACE_DAYS
 
 TODAY = date(2026, 7, 5)
@@ -35,3 +36,18 @@ def test_days_left():
     assert days_left(TODAY + timedelta(days=5), TODAY) == 5
     assert days_left(TODAY - timedelta(days=2), TODAY) == -2
     assert days_left(None, TODAY) is None
+
+
+def test_renewal_payment_line_with_upi(monkeypatch):
+    monkeypatch.setattr(subs.settings, "operator_upi_id", "laksh@okhdfc")
+    monkeypatch.setattr(subs.settings, "operator_upi_name", "ASVA")
+    line = subs.renewal_payment_line("pro")
+    assert "1,999" in line                      # pro price, formatted
+    assert "laksh@okhdfc" in line
+    assert "upi://pay?pa=laksh@okhdfc" in line
+    assert "am=1999" in line and "cu=INR" in line
+
+
+def test_renewal_payment_line_blank_without_upi(monkeypatch):
+    monkeypatch.setattr(subs.settings, "operator_upi_id", "")
+    assert subs.renewal_payment_line("pro") == ""

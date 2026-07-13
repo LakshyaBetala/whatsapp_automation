@@ -129,6 +129,9 @@ def _server_env(admin_key: str) -> str:
         "SEND_VIA_OUTBOX": "false",     # WhatsApp is here -> send directly
         "ENABLE_OUTBOX_SEND": "true",   # also drain any queued sends
     }
+    # Keys we surface (blank) if absent so the operator sees where to fill them,
+    # but never overwrite a real value they already set.
+    ensure = {"OPERATOR_UPI_ID": "", "OPERATOR_UPI_NAME": "ASVA"}
     src = os.path.join(ROOT, ".env")
     out, seen = [], set()
     for line in open(src, encoding="utf-8").read().splitlines():
@@ -138,7 +141,11 @@ def _server_env(admin_key: str) -> str:
             seen.add(key)
         else:
             out.append(line)
+            seen.add(key)
     for k, v in forced.items():
+        if k not in seen:
+            out.append(f"{k}={v}")
+    for k, v in ensure.items():
         if k not in seen:
             out.append(f"{k}={v}")
     return "\n".join(out) + "\n"
