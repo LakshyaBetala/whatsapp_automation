@@ -10,6 +10,7 @@ env/
 *.env
 .env.*
 !.env.example
+.admin_key
 # PyInstaller (agent build artifacts)
 tally_agent/build/
 tally_agent/dist/
