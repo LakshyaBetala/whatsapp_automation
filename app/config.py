@@ -89,6 +89,26 @@ class Settings(BaseSettings):
     send_via_outbox: bool = False       # true ONLY on the bot laptop
     enable_outbox_send: bool = True     # false ONLY on the bot laptop
 
+    # --- Monitoring + email alerts (operator health center) ---
+    # The watchdog job builds a health snapshot every few minutes and emails the
+    # operator when something needs attention (server/bot/shop WhatsApp down,
+    # sends failing, queue backing up). Empty SMTP = alerts are still recorded +
+    # shown in /ops, just not emailed. Gmail: host smtp.gmail.com, port 587, and
+    # an APP PASSWORD (not the account password).
+    enable_monitor: bool = True
+    monitor_interval_min: int = 5          # how often the watchdog runs
+    alert_email_to: str = ""               # where alerts are mailed (you)
+    alert_email_from: str = ""             # usually the same gmail address
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""                    # Gmail APP password
+    # Thresholds for what counts as "needs attention".
+    offline_alert_min: int = 20            # shop agent silent this long = offline
+    wa_down_alert_min: int = 15            # a WhatsApp session down this long
+    outbox_backlog_alert: int = 25         # this many queued+aging = stuck
+    fail_rate_alert_pct: int = 40          # today's failed/attempted above this
+
     # --- AI (optional) ---
     gemini_api_key: str = ""
     anthropic_api_key: str = ""

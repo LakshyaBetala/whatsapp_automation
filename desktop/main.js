@@ -245,6 +245,7 @@ function parseWa(ok, body) {
 // subscription state. Liveness is ALSO covered by /tally/sync every ~60s; this
 // adds the version/machine and keeps last_seen fresh even if Tally is closed.
 let SERVER_VERSION = '';
+let WA_READY = null;   // shop WhatsApp connected? (reported to the health center)
 function sendHeartbeat() {
   if (!CONFIG.token) return;
   try {
@@ -252,6 +253,7 @@ function sendHeartbeat() {
       agent_token: CONFIG.token,
       machine_id: os.hostname(),
       agent_version: SERVER_VERSION || undefined,
+      wa_ready: (typeof WA_READY === 'boolean') ? WA_READY : undefined,
     }, () => { /* fire and forget */ });
   } catch (e) { /* never let a heartbeat crash the app */ }
 }
@@ -268,6 +270,7 @@ function pollStatus() {
   ping('http://localhost:3001/api/wa/status', (ok, b) => {
     const w = parseWa(ok, b);
     out.whatsapp = w.ready; out.whatsappReachable = w.reachable; out.whatsappQr = w.qr;
+    if (w.reachable) WA_READY = !!w.ready;   // only trust a real answer from :3001
     done();
   });
   // Tally sync freshness for the top bar (label + dot colour + last-sync ISO).

@@ -41,6 +41,8 @@ class HeartbeatPayload(BaseModel):
     agent_token: str
     machine_id: Optional[str] = None
     agent_version: Optional[str] = None
+    wa_ready: Optional[bool] = None       # shop's own WhatsApp connected? (health)
+    outbox_pending: Optional[int] = None  # queued sends the shop still owes
 
 
 _BIZ_COLS = ("id, business_name, plan, plan_expires_on, license_key, "
@@ -66,11 +68,17 @@ async def heartbeat(payload: HeartbeatPayload):
     # Record liveness for the health monitor (best-effort - never fail the
     # heartbeat over a bookkeeping write). machine_id is set once and only
     # changed if it was empty, so a copied install shows a different id later.
-    update: dict = {"last_seen": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+    now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    update: dict = {"last_seen": now_iso}
     if payload.agent_version:
         update["agent_version"] = payload.agent_version[:40]
     if payload.machine_id and not (biz.get("machine_id") or "").strip():
         update["machine_id"] = payload.machine_id[:120]
+    if payload.wa_ready is not None:
+        update["wa_ready"] = bool(payload.wa_ready)
+        update["wa_checked_at"] = now_iso
+    if payload.outbox_pending is not None:
+        update["outbox_pending"] = max(0, int(payload.outbox_pending))
     try:
         db.table("businesses").update(update).eq("id", biz["id"]).execute()
     except Exception:

@@ -141,7 +141,12 @@ def _server_env(admin_key: str) -> str:
         "ENABLE_SUBSCRIPTION_CHECK": "true",
         "SEND_VIA_OUTBOX": "true",            # queue customer sends for the shop
         "ENABLE_OUTBOX_SEND": "false",        # no shop number here to deliver
-    }, ensure={"OPERATOR_UPI_ID": "", "OPERATOR_UPI_NAME": "ASVA"})
+    }, ensure={"OPERATOR_UPI_ID": "", "OPERATOR_UPI_NAME": "ASVA",
+               # Health-center email alerts (Gmail app password). Blank = alerts
+               # still show in /ops, just not emailed.
+               "ALERT_EMAIL_TO": "", "ALERT_EMAIL_FROM": "",
+               "SMTP_HOST": "", "SMTP_PORT": "587",
+               "SMTP_USER": "", "SMTP_PASS": ""})
 
 
 def _client_config_template() -> str:
