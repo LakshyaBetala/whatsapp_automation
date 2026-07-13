@@ -44,6 +44,19 @@ def ensure_license_key(db, biz: dict) -> str:
     return ""  # best-effort: never fail a heartbeat over a display key
 
 
+def stamp_last_seen(db, business_id: str) -> None:
+    """Record that this business's agent just contacted us (liveness for the
+    ops health monitor). Best-effort - never fail the caller over it. The Tally
+    watcher hits /tally/sync every ~60s, so last_seen stays fresh while the
+    shop's ASVA is running and reaching Tally."""
+    try:
+        db.table("businesses").update(
+            {"last_seen": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        ).eq("id", business_id).execute()
+    except Exception:
+        pass
+
+
 def _plan_of(biz: dict) -> Plan:
     try:
         return Plan(biz.get("plan") or "starter")

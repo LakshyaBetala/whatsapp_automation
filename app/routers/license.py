@@ -141,3 +141,47 @@ async def renew(payload: RenewPayload):
     hb = lic.build_heartbeat(db, biz)
     log.info("Renewed %s -> expires %s (plan %s)", biz["id"], new_expiry, hb["plan"])
     return {"ok": True, "renewed_until": new_expiry.isoformat(), "heartbeat": hb}
+
+
+class SetPlanPayload(BaseModel):
+    admin_key: str
+    business_id: str
+    plan: str
+
+
+@router.post("/set-plan")
+async def set_plan(payload: SetPlanPayload):
+    """OPS ONLY: change a business's plan tier WITHOUT touching its expiry."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    try:
+        plan = Plan(payload.plan).value
+    except ValueError:
+        raise HTTPException(status_code=400,
+                            detail="Unknown plan. Use starter/growth/pro/max.")
+    r = db.table("businesses").update({"plan": plan}).eq("id", payload.business_id).execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    return {"ok": True, "plan": plan}
+
+
+class SuspendPayload(BaseModel):
+    admin_key: str
+    business_id: str
+
+
+@router.post("/suspend")
+async def suspend(payload: SuspendPayload):
+    """OPS ONLY: cut a business off now (non-payment) by expiring it past the
+    grace window. Sends stop immediately (server-side). Reversible with /renew."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    r = (db.table("businesses").select("id, plan, plan_expires_on")
+         .eq("id", payload.business_id).limit(1).execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    # Backdate past the grace window so effective_status = suspended right away.
+    past = (_dt.date.today() - _dt.timedelta(days=lic.subs.GRACE_DAYS + 1)).isoformat()
+    db.table("businesses").update({"plan_expires_on": past}).eq("id", payload.business_id).execute()
+    log.info("Suspended %s (expiry set to %s)", payload.business_id, past)
+    return {"ok": True, "suspended": True, "expiry": past}

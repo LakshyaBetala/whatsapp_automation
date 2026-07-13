@@ -327,6 +327,9 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
     _sync_company_name(db, biz, payload.company_name)
+    # Liveness for the ops health monitor: the watcher posts here every ~60s.
+    from app.services import license as _lic
+    _lic.stamp_last_seen(db, biz)
 
     sales_processed = 0
     new_bills = 0

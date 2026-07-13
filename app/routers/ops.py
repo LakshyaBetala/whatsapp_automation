@@ -1,0 +1,326 @@
+"""ASVA Command Center - the operator's central health + subscription cockpit.
+
+One page to see every business at a glance: online/offline, subscription state,
+days to expiry, messages this month, agent version, failed sends today - and to
+RENEW or SUSPEND with one click. Gated behind ADMIN_API_KEY (the operator only).
+
+Designed to stay cheap at scale: the data endpoint runs a fixed THREE batch
+queries (businesses, this-month usage, today's failed sends) no matter how many
+businesses there are - never a per-business loop over the network.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import logging
+import secrets
+from collections import Counter
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from app.config import settings
+from app.db import require_db
+from app.models import PLAN_LABELS, PLAN_LIMITS, Plan
+from app.services import subscription as subs
+
+log = logging.getLogger(__name__)
+router = APIRouter(prefix="/ops", tags=["ops"])
+
+ONLINE_MIN = 5          # last_seen within 5 min = online (watcher stamps ~60s)
+IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+
+
+def _key_ok(key: str | None) -> bool:
+    configured = (settings.admin_api_key or "").strip()
+    return bool(configured) and bool(key) and secrets.compare_digest(key, configured)
+
+
+def _plan(biz: dict) -> Plan:
+    try:
+        return Plan(biz.get("plan") or "starter")
+    except ValueError:
+        return Plan.starter
+
+
+def _paged(query_fn, size: int = 1000) -> list:
+    rows, start = [], 0
+    while True:
+        batch = query_fn().range(start, start + size - 1).execute().data or []
+        rows.extend(batch)
+        if len(batch) < size:
+            return rows
+        start += size
+
+
+def _fmt_ago(dt: _dt.datetime | None, now: _dt.datetime) -> tuple[str, int]:
+    """(human label, minutes_ago). minutes_ago = 10**9 when never seen."""
+    if not dt:
+        return "never", 10 ** 9
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    mins = int((now - dt).total_seconds() // 60)
+    if mins < 1:
+        return "just now", 0
+    if mins < 60:
+        return f"{mins} min ago", mins
+    hrs = mins // 60
+    if hrs < 24:
+        return f"{hrs} h ago", mins
+    return f"{hrs // 24} d ago", mins
+
+
+def build_ops_data(db) -> dict:
+    now = _dt.datetime.now(_dt.timezone.utc)
+    today_ist = _dt.datetime.now(IST).date()
+    month_start = today_ist.replace(day=1).isoformat()
+    day_start_utc = _dt.datetime.combine(today_ist, _dt.time.min, tzinfo=IST).astimezone(
+        _dt.timezone.utc).isoformat()
+
+    # (1) all businesses
+    bizes = _paged(lambda: db.table("businesses").select(
+        "id, business_name, plan, plan_expires_on, license_key, last_seen, "
+        "agent_version, whatsapp_number"))
+    # (2) this-month usage, one query -> dict
+    used_by: dict = {}
+    for r in _paged(lambda: db.table("usage").select("business_id, message_count")
+                    .eq("period_month", month_start)):
+        used_by[r["business_id"]] = int(r.get("message_count") or 0)
+    # (3) today's failed sends, one query -> count per business
+    failed_by: Counter = Counter()
+    for r in _paged(lambda: db.table("messages").select("business_id")
+                    .eq("delivery_status", "failed").gte("created_at", day_start_utc)):
+        if r.get("business_id"):
+            failed_by[r["business_id"]] += 1
+
+    latest_ver, _mand = _latest_release(db)
+
+    rows = []
+    tot = {"businesses": 0, "online": 0, "active": 0, "grace": 0, "suspended": 0,
+           "messages_month": 0, "failed_today": 0, "outdated": 0}
+    for b in bizes:
+        plan = _plan(b)
+        limits = PLAN_LIMITS[plan]
+        exp = b.get("plan_expires_on")
+        status = subs.effective_status(exp, today_ist)
+        dleft = subs.days_left(exp, today_ist)
+        ls = _parse_ts(b.get("last_seen"))
+        label, mins = _fmt_ago(ls, now)
+        online = mins <= ONLINE_MIN
+        used = used_by.get(b["id"], 0)
+        failed = failed_by.get(b["id"], 0)
+        ver = b.get("agent_version") or "-"
+        version_ok = (ver == latest_ver) or ver == "-"
+
+        tot["businesses"] += 1
+        tot["online"] += 1 if online else 0
+        tot[status] = tot.get(status, 0) + 1
+        tot["messages_month"] += used
+        tot["failed_today"] += failed
+        tot["outdated"] += 0 if version_ok else 1
+
+        rows.append({
+            "id": b["id"],
+            "name": b.get("business_name") or "(unnamed)",
+            "license_key": b.get("license_key") or "-",
+            "plan": plan.value,
+            "plan_label": PLAN_LABELS.get(plan, plan.value.title()),
+            "price": int(limits.get("price", 0)),
+            "status": status,
+            "expiry": str(exp)[:10] if exp else None,
+            "days_left": dleft,
+            "online": online,
+            "last_seen_label": label,
+            "minutes_ago": mins,
+            "version": ver,
+            "version_ok": version_ok,
+            "messages_used": used,
+            "messages_limit": int(limits["messages"]),
+            "failed_today": failed,
+        })
+
+    # sort: problems first (suspended, then grace, then most days-left), online last
+    order = {"suspended": 0, "grace": 1, "active": 2}
+    rows.sort(key=lambda r: (order.get(r["status"], 3),
+                             r["days_left"] if r["days_left"] is not None else 10 ** 9))
+    return {
+        "server_time": now.isoformat(),
+        "server_version": settings.app_version,
+        "latest_version": latest_ver,
+        "totals": tot,
+        "businesses": rows,
+    }
+
+
+def _parse_ts(raw):
+    if not raw:
+        return None
+    try:
+        return _dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_release(db) -> tuple[str, bool]:
+    try:
+        r = (db.table("app_releases").select("version, mandatory")
+             .order("created_at", desc=True).limit(1).execute()).data
+        if r:
+            return str(r[0]["version"]), bool(r[0].get("mandatory"))
+    except Exception:
+        pass
+    return settings.app_version, False
+
+
+@router.get("/data")
+async def ops_data(key: str = Query("")):
+    if not _key_ok(key):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+    return JSONResponse(build_ops_data(require_db()))
+
+
+@router.get("", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
+async def ops_page(key: str = Query("")):
+    if not (settings.admin_api_key or "").strip():
+        return HTMLResponse(_DISABLED_HTML, status_code=503)
+    if not _key_ok(key):
+        return HTMLResponse(_LOGIN_HTML)
+    return HTMLResponse(_PAGE_HTML)
+
+
+# ── HTML ──────────────────────────────────────────────────────────────────
+_DISABLED_HTML = """<!doctype html><meta charset="utf-8"><title>ASVA Command Center</title>
+<body style="font-family:system-ui;max-width:560px;margin:60px auto;color:#2F3437">
+<h2>Command Center is off</h2>
+<p>Set <code>ADMIN_API_KEY</code> in the server's <code>.env</code> and restart to enable it.</p>
+</body>"""
+
+_LOGIN_HTML = """<!doctype html><meta charset="utf-8"><title>ASVA Command Center</title>
+<body style="font-family:'SF Pro Display',system-ui;max-width:360px;margin:80px auto;color:#2F3437">
+<h2 style="letter-spacing:-.02em">ASVA Command Center</h2>
+<p style="color:#787774">Enter the operator key.</p>
+<input id="k" type="password" placeholder="Admin key" autofocus
+ style="width:100%;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box;font:inherit">
+<button onclick="go()" style="margin-top:12px;width:100%;padding:11px;border:0;border-radius:8px;background:#0a7d33;color:#fff;font:inherit;cursor:pointer">Open</button>
+<div id="e" style="color:#c0392b;margin-top:10px;font-size:.9rem"></div>
+<script>
+function go(){var k=document.getElementById('k').value.trim();if(!k)return;
+ location.href='/ops?key='+encodeURIComponent(k);}
+document.getElementById('k').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
+if(location.search.indexOf('key=')>-1)document.getElementById('e').textContent='Wrong key.';
+</script></body>"""
+
+_PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
+<title>ASVA Command Center</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+ body{font-family:'SF Pro Display','Helvetica Neue',system-ui,sans-serif;margin:0;background:#0f1713;color:#e8efe9}
+ .top{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;background:#17211b;border-bottom:1px solid #24332a}
+ .top h1{font-size:1.15rem;margin:0;letter-spacing:.02em;font-weight:800}
+ .top .meta{color:#8fae9c;font-size:.82rem}
+ .wrap{padding:18px 22px;max-width:1500px;margin:0 auto}
+ .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+ .kpi{background:#17211b;border:1px solid #24332a;border-radius:12px;padding:14px 16px}
+ .kpi .n{font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums}
+ .kpi .l{color:#8fae9c;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;margin-top:4px}
+ .kpi.warn .n{color:#f0b849}.kpi.bad .n{color:#e2574c}.kpi.good .n{color:#46d67e}
+ .tablewrap{overflow-x:auto;background:#17211b;border:1px solid #24332a;border-radius:12px}
+ table{width:100%;border-collapse:collapse;min-width:1050px}
+ th,td{padding:11px 13px;text-align:left;border-bottom:1px solid #223029;font-size:.9rem;white-space:nowrap}
+ th{color:#8fae9c;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+ tr:last-child td{border-bottom:0}
+ tbody tr:hover td{background:#1c281f}
+ .num{text-align:right;font-variant-numeric:tabular-nums}
+ .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+ .dot.on{background:#46d67e}.dot.off{background:#556}
+ .pill{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 9px;border-radius:9999px;text-transform:uppercase;letter-spacing:.04em}
+ .pill.active{background:#123524;color:#46d67e}.pill.grace{background:#3a2f10;color:#f0b849}.pill.suspended{background:#3a1613;color:#ff6a5c}
+ .lk{font-family:'SF Mono',Consolas,monospace;font-size:.8rem;color:#9db8a8}
+ .btn{font:inherit;font-size:.82rem;border:1px solid #2c5c42;background:#123524;color:#cfe6d8;border-radius:6px;padding:5px 10px;cursor:pointer}
+ .btn:hover{background:#173f2a}.btn.sus{border-color:#5c2c2c;background:#341613;color:#f2b8b0}.btn.sus:hover{background:#4a1e19}
+ .warnv{color:#f0b849}
+ .muted{color:#7c9787;font-size:.82rem}
+ select.pl{font:inherit;font-size:.82rem;background:#0f1713;color:#cfe6d8;border:1px solid #2c5c42;border-radius:6px;padding:5px}
+ #msg{color:#46d67e;font-size:.85rem;min-height:18px;margin:8px 0}
+</style></head><body>
+<div class="top">
+  <h1>ASVA Command Center</h1>
+  <div class="meta"><span id="clock"></span> &middot; server v<span id="sv"></span></div>
+</div>
+<div class="wrap">
+  <div id="msg"></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="tablewrap"><table>
+   <thead><tr>
+     <th>Business</th><th>Status</th><th>Plan</th><th>Expiry</th><th class="num">Days</th>
+     <th>Last seen</th><th>Version</th><th class="num">Msgs (mo)</th><th class="num">Fail (today)</th>
+     <th>Renew</th><th>Cut off</th>
+   </tr></thead>
+   <tbody id="rows"></tbody>
+  </table></div>
+  <div class="muted" style="margin-top:10px">Auto-refreshes every 30s. "Days" is time to expiry (negative = past). Online = agent seen in the last 5 min.</div>
+</div>
+<script>
+const KEY = new URLSearchParams(location.search).get('key') || '';
+const inr = n => (n||0).toLocaleString('en-IN');
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Basic',growth:'Growth',pro:'Pro',max:'Max'};
+
+async function load(){
+  try{
+    const r = await fetch('/ops/data?key='+encodeURIComponent(KEY));
+    if(!r.ok){document.getElementById('msg').textContent='Session error - reload with the key.';return;}
+    const d = await r.json();
+    document.getElementById('sv').textContent = d.server_version;
+    const t = d.totals;
+    const K=[['businesses','Businesses',''],['online','Online','good'],
+      ['active','Active','good'],['grace','Grace','warn'],['suspended','Suspended','bad'],
+      ['messages_month','Messages (mo)',''],['failed_today','Failed (today)', t.failed_today?'bad':''],
+      ['outdated','Outdated','warn']];
+    document.getElementById('kpis').innerHTML = K.map(k=>
+      '<div class="kpi '+(k[2])+'"><div class="n">'+inr(t[k[0]])+'</div><div class="l">'+k[1]+'</div></div>').join('');
+    document.getElementById('rows').innerHTML = d.businesses.map(rowHtml).join('') ||
+      '<tr><td colspan="11" class="muted" style="padding:22px">No businesses yet.</td></tr>';
+  }catch(e){document.getElementById('msg').textContent='Could not load. Retrying...';}
+}
+function rowHtml(b){
+  const days = (b.days_left==null)?'-':b.days_left;
+  const verCls = b.version_ok?'':'warnv';
+  const plopts = PLANS.map(p=>'<option value="'+p+'"'+(p===b.plan?' selected':'')+'>'+PLABEL[p]+'</option>').join('');
+  return '<tr>'+
+    '<td><div><span class="dot '+(b.online?'on':'off')+'"></span>'+esc(b.name)+'</div>'+
+      '<div class="lk">'+esc(b.license_key)+'</div></td>'+
+    '<td><span class="pill '+b.status+'">'+b.status+'</span></td>'+
+    '<td><select class="pl" onchange="setPlan(\''+b.id+'\',this.value)">'+plopts+'</select>'+
+      '<div class="muted">&#8377;'+inr(b.price)+'</div></td>'+
+    '<td>'+(b.expiry||'-')+'</td>'+
+    '<td class="num">'+days+'</td>'+
+    '<td>'+esc(b.last_seen_label)+'</td>'+
+    '<td class="'+verCls+'">'+esc(b.version)+'</td>'+
+    '<td class="num">'+inr(b.messages_used)+' / '+inr(b.messages_limit)+'</td>'+
+    '<td class="num">'+(b.failed_today||0)+'</td>'+
+    '<td><button class="btn" onclick="renew(\''+b.id+'\',1)">+1 mo</button></td>'+
+    '<td><button class="btn sus" onclick="suspend(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Suspend</button></td>'+
+  '</tr>';
+}
+function flash(t){var m=document.getElementById('msg');m.textContent=t;setTimeout(()=>{if(m.textContent===t)m.textContent='';},4000);}
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({})); return {ok:r.ok,j:j};
+}
+async function renew(id,months){
+  const x=await post('/license/renew',{admin_key:KEY,business_id:id,months:months});
+  flash(x.ok?('Renewed until '+x.j.renewed_until):(x.j.detail||'Renew failed')); load();
+}
+async function setPlan(id,plan){
+  const x=await post('/license/set-plan',{admin_key:KEY,business_id:id,plan:plan});
+  flash(x.ok?('Plan set to '+plan):(x.j.detail||'Plan change failed')); load();
+}
+async function suspend(id,name){
+  if(!confirm('Suspend "'+name+'" now? Their sends stop immediately. Reversible with Renew.'))return;
+  const x=await post('/license/suspend',{admin_key:KEY,business_id:id});
+  flash(x.ok?'Suspended':(x.j.detail||'Suspend failed')); load();
+}
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString();},1000);
+load(); setInterval(load,30000);
+</script></body></html>"""
