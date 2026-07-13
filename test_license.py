@@ -92,3 +92,47 @@ def test_heartbeat_update_available(monkeypatch):
     assert hb["update_available"] is True
     assert hb["update_mandatory"] is True
     assert hb["status"] == "active"   # no expiry = internal/active
+
+
+# ── Renewal cycle math ────────────────────────────────────────────────
+def test_renew_on_time_stacks_from_expiry():
+    today = _dt.date(2026, 7, 12)
+    # active until Aug 5 -> renewing adds 30 days ONTO Aug 5 (no days lost)
+    out = lic.renew_expiry("2026-08-05", months=1, today=today)
+    assert out == _dt.date(2026, 8, 5) + _dt.timedelta(days=30)
+
+
+def test_renew_late_starts_from_today():
+    today = _dt.date(2026, 7, 12)
+    # lapsed (expired Jun 1) -> renew from TODAY, not back-dated
+    out = lic.renew_expiry("2026-06-01", months=1, today=today)
+    assert out == today + _dt.timedelta(days=30)
+
+
+def test_renew_no_prior_expiry_from_today():
+    today = _dt.date(2026, 7, 12)
+    out = lic.renew_expiry(None, months=2, today=today)
+    assert out == today + _dt.timedelta(days=60)
+
+
+def test_renew_endpoint_admin_gate(monkeypatch):
+    """/license/renew refuses without the configured admin key."""
+    import asyncio
+    from app.routers import license as lr
+    from fastapi import HTTPException
+
+    # key unset -> 503 (feature disabled)
+    monkeypatch.setattr(lr.settings, "admin_api_key", "")
+    try:
+        asyncio.run(lr.renew(lr.RenewPayload(admin_key="x", agent_token="t")))
+        assert False, "should have refused"
+    except HTTPException as e:
+        assert e.status_code == 503
+
+    # key set but wrong -> 401
+    monkeypatch.setattr(lr.settings, "admin_api_key", "s3cret")
+    try:
+        asyncio.run(lr.renew(lr.RenewPayload(admin_key="wrong", agent_token="t")))
+        assert False, "should have refused"
+    except HTTPException as e:
+        assert e.status_code == 401

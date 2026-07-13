@@ -127,6 +127,24 @@ def feature_flags(status: str) -> dict:
     }
 
 
+def renew_expiry(current: Optional[str | _dt.date], months: int = 1,
+                 today: Optional[_dt.date] = None) -> _dt.date:
+    """New expiry after paying for ``months`` cycles.
+
+    A month = settings.subscription_cycle_days (30). Renewing an ACTIVE sub
+    stacks onto its remaining time (renew from the current expiry); renewing a
+    LAPSED sub starts fresh from today. So paying on time never loses days, and
+    paying late never back-dates. months can be a fraction for a trial/pro-rata.
+    """
+    today = today or _dt.date.today()
+    base = today
+    if current:
+        cur = current if isinstance(current, _dt.date) else _dt.date.fromisoformat(str(current)[:10])
+        if cur > today:
+            base = cur
+    return base + _dt.timedelta(days=round(settings.subscription_cycle_days * months))
+
+
 def build_heartbeat(db, biz: dict, today: Optional[_dt.date] = None) -> dict:
     """The authoritative subscription answer for one business."""
     today = today or _dt.date.today()

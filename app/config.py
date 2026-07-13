@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
     public_base_url: str = "http://localhost:8000"
+    # Ops secret for subscription/renewal actions (POST /license/renew). The
+    # CLIENT never renews itself - only you, the operator, with this key. Set
+    # ADMIN_API_KEY in .env; while it stays empty, all ops endpoints refuse.
+    admin_api_key: str = ""
+    # 30-day billing cycle: one paid "month" = this many days.
+    subscription_cycle_days: int = 30
 
     # --- Sending safety ---
     # Max customer reminders per business per day. Backlog drips out over
