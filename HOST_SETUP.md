@@ -50,25 +50,36 @@ shop's laptop and the shopkeeper scans it there.
 2. Backend once: `python -m venv .venv ; .\.venv\Scripts\Activate.ps1 ; pip install -r requirements.txt`
 3. WhatsApp once: `cd wa_service ; npm install ; cd ..`
 4. `.env` is already set (Command Center key, `api.tryasva.com`, scheduler ON,
-   `SEND_VIA_OUTBOX=true`, bot on `:3002`). Set only `OPERATOR_UPI_ID=yourvpa@bank`
-   so renewal reminders carry your UPI.
+   `SEND_VIA_OUTBOX=true`, bot on `:3002`, monitor ON). Fill in two things:
+   - `OPERATOR_UPI_ID=yourvpa@bank` so renewal reminders carry your UPI.
+   - Email alerts (so a drop mails you): `ALERT_EMAIL_TO=you@gmail.com`,
+     `ALERT_EMAIL_FROM=you@gmail.com`, `SMTP_HOST=smtp.gmail.com`,
+     `SMTP_USER=you@gmail.com`, `SMTP_PASS=<Gmail APP password>` (make one at
+     myaccount.google.com -> Security -> App passwords; not your real password).
+     Leave blank to skip email - alerts still show in the Health tab.
 
 ## 2. Never let it sleep
 
 Right-click `KEEP_AWAKE.bat` -> **Run as administrator**.
 
-## 3. Move tryasva.com to Cloudflare (from GoDaddy) and open the tunnel
+## 3. Move tryasva.com DNS to Cloudflare (keep the Vercel landing) + tunnel
 
-Your domain is at GoDaddy; we point its nameservers at Cloudflare (GoDaddy stays
-the registrar, Cloudflare runs the DNS + tunnel, all free).
+The **root** tryasva.com is a landing page on **Vercel**. We keep that working
+and only add two subdomains for the i3. Cloudflare runs the DNS; GoDaddy stays
+the registrar; Vercel keeps serving the landing.
 
-1. Create a free account at `cloudflare.com` -> **Add a site** -> `tryasva.com`
-   -> Free plan. Cloudflare gives you **two nameservers** (like
-   `xxx.ns.cloudflare.com`).
-2. In **GoDaddy**: your domain -> **Nameservers** -> **Change** -> **Enter my
-   own nameservers** -> paste the two Cloudflare ones -> Save. (Propagates in a
-   few minutes to a few hours; Cloudflare emails you when the site is "Active".)
-3. On the i3, download `cloudflared` (rename to `cloudflared.exe`, put in
+1. Create a free `cloudflare.com` account -> **Add a site** -> `tryasva.com`
+   -> Free plan. Cloudflare **scans your existing DNS** - let it import
+   everything (this preserves the Vercel records). It gives you **two
+   nameservers** (like `xxx.ns.cloudflare.com`).
+2. In **GoDaddy**: domain -> **Nameservers** -> **Change** -> **Enter my own** ->
+   paste the two Cloudflare ones -> Save. Cloudflare emails you when "Active".
+3. In **Cloudflare -> DNS**, confirm the landing still points to Vercel (if the
+   import missed it, add: apex `tryasva.com` **A** -> `76.76.21.21`, and `www`
+   **CNAME** -> `cname.vercel-dns.com`, both DNS-only / grey cloud). Open
+   `tryasva.com` to confirm the landing still loads. THEN continue - the tunnel
+   only adds `api.` and `link.`, it never touches the root.
+4. On the i3, download `cloudflared` (rename to `cloudflared.exe`, put in
    `C:\ASVA`), then:
    ```powershell
    .\cloudflared.exe tunnel login
@@ -76,7 +87,7 @@ the registrar, Cloudflare runs the DNS + tunnel, all free).
    .\cloudflared.exe tunnel route dns asva api.tryasva.com
    .\cloudflared.exe tunnel route dns asva link.tryasva.com
    ```
-4. Create `C:\Users\<you>\.cloudflared\config.yml`:
+5. Create `C:\Users\<you>\.cloudflared\config.yml`:
    ```yaml
    tunnel: asva
    credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
