@@ -59,19 +59,26 @@ def _walk():
 
 
 def _shop_env() -> str:
-    """The shop .env: same as the working .env but with PLATFORM_WA_URL blanked
-    (no bot on the shop laptop -> digest/alerts fall back to the shop number)."""
+    """The shop .env: same as the working .env but with a couple of keys forced
+    blank on a distributed shop laptop:
+      - PLATFORM_WA_URL: no bot here -> digest/alerts fall back to the shop number
+      - ADMIN_API_KEY: the Command Center (/ops) reads the SHARED database, so it
+        must NEVER be enabled on a shop laptop - only on the operator's own
+        machine. Blanking it here keeps /ops OFF on every shipped shop install."""
+    blanks = ("PLATFORM_WA_URL", "ADMIN_API_KEY")
     src = os.path.join(ROOT, ".env")
     out = []
-    seen = False
+    seen = set()
     for line in open(src, encoding="utf-8").read().splitlines():
-        if line.strip().startswith("PLATFORM_WA_URL"):
-            out.append("PLATFORM_WA_URL=")
-            seen = True
+        key = line.strip().split("=", 1)[0].strip()
+        if key in blanks:
+            out.append(f"{key}=")
+            seen.add(key)
         else:
             out.append(line)
-    if not seen:
-        out.append("PLATFORM_WA_URL=")
+    for k in blanks:
+        if k not in seen:
+            out.append(f"{k}=")
     return "\n".join(out) + "\n"
 
 
