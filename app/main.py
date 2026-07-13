@@ -13,7 +13,7 @@ from fastapi import FastAPI
 
 from app import scheduler
 from app.config import settings
-from app.routers import admin, bills, businesses, clients, eod, health, tally, webhooks
+from app.routers import admin, bills, businesses, clients, eod, health, license, tally, webhooks
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +53,7 @@ app.include_router(tally.router)          # already has prefix="/tally"
 app.include_router(webhooks.router)       # already has prefix="/webhooks"
 app.include_router(eod.router, prefix="/eod")
 app.include_router(admin.router)              # /admin tick-box page (LAN)
+app.include_router(license.router)            # /license/heartbeat - server-authoritative subscription
 
 
 @app.get("/")
