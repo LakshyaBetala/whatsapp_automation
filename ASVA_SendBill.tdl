@@ -46,13 +46,23 @@
 ;;  or breaks another add-on. The only real clash risk between add-ons is two
 ;;  of them using the SAME definition name, so every name below is prefixed
 ;;  "ASVAWA..." (per Tally's own best practice) to keep it unique.
+;;  In TallyPrime a BUTTON's "Key" must be the NAME of a [Key] definition -
+;;  NOT a raw combo. Putting "Key: Ctrl + Shift + W" straight in the button is
+;;  what triggers "Improper use as a Button". So we define a [Key] that holds
+;;  the real shortcut + action, and the button just points at that key.
 [#Form: Voucher]
     Add : Button : ASVAWABillButton
+    Add : Key    : ASVAWABillKey
 
-[Button: ASVAWABillButton]
-    Title  : "Send to ASVA"
+;; The KEY carries the real shortcut and the action.
+[Key: ASVAWABillKey]
     Key    : Ctrl + Shift + W
     Action : Call : ASVAWAExportBillFunc
+
+;; The BUTTON is the on-screen control; clicking it fires the same key/action.
+[Button: ASVAWABillButton]
+    Key    : ASVAWABillKey
+    Title  : "Send to ASVA"
 
 
 ;; --- OPTIONAL: export automatically every time you SAVE a sales voucher,
