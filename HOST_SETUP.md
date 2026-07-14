@@ -1,90 +1,71 @@
-# ASVA HOST SETUP (the always-on i3 laptop = server + bot)
+# ASVA SERVER SETUP - the complete guide (i3 host + tryasva.com)
 
-This laptop is the **server + bot**. It runs the backend, the scheduler
-(decides WHEN to remind), the Command Center, and the **bot** WhatsApp (your
-number, for owner digests/alerts/commands). It never messages customers.
+This sets up ONE always-on laptop (your i3) as the whole ASVA server: the public
+landing page, the backend + scheduler, the Command Center health dashboard, and
+the owner bot. Then each shop (starting with father's) runs a thin app that reads
+Tally and sends from the shop's own WhatsApp.
 
-The **shop's** WhatsApp is scanned on the **shop's own laptop** by the
-shopkeeper, and customer messages go out from the shop's number. The server
-decides the timing and queues each message; the shop laptop delivers it when it
-is on. So the customer only ever hears from the shop, and the timing is reliable
-because the i3 is always on.
-
-Your i3 has a broken screen, so this runs **headless** - you do everything from
-your main laptop. One-time setup, then it stays on.
+Everything lives on the i3 and is reached through your domain `tryasva.com` over a
+free Cloudflare Tunnel. Your i3 has a broken screen, so this runs headless, you
+do it all from your main laptop.
 
 ---
 
-## Who runs what
+## The map (one i3, one domain)
 
-| Machine | Runs | WhatsApp scanned by |
+| URL | Serves | Who reaches it |
 |---|---|---|
-| **i3 host** (always on) | backend + scheduler + Command Center + **bot** WhatsApp | **you** (your number), on the i3 |
-| **Shop laptop** (father's) | Tally agent + **shop** WhatsApp + delivers queued sends | **the shopkeeper** (their number), on their laptop |
+| `tryasva.com` , `www.tryasva.com` | the ASVA **landing page** + the API | public |
+| `tryasva.com/ops` | the **Command Center** (health + subscriptions) | you only (locked) |
+| `tryasva.com/admin?token=...` | a shop owner's own dashboard | that shop owner |
+| `link.tryasva.com` | the **bot** WhatsApp QR | you (scan once) |
 
-## The domain map (tryasva.com does everything)
-
-| URL | What |
-|---|---|
-| `tryasva.com` / `www` | landing page (later, Cloudflare Pages) |
-| `api.tryasva.com` | the backend + `/ops` Command Center (via Cloudflare Tunnel) |
-| `link.tryasva.com` | the **bot** QR, so you scan the bot from your phone |
-
-The shop's QR is NOT on the internet - it stays at `localhost:3001/qr` on the
-shop's laptop and the shopkeeper scans it there.
+All of that is one backend on the i3 (port 8000) plus the bot WhatsApp (port 3002).
+The shop's own WhatsApp is NOT here, it stays on the shop's laptop.
 
 ---
 
-## 0. Control the headless i3 from your main laptop
+## PART A - the i3 host (do this today)
 
-1. On the i3, install **Chrome Remote Desktop**
-   (`remotedesktop.google.com/access` -> "Set up remote access"), sign in with
-   your Google account, set a PIN. From your main laptop, open the same page and
-   connect. You now see the i3 in a browser tab.
+### A0. Reach the headless i3 from your main laptop
+1. On the i3, install **Chrome Remote Desktop** (`remotedesktop.google.com/access`
+   -> "Set up remote access"), sign in, set a PIN. Connect to it from your main
+   laptop's browser. Everything below is done through that.
 2. Auto-login after a power cut: `Win+R` -> `netplwiz` -> untick "Users must
    enter a user name and password".
 
-## 1. Put ASVA on the host
+### A1. Install ASVA
+1. Unzip **`ASVA_server.zip`** to `C:\ASVA`.
+2. Backend (once): `python -m venv .venv ; .\.venv\Scripts\Activate.ps1 ; pip install -r requirements.txt`
+3. WhatsApp service (once): `cd wa_service ; npm install ; cd ..`
+4. Open `.env` and fill two things (the rest is already set):
+   - `OPERATOR_UPI_ID=yourvpa@bank` - your UPI, so renewal reminders carry it.
+   - Email alerts: `ALERT_EMAIL_TO=you@gmail.com`, `ALERT_EMAIL_FROM=you@gmail.com`,
+     `SMTP_HOST=smtp.gmail.com`, `SMTP_USER=you@gmail.com`,
+     `SMTP_PASS=<Gmail App password>` (make one at myaccount.google.com ->
+     Security -> App passwords). Blank = alerts still show in /ops, just not mailed.
+   - `PUBLIC_BASE_URL=https://tryasva.com` and `ADMIN_API_KEY=...` are already set.
 
-1. Unzip `ASVA_server.zip` to `C:\ASVA`.
-2. Backend once: `python -m venv .venv ; .\.venv\Scripts\Activate.ps1 ; pip install -r requirements.txt`
-3. WhatsApp once: `cd wa_service ; npm install ; cd ..`
-4. `.env` is already set (Command Center key, `api.tryasva.com`, scheduler ON,
-   `SEND_VIA_OUTBOX=true`, bot on `:3002`, monitor ON). Fill in two things:
-   - `OPERATOR_UPI_ID=yourvpa@bank` so renewal reminders carry your UPI.
-   - Email alerts (so a drop mails you): `ALERT_EMAIL_TO=you@gmail.com`,
-     `ALERT_EMAIL_FROM=you@gmail.com`, `SMTP_HOST=smtp.gmail.com`,
-     `SMTP_USER=you@gmail.com`, `SMTP_PASS=<Gmail APP password>` (make one at
-     myaccount.google.com -> Security -> App passwords; not your real password).
-     Leave blank to skip email - alerts still show in the Health tab.
+### A2. Never sleep
+Right-click **`KEEP_AWAKE.bat`** -> Run as administrator.
 
-## 2. Never let it sleep
+### A3. Move tryasva.com to Cloudflare (off Vercel) + open the tunnel
+The domain is at GoDaddy and the old page is on Vercel. We move DNS to Cloudflare
+and point the whole domain at the i3. The old Vercel page simply stops receiving
+traffic (you can delete that Vercel project later, it is not needed).
 
-Right-click `KEEP_AWAKE.bat` -> **Run as administrator**.
-
-## 3. Move tryasva.com DNS to Cloudflare (keep the Vercel landing) + tunnel
-
-The **root** tryasva.com is a landing page on **Vercel**. We keep that working
-and only add two subdomains for the i3. Cloudflare runs the DNS; GoDaddy stays
-the registrar; Vercel keeps serving the landing.
-
-1. Create a free `cloudflare.com` account -> **Add a site** -> `tryasva.com`
-   -> Free plan. Cloudflare **scans your existing DNS** - let it import
-   everything (this preserves the Vercel records). It gives you **two
-   nameservers** (like `xxx.ns.cloudflare.com`).
+1. Create a free `cloudflare.com` account -> **Add a site** -> `tryasva.com` ->
+   Free plan. Let it import existing records. It gives you **two nameservers**.
 2. In **GoDaddy**: domain -> **Nameservers** -> **Change** -> **Enter my own** ->
-   paste the two Cloudflare ones -> Save. Cloudflare emails you when "Active".
-3. In **Cloudflare -> DNS**, confirm the landing still points to Vercel (if the
-   import missed it, add: apex `tryasva.com` **A** -> `76.76.21.21`, and `www`
-   **CNAME** -> `cname.vercel-dns.com`, both DNS-only / grey cloud). Open
-   `tryasva.com` to confirm the landing still loads. THEN continue - the tunnel
-   only adds `api.` and `link.`, it never touches the root.
-4. On the i3, download `cloudflared` (rename to `cloudflared.exe`, put in
-   `C:\ASVA`), then:
+   paste the two Cloudflare ones -> Save. Wait for Cloudflare to say "Active".
+3. In **Cloudflare -> DNS**, DELETE any old Vercel records for `@` and `www`
+   (A record to 76.76.21.21, or CNAME to vercel-dns) - the tunnel will own these.
+4. On the i3, download `cloudflared` (rename to `cloudflared.exe`, put in `C:\ASVA`):
    ```powershell
    .\cloudflared.exe tunnel login
    .\cloudflared.exe tunnel create asva
-   .\cloudflared.exe tunnel route dns asva api.tryasva.com
+   .\cloudflared.exe tunnel route dns asva tryasva.com
+   .\cloudflared.exe tunnel route dns asva www.tryasva.com
    .\cloudflared.exe tunnel route dns asva link.tryasva.com
    ```
 5. Create `C:\Users\<you>\.cloudflared\config.yml`:
@@ -92,72 +73,79 @@ the registrar; Vercel keeps serving the landing.
    tunnel: asva
    credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
    ingress:
-     - hostname: api.tryasva.com
+     - hostname: tryasva.com
+       service: http://localhost:8000
+     - hostname: www.tryasva.com
        service: http://localhost:8000
      - hostname: link.tryasva.com
        service: http://localhost:3002
      - service: http_status:404
    ```
 
-## 4. Lock it down (so only YOU can reach the Command Center)
+### A4. Lock the Command Center to you (Cloudflare Access, free)
+So only you can open the health dashboard, even with the URL:
+1. Cloudflare -> **Zero Trust** -> **Access** -> **Applications** -> Add ->
+   Self-hosted. Domain `tryasva.com`, **path `/ops`**.
+2. Policy: **Allow**, rule **Emails** = your Google email. Save.
+Now `tryasva.com/ops` asks for your Cloudflare login first, then the admin key in
+the URL. The landing page (`/`) and the agent endpoints stay public, so shops
+still work; only `/ops` is gated.
 
-Owning the domain means no one else can use `tryasva.com`. To stop anyone
-reaching your control panel, add **Cloudflare Access** (free, up to 50 users):
-
-1. Cloudflare dashboard -> **Zero Trust** -> **Access** -> **Applications** ->
-   **Add** -> Self-hosted.
-2. Application domain: `api.tryasva.com`, path `/ops`. Add a second app for
-   path `/license`.
-3. Policy: **Allow**, rule **Emails** = your Google email (add trusted teammate
-   emails later). Save.
-
-Now `api.tryasva.com/ops` first asks for a Cloudflare login and only lets your
-email through - even before the admin key. Two locks: Cloudflare Access (who can
-reach it) + the admin key (what acts). The shop agents hit `/tally/*` and
-`/license/heartbeat`, which stay open but require a valid **agent token**, so a
-stranger with the URL still cannot do anything.
-
-## 5. Start + link the bot
-
+### A5. Start + link the bot
 - Double-click **`HOST_START.bat`** -> backend (8000) + bot WhatsApp (3002).
 - Double-click **`TUNNEL.bat`**.
-- Scan the **bot** once: from your phone open `https://link.tryasva.com/qr` and
-  scan with **your** WhatsApp. This is the only QR you ever scan.
+- From your phone open `https://link.tryasva.com/qr` and scan with **your**
+  WhatsApp. That is the only QR you ever scan.
 
-## 6. Autostart on boot
-
+### A6. Autostart on boot
 On the i3: `Win+R` -> `shell:startup` -> put shortcuts to `HOST_START.bat` and
 `TUNNEL.bat` there. With auto-login + Keep Awake, a reboot self-heals.
 
-## 7. Your control panel
+### A7. Check it
+- `https://tryasva.com` -> the ASVA landing page loads (public).
+- `https://tryasva.com/ops` -> Cloudflare login (your email) -> Command Center,
+  Health tab. Bookmark `https://tryasva.com/ops?key=YOUR_ADMIN_API_KEY`.
+- `https://link.tryasva.com/qr` -> "connected".
 
-`https://api.tryasva.com/ops` (Cloudflare asks your email, then the key is in
-the URL you bookmark). See every shop: online/offline, plan, expiry, messages,
-version, failed sends. **+ Add business**, **Renew**, **Suspend**, change plan.
+---
+
+## PART B - father's shop (do this tomorrow)
+
+### B1. Create the shop in the Command Center
+Open `tryasva.com/ops` -> **+ Add business** -> shop name, owner, the shop's
+WhatsApp number, plan, months paid. It shows a licence key + agent token + a ready
+`config.json`. Copy it.
+
+### B2. Set up the shop app
+1. On father's laptop, quit the old standalone ASVA.
+2. Unzip **`ASVA_shop.zip`** to `C:\ASVA`.
+3. Paste `agent_token` + `business_id` into `tally_agent\config.json`, keep
+   `backend_url` = `https://tryasva.com`, set the Tally `company_name`.
+   (To keep his WhatsApp linked, copy the old `wa_service\.baileys_auth` folder in.)
+4. `SETUP.bat` once, then `START.bat` daily.
+5. Open `localhost:3001/qr` on his laptop and have **father** scan with the
+   **shop's** WhatsApp. That number sends the bills and reminders.
+6. Load the Tally button: copy `ASVA_SendBill.tdl` to `C:\ASVA`, then TallyPrime
+   `F1 -> TDL & Add-On -> F4 -> Load on Startup: Yes`, add the path, restart Tally.
+
+### B3. Confirm
+In `tryasva.com/ops` the shop shows **online** within a minute, its WhatsApp shows
+connected, and a test bill (Send to ASVA in Tally) reaches the customer.
 
 ---
 
-## Onboard the shop (father's laptop)
-
-1. In `/ops` click **+ Add business**: shop name, owner, the shop's WhatsApp
-   number, plan, months paid. It shows a licence key + agent token + a ready
-   `config.json`.
-2. On the shop's laptop: unzip **`ASVA_shop.zip`**, paste the `agent_token` +
-   `business_id` into `tally_agent\config.json` (set `backend_url` to
-   `http://localhost:8000` - the shop runs its own local backend), set the Tally
-   `company_name`, then run `SETUP.bat` once and `START.bat` daily.
-3. On the shop's laptop, open `http://localhost:3001/qr` and have the
-   **shopkeeper** scan with the **shop's** WhatsApp. That number now sends the
-   bills and reminders. It stays linked as long as the shopkeeper opens WhatsApp
-   on their phone within any 14-day window (they use it daily, so it holds).
-
-Access is enforced on the server: every send is checked against the subscription
-before it goes. No pay -> 3-day grace -> sends stop until you Renew.
-
----
+## How the pieces talk (so you know what runs where)
+- The **i3** decides WHEN to remind (scheduler), queues each customer message,
+  serves the landing + Command Center, and runs the owner bot. Always on.
+- The **shop laptop** reads Tally, and delivers the queued messages from the
+  shop's own WhatsApp when it is on. The customer only ever hears the shop.
+- Every send is checked against the subscription on the i3 before it goes. No
+  pay -> 3-day grace -> sends stop until you Renew in `/ops`. The shop cannot
+  bypass this.
+- If anything drops (a shop offline, its WhatsApp down, the bot down, a stuck
+  queue), the watchdog on the i3 emails you within minutes.
 
 ## No domain live yet? (trial in 2 minutes)
-
 On the i3: `.\cloudflared.exe tunnel --url http://localhost:8000` prints a random
 `https://xxxx.trycloudflare.com`. Use it as `/ops` and the shop `backend_url` to
-test; it changes each restart, so switch to `api.tryasva.com` before a real shop.
+test; switch to `tryasva.com` before real use.
