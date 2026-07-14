@@ -224,6 +224,41 @@ def build_shop() -> None:
              "tally_agent/agent.py", "desktop/main.js", ".env"))
 
 
+def _solo_env() -> str:
+    """The ALL-IN-ONE standalone shop build: ONE laptop does everything and needs
+    NO central server. The scheduler + digest run locally and sends go out
+    directly from the shop's own WhatsApp. This is the pre-server-split behaviour
+    - use it while the i3 host is not set up yet."""
+    return _env_transform({
+        "ENABLE_REMINDER_SWEEP": "true",     # this laptop computes + sends reminders
+        "ENABLE_EOD_DIGEST": "true",         # and the owner digest
+        "ENABLE_SUBSCRIPTION_CHECK": "false",  # no subscription nagging on a solo box
+        "SEND_VIA_OUTBOX": "false",          # send directly from the shop WhatsApp
+        "ENABLE_OUTBOX_SEND": "false",       # nothing is queued -> no drainer needed
+        "ENABLE_MONITOR": "false",           # the health watchdog is operator-side
+        "PLATFORM_WA_URL": "",               # no bot number -> owner msgs via shop WA
+        "ADMIN_API_KEY": "",                 # no Command Center on a shop
+    })
+
+
+def build_standalone() -> None:
+    """ASVA_standalone.zip - the full app on one laptop, server-independent."""
+    out = os.path.join(DESKTOP, "ASVA_standalone.zip")
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for ap, rel in _walk():
+            if rel in BOT_ONLY or rel == "build_zip.py":
+                continue
+            if rel == ".env":
+                z.writestr(".env", _solo_env())
+            else:
+                z.write(ap, rel)
+            n += 1
+    _report("ASVA_standalone.zip", out, n,
+            ("SETUP.bat", "START.bat", "ASVA.vbs", "Asva/Asva.exe",
+             "tally_agent/agent.py", "desktop/main.js", ".env"))
+
+
 def build_bot() -> None:
     out = os.path.join(DESKTOP, "ASVA_bot.zip")
     n = 0
@@ -251,6 +286,8 @@ if __name__ == "__main__":
     which = set(sys.argv[1:]) or {"shop", "bot"}
     if "all" in which:
         which = {"shop", "bot", "server", "client"}
+    if "standalone" in which or "solo" in which:
+        build_standalone()
     if "shop" in which:
         build_shop()
     if "bot" in which:
