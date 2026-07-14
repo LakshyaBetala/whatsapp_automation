@@ -10,6 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from app import scheduler
 from app.config import settings
@@ -57,8 +58,16 @@ app.include_router(license.router)            # /license/heartbeat - server-auth
 app.include_router(ops.router)                # /ops - operator command center (health + subscriptions)
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def root():
+    """Public ASVA landing page (server-rendered). The machine-readable status
+    that used to live here is at /api."""
+    from app.landing import landing_html
+    return HTMLResponse(landing_html())
+
+
+@app.get("/api")
+def api_root():
     return {
         "service": "asva",
         "version": app.version,
