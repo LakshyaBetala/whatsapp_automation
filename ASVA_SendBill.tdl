@@ -70,6 +70,6 @@
     40 : SET : SVPrintFileName  : $$MakeExportName:##SVPrintFileName:##SVExportFormat
     ;; 4. export THIS on-screen voucher as the PDF
     50 : EXPORT REPORT : . : TRUE
-    ;; 5. brief confirmation (delete this line if you enable auto-on-save above
-    ;;    and don't want a popup on every save)
-    60 : MSGBOX : "ASVA" : "Bill saved for ASVA."
+    ;; 5. confirmation showing the EXACT path it saved to (so you can find it).
+    ;;    Delete this line if you enable auto-on-save and don't want a popup.
+    60 : MSGBOX : "ASVA - saved" : "Sent to ASVA. Saved at:" + $$NewLine + ##SVExportLocation + "\" + ##SVPrintFileName
