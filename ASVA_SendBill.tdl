@@ -77,17 +77,16 @@
     ;; Voucher number made file-safe (a "/" in a number would create folders).
     Local Formula : ASVAWAVchNo : $$StringFindAndReplace:$$String:$VoucherNumber:"/":"-"
 
-    ;; 1. destination folder ASVA watches
+    ;; 1. destination folder ASVA watches (SVExportLocation sets the FOLDER).
     10 : SET : SVExportLocation : "C:\ASVA\bills"
     ;; 2. native PDF (no printer needed)
     20 : SET : SVExportFormat   : $$SysName:PDF
-    ;; 3. base file name -> Sales_<number>
+    ;; 3. file name ONLY - "Sales_<number>.pdf". Do NOT prepend the folder here:
+    ;;    SVExportLocation already is the folder, so adding it again made a
+    ;;    doubled path (C:\ASVA\bills\C:\ASVA\bills\...) -> "failed to create file".
     30 : SET : SVPrintFileName  : "Sales_" + @ASVAWAVchNo
-    ;; 4. add the correct extension (.pdf) for the chosen format
     40 : SET : SVPrintFileName  : $$MakeExportName:##SVPrintFileName:##SVExportFormat
-    ;; 5. prepend the folder -> C:\ASVA\bills\Sales_<number>.pdf
-    50 : SET : SVPrintFileName  : ##SVExportLocation + "\" + ##SVPrintFileName
-    ;; 6. export THIS voucher (the current report) as the PDF
-    60 : EXPORT REPORT : . : TRUE
-    ;; 7. friendly confirmation
-    70 : MSGBOX : "ASVA" : "Bill saved for ASVA. It will reach the party on WhatsApp shortly."
+    ;; 4. export THIS voucher (the current report) as the PDF
+    50 : EXPORT REPORT : . : TRUE
+    ;; 5. friendly confirmation
+    60 : MSGBOX : "ASVA" : "Bill saved for ASVA. It will reach the party on WhatsApp shortly."
