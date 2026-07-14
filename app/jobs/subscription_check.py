@@ -4,10 +4,11 @@ Runs each morning. The stored subscription_status column is display-only
 (the live gate in whatsapp.send_message computes from plan_expires_on),
 so a missed run never lets a suspended business keep sending.
 
-Notices (sent to the OWNER via the platform channel):
-  - 5 days before expiry: "renew hone wala hai"
-  - on entering grace:    "expire ho gaya - N din baaki"
-  - on suspension:        "reminders band ho gaye - renew karein"
+Notices (sent to the OWNER via the platform channel, English, with a UPI
+payment line when settings.operator_upi_id is set):
+  - 5 days before expiry: renew soon
+  - on entering grace:    expired, N days left
+  - on suspension:        reminders paused, renew to resume
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ async def run() -> None:
     db = require_db()
     biz_resp = (
         db.table("businesses")
-        .select("id, business_name, subscription_status, plan_expires_on")
+        .select("id, business_name, plan, subscription_status, plan_expires_on")
         .execute()
     )
 
@@ -33,14 +34,16 @@ async def run() -> None:
             stored = biz.get("subscription_status") or "trial"
             live = subs.effective_status(biz.get("plan_expires_on"))
             left = subs.days_left(biz.get("plan_expires_on"))
-            name = biz.get("business_name") or ""
+            name = biz.get("business_name") or "Your shop"
+            pay = subs.renewal_payment_line(biz.get("plan"))
+            tail = ("\n\n" + pay) if pay else ""
 
             # Heads-up 5 days before expiry (fires exactly once - equality)
             if live in ("trial", "active") and left == 5:
                 await whatsapp.notify_owner(
                     biz["id"],
-                    f"{name}: subscription 5 din mein khatam ho raha hai. "
-                    f"Renew karein taaki reminders chalte rahein.")
+                    f"{name}: your ASVA plan ends in 5 days. Renew to keep "
+                    f"reminders and bills running." + tail)
 
             if live == stored or (live == "active" and stored in ("trial", "active")):
                 continue
@@ -51,12 +54,12 @@ async def run() -> None:
                 remaining = subs.GRACE_DAYS + (left or 0)
                 await whatsapp.notify_owner(
                     biz["id"],
-                    f"{name}: subscription expire ho gaya. {remaining} din ke andar renew "
-                    f"nahi kiya to customer reminders band ho jayenge.")
+                    f"{name}: your ASVA plan has expired. Renew within {remaining} "
+                    f"day(s) or customer reminders will stop." + tail)
             elif live == "suspended":
                 await whatsapp.notify_owner(
                     biz["id"],
-                    f"{name}: subscription suspend ho gaya. Bills aur reminders ab NAHI ja "
-                    f"rahe. Renew karte hi sab turant chalu ho jayega.")
+                    f"{name}: your ASVA plan is paused. Bills and reminders are NOT "
+                    f"going out. They resume the moment you renew." + tail)
         except Exception:
             log.exception("Subscription check failed for %s", biz.get("id"))

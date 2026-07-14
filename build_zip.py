@@ -18,7 +18,9 @@ dev/heavy/junk dirs (node_modules, .venv, browser caches, __pycache__, .git).
 """
 from __future__ import annotations
 
+import json
 import os
+import secrets
 import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +41,38 @@ BOT_ONLY = {"ASVA_BOT.bat", ".env.bot", "BOT_SETUP.md"}
 BOT_DIRS = ("app/", "wa_service/", "migrations/")
 BOT_FILES = {"ASVA_BOT.bat", ".env.bot", "requirements.txt", "BOT_SETUP.md", "TEST_GUIDE.md"}
 
+# --- Server-host split (the i3 always-on laptop = server; shop = thin agent) ---
+# The HOST runs everything except reading Tally: backend + scheduler + Command
+# Center + the shop's WhatsApp session. It does NOT need the 54MB agent exe or
+# the Electron app, so we drop those top dirs to stay lean.
+HOST_SKIP_TOP = {"Asva", "tally_agent", "desktop", "dashboard"}
+# Shop / bot / dev launchers that don't belong on the host.
+HOST_SKIP_FILES = {"START.bat", "ASVA.vbs", "DASHBOARD.bat", "AGENT_ONLY.bat",
+                   "SHOP_AGENT_SETUP.md", "build_zip.py"} | BOT_ONLY
+
+# The SHOP CLIENT is the thin agent: read Tally, push to the host. Nothing else.
+CLIENT_DIRS = ("tally_agent/", "Asva/")
+CLIENT_FILES = {"AGENT_ONLY.bat", "SHOP_AGENT_SETUP.md"}
+# The live per-machine configs never travel in a generic build - we ship a
+# clean template instead so no token leaks between shops.
+CLIENT_SKIP = {"tally_agent/config.json", "Asva/config.json"}
+
+# Host env overrides: it sends directly (WhatsApp is here), runs the scheduler,
+# and the Command Center is ON. Set ADMIN_API_KEY to the operator key.
+def _admin_key() -> str:
+    """A stable operator key for the Command Center. Persisted to .admin_key
+    (gitignored) so rebuilding the host zip keeps the same key - the operator
+    bookmarks /ops?key=... once and it keeps working."""
+    p = os.path.join(ROOT, ".admin_key")
+    if os.path.exists(p):
+        k = open(p, encoding="utf-8").read().strip()
+        if k:
+            return k
+    k = secrets.token_urlsafe(24)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(k + "\n")
+    return k
+
 
 def _skip(rel: str) -> bool:
     parts = rel.replace("\\", "/").split("/")
@@ -58,28 +92,119 @@ def _walk():
                 yield ap, rel
 
 
-def _shop_env() -> str:
-    """The shop .env: same as the working .env but with a couple of keys forced
-    blank on a distributed shop laptop:
-      - PLATFORM_WA_URL: no bot here -> digest/alerts fall back to the shop number
-      - ADMIN_API_KEY: the Command Center (/ops) reads the SHARED database, so it
-        must NEVER be enabled on a shop laptop - only on the operator's own
-        machine. Blanking it here keeps /ops OFF on every shipped shop install."""
-    blanks = ("PLATFORM_WA_URL", "ADMIN_API_KEY")
+def _env_transform(overrides: dict, ensure: dict | None = None) -> str:
+    """The working .env with each key in `overrides` forced to the given value,
+    and any key in `ensure` appended (blank/default) only if it is absent -
+    never overwriting a real value the operator already set."""
+    ensure = ensure or {}
     src = os.path.join(ROOT, ".env")
-    out = []
-    seen = set()
+    out, seen = [], set()
     for line in open(src, encoding="utf-8").read().splitlines():
         key = line.strip().split("=", 1)[0].strip()
-        if key in blanks:
-            out.append(f"{key}=")
-            seen.add(key)
-        else:
-            out.append(line)
-    for k in blanks:
+        out.append(f"{key}={overrides[key]}" if key in overrides else line)
+        seen.add(key)
+    for k, v in {**overrides, **ensure}.items():
         if k not in seen:
-            out.append(f"{k}=")
+            out.append(f"{k}={v}")
     return "\n".join(out) + "\n"
+
+
+def _shop_env() -> str:
+    """Shop laptop (e.g. father's): runs the shop's OWN WhatsApp (scanned by the
+    shopkeeper, port 3001) and DELIVERS the host-queued customer sends from that
+    number. The always-on i3 host owns timing (reminders, digest, subscription),
+    so those jobs are OFF here - otherwise both boxes would send. Command Center
+    is OFF (it reads the shared DB; operator machine only)."""
+    return _env_transform({
+        "ENABLE_REMINDER_SWEEP": "false",     # host computes + queues reminders
+        "ENABLE_EOD_DIGEST": "false",         # host bot sends the owner digest
+        "ENABLE_SUBSCRIPTION_CHECK": "false",  # host runs the subscription clock
+        "SEND_VIA_OUTBOX": "false",           # this IS the shop number -> direct
+        "ENABLE_OUTBOX_SEND": "true",         # drain the host's queue from here
+        "PLATFORM_WA_URL": "",                # owner alerts come from the host bot
+        "ADMIN_API_KEY": "",                  # never a Command Center on a shop
+    })
+
+
+def _server_env(admin_key: str) -> str:
+    """i3 host = server + bot. The always-on backend owns timing (reminders,
+    digest, subscription) and the Command Center. Customer sends are QUEUED
+    (send_via_outbox) for the shop to deliver from its own number; the host has
+    no shop number, so it does NOT drain the queue. Owner-facing messages (digest,
+    alerts, bot replies) go via the BOT WhatsApp on :3002 (you scan that one)."""
+    return _env_transform({
+        "ADMIN_API_KEY": admin_key,
+        "PUBLIC_BASE_URL": "https://api.tryasva.com",
+        "PLATFORM_WA_URL": "http://localhost:3002",  # the bot number (owner-facing)
+        "ENABLE_REMINDER_SWEEP": "true",
+        "ENABLE_EOD_DIGEST": "true",
+        "ENABLE_SUBSCRIPTION_CHECK": "true",
+        "SEND_VIA_OUTBOX": "true",            # queue customer sends for the shop
+        "ENABLE_OUTBOX_SEND": "false",        # no shop number here to deliver
+    }, ensure={"OPERATOR_UPI_ID": "", "OPERATOR_UPI_NAME": "ASVA",
+               # Health-center email alerts (Gmail app password). Blank = alerts
+               # still show in /ops, just not emailed.
+               "ALERT_EMAIL_TO": "", "ALERT_EMAIL_FROM": "",
+               "SMTP_HOST": "", "SMTP_PORT": "587",
+               "SMTP_USER": "", "SMTP_PASS": ""})
+
+
+def _client_config_template() -> str:
+    """A clean config.json for a shop laptop - operator fills the 3 values from
+    the Add Business screen. No real tokens ever ship in a generic build."""
+    return json.dumps({
+        "backend_url": "https://api.tryasva.com",
+        "business_id": "PASTE_FROM_ADD_BUSINESS",
+        "agent_token": "PASTE_FROM_ADD_BUSINESS",
+        "company_name": "YOUR TALLY COMPANY NAME",
+        "tally_host": "localhost",
+        "tally_port": 9000,
+        "watch_interval_seconds": 30,
+        "bill_pdf_dir": "C:\\ASVA\\bills",
+    }, indent=2) + "\n"
+
+
+def build_server() -> None:
+    """The always-on host zip: backend + scheduler + Command Center + shop
+    WhatsApp. Command Center is ENABLED here (operator box, shared DB)."""
+    key = _admin_key()
+    out = os.path.join(DESKTOP, "ASVA_server.zip")
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for ap, rel in _walk():
+            top = rel.split("/", 1)[0]
+            if top in HOST_SKIP_TOP or rel in HOST_SKIP_FILES:
+                continue
+            if rel == ".env":
+                z.writestr(".env", _server_env(key))
+            else:
+                z.write(ap, rel)
+            n += 1
+    _report("ASVA_server.zip", out, n,
+            ("HOST_START.bat", "TUNNEL.bat", "KEEP_AWAKE.bat", "HOST_SETUP.md",
+             "app/main.py", "wa_service/index.js", ".env"))
+    print(f"  Command Center key (also saved to .admin_key): {key}")
+    print(f"  Open after start:  http://localhost:8000/ops?key={key}")
+
+
+def build_shop_client() -> None:
+    """The thin shop zip: Tally agent only, points at the host. No backend,
+    no WhatsApp, no admin key, no database."""
+    out = os.path.join(DESKTOP, "ASVA_shop_client.zip")
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for ap, rel in _walk():
+            if rel in CLIENT_SKIP:
+                continue
+            keep = rel in CLIENT_FILES or any(rel.startswith(d) for d in CLIENT_DIRS)
+            if keep:
+                z.write(ap, rel)
+                n += 1
+        z.writestr("tally_agent/config.json", _client_config_template())
+        n += 1
+    _report("ASVA_shop_client.zip", out, n,
+            ("AGENT_ONLY.bat", "SHOP_AGENT_SETUP.md", "tally_agent/agent.py",
+             "tally_agent/config.json", "Asva/Asva.exe"))
 
 
 def build_shop() -> None:
@@ -95,6 +220,41 @@ def build_shop() -> None:
                 z.write(ap, rel)
             n += 1
     _report("ASVA_shop.zip", out, n,
+            ("SETUP.bat", "START.bat", "ASVA.vbs", "Asva/Asva.exe",
+             "tally_agent/agent.py", "desktop/main.js", ".env"))
+
+
+def _solo_env() -> str:
+    """The ALL-IN-ONE standalone shop build: ONE laptop does everything and needs
+    NO central server. The scheduler + digest run locally and sends go out
+    directly from the shop's own WhatsApp. This is the pre-server-split behaviour
+    - use it while the i3 host is not set up yet."""
+    return _env_transform({
+        "ENABLE_REMINDER_SWEEP": "true",     # this laptop computes + sends reminders
+        "ENABLE_EOD_DIGEST": "true",         # and the owner digest
+        "ENABLE_SUBSCRIPTION_CHECK": "false",  # no subscription nagging on a solo box
+        "SEND_VIA_OUTBOX": "false",          # send directly from the shop WhatsApp
+        "ENABLE_OUTBOX_SEND": "false",       # nothing is queued -> no drainer needed
+        "ENABLE_MONITOR": "false",           # the health watchdog is operator-side
+        "PLATFORM_WA_URL": "",               # no bot number -> owner msgs via shop WA
+        "ADMIN_API_KEY": "",                 # no Command Center on a shop
+    })
+
+
+def build_standalone() -> None:
+    """ASVA_standalone.zip - the full app on one laptop, server-independent."""
+    out = os.path.join(DESKTOP, "ASVA_standalone.zip")
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for ap, rel in _walk():
+            if rel in BOT_ONLY or rel == "build_zip.py":
+                continue
+            if rel == ".env":
+                z.writestr(".env", _solo_env())
+            else:
+                z.write(ap, rel)
+            n += 1
+    _report("ASVA_standalone.zip", out, n,
             ("SETUP.bat", "START.bat", "ASVA.vbs", "Asva/Asva.exe",
              "tally_agent/agent.py", "desktop/main.js", ".env"))
 
@@ -122,5 +282,17 @@ def _report(label: str, path: str, count: int, musts) -> None:
 
 
 if __name__ == "__main__":
-    build_shop()
-    build_bot()
+    import sys
+    which = set(sys.argv[1:]) or {"shop", "bot"}
+    if "all" in which:
+        which = {"shop", "bot", "server", "client"}
+    if "standalone" in which or "solo" in which:
+        build_standalone()
+    if "shop" in which:
+        build_shop()
+    if "bot" in which:
+        build_bot()
+    if "server" in which:
+        build_server()
+    if "client" in which:
+        build_shop_client()

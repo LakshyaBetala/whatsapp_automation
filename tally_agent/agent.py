@@ -257,21 +257,21 @@ def _vouchers_payload(sales: list, receipts: list) -> list:
 
 
 async def run_watch(config: dict):
-    """Live LOCAL mode: poll Tally on this laptop every watch_interval_seconds
-    (default 300 = 5 min). A bill made in Tally reaches the customer's WhatsApp
-    (PDF + message) within one cycle - so a 9:00 bill goes out by ~9:05.
+    """Live LOCAL mode, TALLY-FRIENDLY.
 
-    Each cycle fetches only the last 3 days (light on Tally). Every few cycles
-    it ALSO refreshes the authoritative bill-wise outstanding (accuracy). Every
-    Tally call is made sequentially inside THIS single loop, so Tally (whose
-    HTTP server is single-threaded) never receives concurrent/overlapping
-    requests - the main cause of it wedging.
+    Tally's HTTP server is single-threaded and wedges if polled too often, so we
+    do NOT poll it on a fast timer. Instead we WATCH the PDF pickup folder (a
+    cheap directory listing, zero Tally load) every few seconds. The moment a new
+    bill PDF appears - i.e. the moment 'Send to ASVA' is pressed in Tally - we do
+    ONE Tally read for that bill and send it to the party. So Tally is touched
+    only (a) when a bill is actually sent to ASVA, and (b) on a slow background
+    beat that keeps payments + the 'connected' status fresh.
     """
-    # Fast tick (default 60s) so a dashboard "Reload data" override is picked up
-    # within ~1 min. The light 3-day voucher check runs every tick; the heavy
-    # full-outstanding refresh runs on its own slower cadence (default 300s =
-    # 5 min) OR immediately when the owner presses Reload.
-    interval = int(config.get('watch_interval_seconds', 60) or 60)
+    # Cheap folder check (seconds) - this NEVER touches Tally, so it can be fast.
+    folder_poll = max(3, int(config.get('folder_poll_seconds', 8) or 8))
+    # Slow background Tally read (payments + heartbeat). Kept LONG on purpose so
+    # Tally is never hammered; the folder watch above gives instant bill sending.
+    sync_every = max(60, int(config.get('watch_interval_seconds', 300) or 300))
     outstanding_every = int(config.get('outstanding_every_seconds', 300) or 300)
     company = config['company_name']
     # Make sure the Tally PDF pickup folder exists (the TDL exports bills here).
@@ -281,38 +281,58 @@ async def run_watch(config: dict):
             os.makedirs(pdf_dir, exist_ok=True)
         except Exception as e:
             log_and_print(f"Could not create bill_pdf_dir {pdf_dir}: {e}", is_error=True)
-    log_and_print(f"WATCH MODE (local): tick every {interval}s -> deliver new bills; full "
-                  f"outstanding refresh every {outstanding_every}s or on Reload. Ctrl+C to stop.")
 
+    def _pending_pdfs() -> set:
+        """PDFs waiting in the pickup folder (the /sent subfolder is a directory,
+        so it is skipped). Pure filesystem - no Tally involved."""
+        if not pdf_dir or not os.path.isdir(pdf_dir):
+            return set()
+        try:
+            return {f for f in os.listdir(pdf_dir) if f.lower().endswith('.pdf')}
+        except Exception:
+            return set()
+
+    log_and_print(f"WATCH MODE (local, Tally-friendly): folder checked every {folder_poll}s "
+                  f"-> send the instant a bill PDF appears; background Tally read every "
+                  f"{sync_every}s. Ctrl+C to stop.")
+
+    seen = _pending_pdfs()
+    last_sync = 0.0          # monotonic time of the last Tally read (0 = never)
+    last_outstanding = 0.0
     failures = 0
-    last_outstanding = 0.0   # monotonic time of the last full refresh (0 = never)
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
-        # ── STEP 1 (every tick, FAST): light 3-day voucher check + deliver new
-        # bills + HEARTBEAT. This runs FIRST and on a short Tally timeout so a
-        # wedged/slow Tally on the heavy refresh below can never freeze the tick
-        # or stop the "Tally connected" heartbeat. The backend stamps a sync on
-        # EVERY /tally/sync call (even 0 vouchers), so the dashboard shows
-        # "connected" as long as this loop is alive and reaching Tally.
-        try:
-            new_bills, payments = await _deliver_new_bills(config, company, pdf_dir, stamp)
-            log_and_print(f"[{stamp}] Tally checked (local) - {new_bills} new bill(s) sent, {payments} payment(s).")
-            failures = 0
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            failures += 1
-            log_and_print(f"[{stamp}] Watch cycle failed ({e}) - retry in {interval}s", is_error=True)
-            if failures in (5, 50):  # nudge at ~5min and ~50min of failures
-                log_and_print("Tally or backend unreachable for a while - check they are running.", is_error=True)
+        now_mono = asyncio.get_event_loop().time()
 
-        # ── STEP 2 (on cadence, isolated): heavy bill-wise outstanding refresh.
-        # Wrapped so a failure/timeout here NEVER affects the heartbeat above.
+        current = _pending_pdfs()
+        new_pdf = bool(current - seen)   # a bill was just sent to ASVA
+        due_sync = (last_sync == 0.0) or (now_mono - last_sync >= sync_every)
+
+        # Read Tally + deliver ONLY on a new PDF (button press) or the slow beat.
+        # Never on the fast folder tick, so Tally is never hammered.
+        if new_pdf or due_sync:
+            try:
+                if new_pdf:
+                    log_and_print(f"[{stamp}] New bill PDF detected - sending to the party now.")
+                new_bills, payments = await _deliver_new_bills(config, company, pdf_dir, stamp)
+                if due_sync and not new_pdf:
+                    log_and_print(f"[{stamp}] Tally checked - {new_bills} new bill(s) sent, {payments} payment(s).")
+                last_sync = asyncio.get_event_loop().time()
+                failures = 0
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                failures += 1
+                log_and_print(f"[{stamp}] Send/sync failed ({e}).", is_error=True)
+                if failures in (5, 50):
+                    log_and_print("Tally or backend unreachable for a while - check they are running.", is_error=True)
+            seen = _pending_pdfs()   # delivered PDFs have moved to /sent
+
+        # Heavy bill-wise outstanding refresh on its own slow cadence or on Reload.
         try:
-            now_mono = asyncio.get_event_loop().time()
-            due = (last_outstanding == 0.0) or (now_mono - last_outstanding >= outstanding_every)
-            forced = False if due else await check_pending_refresh(config)
-            if due or forced:
+            due_out = (last_outstanding == 0.0) or (now_mono - last_outstanding >= outstanding_every)
+            forced = False if due_out else await check_pending_refresh(config)
+            if due_out or forced:
                 if forced:
                     log_and_print(f"[{stamp}] Reload pressed - refreshing outstanding now.")
                 await run_apply_outstanding(config)
@@ -321,7 +341,8 @@ async def run_watch(config: dict):
             raise
         except Exception as e:
             log_and_print(f"[{stamp}] Outstanding refresh failed ({e}) - bills/heartbeat unaffected.", is_error=True)
-        await asyncio.sleep(interval)
+
+        await asyncio.sleep(folder_poll)
 
 
 async def _deliver_new_bills(config: dict, company: str, pdf_dir: str, stamp: str) -> tuple[int, int]:

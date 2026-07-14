@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Release version of THIS build. Bump on every shipped zip. The dashboard
     # compares it against the newest row in app_releases (Supabase) and shows
     # an update banner when a newer version exists - Tally-style update notice.
-    app_version: str = "1.4.0"
+    app_version: str = "1.5.0"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # is suspended. Like a paid app: pay -> access continues; lapse -> a short
     # grace, then cut off. Max 3.
     subscription_grace_days: int = 3
+    # Direct-UPI billing: where shops pay you. When set, renewal notices carry
+    # the amount + this UPI id + a tap-to-pay upi:// link, so "pay directly"
+    # feels hands-off. You confirm payment and click Renew in the Command Center.
+    operator_upi_id: str = ""            # e.g. yourname@okhdfc
+    operator_upi_name: str = "ASVA"      # payee name shown in the UPI app
 
     # --- Sending safety ---
     # Max customer reminders per business per day. Backlog drips out over
@@ -83,6 +88,26 @@ class Settings(BaseSettings):
     # alerts, bot replies) stay direct on the bot number.
     send_via_outbox: bool = False       # true ONLY on the bot laptop
     enable_outbox_send: bool = True     # false ONLY on the bot laptop
+
+    # --- Monitoring + email alerts (operator health center) ---
+    # The watchdog job builds a health snapshot every few minutes and emails the
+    # operator when something needs attention (server/bot/shop WhatsApp down,
+    # sends failing, queue backing up). Empty SMTP = alerts are still recorded +
+    # shown in /ops, just not emailed. Gmail: host smtp.gmail.com, port 587, and
+    # an APP PASSWORD (not the account password).
+    enable_monitor: bool = True
+    monitor_interval_min: int = 5          # how often the watchdog runs
+    alert_email_to: str = ""               # where alerts are mailed (you)
+    alert_email_from: str = ""             # usually the same gmail address
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""                    # Gmail APP password
+    # Thresholds for what counts as "needs attention".
+    offline_alert_min: int = 20            # shop agent silent this long = offline
+    wa_down_alert_min: int = 15            # a WhatsApp session down this long
+    outbox_backlog_alert: int = 25         # this many queued+aging = stuck
+    fail_rate_alert_pct: int = 40          # today's failed/attempted above this
 
     # --- AI (optional) ---
     gemini_api_key: str = ""

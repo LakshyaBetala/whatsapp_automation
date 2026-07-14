@@ -41,6 +41,8 @@ class HeartbeatPayload(BaseModel):
     agent_token: str
     machine_id: Optional[str] = None
     agent_version: Optional[str] = None
+    wa_ready: Optional[bool] = None       # shop's own WhatsApp connected? (health)
+    outbox_pending: Optional[int] = None  # queued sends the shop still owes
 
 
 _BIZ_COLS = ("id, business_name, plan, plan_expires_on, license_key, "
@@ -66,11 +68,17 @@ async def heartbeat(payload: HeartbeatPayload):
     # Record liveness for the health monitor (best-effort - never fail the
     # heartbeat over a bookkeeping write). machine_id is set once and only
     # changed if it was empty, so a copied install shows a different id later.
-    update: dict = {"last_seen": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+    now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    update: dict = {"last_seen": now_iso}
     if payload.agent_version:
         update["agent_version"] = payload.agent_version[:40]
     if payload.machine_id and not (biz.get("machine_id") or "").strip():
         update["machine_id"] = payload.machine_id[:120]
+    if payload.wa_ready is not None:
+        update["wa_ready"] = bool(payload.wa_ready)
+        update["wa_checked_at"] = now_iso
+    if payload.outbox_pending is not None:
+        update["outbox_pending"] = max(0, int(payload.outbox_pending))
     try:
         db.table("businesses").update(update).eq("id", biz["id"]).execute()
     except Exception:
@@ -86,6 +94,47 @@ async def status(token: str):
     db = require_db()
     biz = _biz_by_token(db, token)
     return lic.build_heartbeat(db, biz)
+
+
+class CreateBizPayload(BaseModel):
+    admin_key: str
+    owner_name: str
+    whatsapp_number: str
+    business_name: Optional[str] = None
+    plan: str = "starter"
+    months: float = 1                 # first paid cycle length (30-day cycles)
+
+
+@router.post("/create-business")
+async def create_business(payload: CreateBizPayload):
+    """OPS ONLY: onboard a new shop. Creates the business row and mints its
+    agent_token + licence key + first paid cycle, and returns them so the
+    operator can drop the token into the new shop's config. The agent_token is
+    a SECRET shown once here - it is never exposed by any read endpoint."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    try:
+        biz = lic.create_business(
+            db, owner_name=payload.owner_name, whatsapp_number=payload.whatsapp_number,
+            business_name=payload.business_name, plan=payload.plan, months=payload.months)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        log.exception("create_business failed")
+        raise HTTPException(status_code=409,
+                            detail="Could not create - is that WhatsApp number already used?")
+    log.info("Onboarded business %s (%s)", biz.get("id"), biz.get("business_name"))
+    return {
+        "ok": True,
+        "business_id": biz["id"],
+        "business_name": biz.get("business_name") or "",
+        "owner_name": biz.get("owner_name") or "",
+        "whatsapp_number": biz.get("whatsapp_number") or "",
+        "agent_token": biz["agent_token"],       # secret, shown once
+        "license_key": biz["license_key"],
+        "plan": biz["plan"],
+        "plan_expires_on": str(biz.get("plan_expires_on"))[:10],
+    }
 
 
 class RenewPayload(BaseModel):

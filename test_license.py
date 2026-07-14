@@ -115,6 +115,77 @@ def test_renew_no_prior_expiry_from_today():
     assert out == today + _dt.timedelta(days=60)
 
 
+# ── Onboarding (create_business) ──────────────────────────────────────
+class _InsertQ:
+    def __init__(self, sink):
+        self._sink = sink
+        self._row = None
+
+    def insert(self, row):
+        self._row = dict(row)
+        return self
+
+    def execute(self):
+        self._sink.append(self._row)
+        return type("R", (), {"data": [self._row]})()
+
+
+class _InsertDB:
+    def __init__(self):
+        self.inserted = []
+
+    def table(self, name):
+        return _InsertQ(self.inserted)
+
+
+def test_normalize_wa_number():
+    assert lic.normalize_wa_number("9876543210") == "919876543210"
+    assert lic.normalize_wa_number("09876543210") == "919876543210"
+    assert lic.normalize_wa_number("+91 98765 43210") == "919876543210"
+    assert lic.normalize_wa_number("919876543210") == "919876543210"
+
+
+def test_create_business_mints_token_key_expiry():
+    db = _InsertDB()
+    today = _dt.date(2026, 7, 13)
+    biz = lic.create_business(db, owner_name="Papa", business_name="Rishab Trading",
+                              whatsapp_number="98765 43210", plan="pro", months=1, today=today)
+    assert biz["whatsapp_number"] == "919876543210"
+    assert biz["plan"] == "pro"
+    assert biz["business_name"] == "Rishab Trading"
+    assert biz["agent_token"] and len(biz["agent_token"]) >= 20
+    assert biz["license_key"].startswith("ASVA-")
+    assert biz["plan_expires_on"] == (today + _dt.timedelta(days=30)).isoformat()
+    assert biz["onboarding_status"] == "active"
+    assert db.inserted and db.inserted[0]["agent_token"] == biz["agent_token"]
+
+
+def test_create_business_rejects_bad_input():
+    db = _InsertDB()
+    for bad in (lambda: lic.create_business(db, owner_name="x", whatsapp_number="123"),
+                lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", plan="ultra"),
+                lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", months=0)):
+        try:
+            bad()
+            assert False, "should have raised"
+        except ValueError:
+            pass
+    assert db.inserted == []          # nothing written on bad input
+
+
+def test_create_business_endpoint_admin_gate(monkeypatch):
+    import asyncio
+    from app.routers import license as lr
+    from fastapi import HTTPException
+    monkeypatch.setattr(lr.settings, "admin_api_key", "s3cret")
+    try:
+        asyncio.run(lr.create_business(lr.CreateBizPayload(
+            admin_key="wrong", owner_name="x", whatsapp_number="9876543210")))
+        assert False, "should have refused"
+    except HTTPException as e:
+        assert e.status_code == 401
+
+
 def test_renew_endpoint_admin_gate(monkeypatch):
     """/license/renew refuses without the configured admin key."""
     import asyncio

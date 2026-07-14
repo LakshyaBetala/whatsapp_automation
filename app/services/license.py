@@ -28,6 +28,59 @@ def generate_license_key() -> str:
     return "ASVA-" + "-".join(raw[i:i + 4] for i in range(0, 12, 4))
 
 
+def generate_agent_token() -> str:
+    """The per-shop SECRET the thin client uses to authenticate to the server
+    (heartbeat + Tally push). Unlike the licence key, this must stay private -
+    it lives only in the shop's config.json, never in a browser."""
+    return secrets.token_urlsafe(24)
+
+
+def normalize_wa_number(raw: str) -> str:
+    """A 10-digit Indian mobile -> E.164-without-plus (91XXXXXXXXXX), the shape
+    the businesses table stores. Tolerates +, spaces, a leading 0 or 91."""
+    digits = "".join(c for c in str(raw or "") if c.isdigit())
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        digits = "91" + digits
+    return digits
+
+
+def create_business(db, *, owner_name: str, whatsapp_number: str,
+                    business_name: Optional[str] = None, plan: str = "starter",
+                    months: float = 1, today: Optional[_dt.date] = None) -> dict:
+    """Onboard a new shop from the Command Center: insert the business row and
+    mint its agent_token + licence key + first paid cycle. Returns the created
+    row (including the secret agent_token, shown ONCE to the operator so it can
+    be dropped into the new shop's config.json).
+
+    Raises ValueError for bad input; lets a DB unique-violation propagate so the
+    caller can turn a duplicate WhatsApp number into a clean 409."""
+    today = today or _dt.date.today()
+    wa = normalize_wa_number(whatsapp_number)
+    if len(wa) != 12 or not wa.startswith("91"):
+        raise ValueError("WhatsApp number must be a 10-digit Indian mobile.")
+    try:
+        plan_v = Plan(plan).value
+    except ValueError:
+        raise ValueError("Unknown plan. Use starter/growth/pro/max.")
+    if months <= 0 or months > 60:
+        raise ValueError("months must be between 0 and 60.")
+
+    row = {
+        "owner_name": (owner_name or "").strip() or "Owner",
+        "business_name": (business_name or "").strip() or None,
+        "whatsapp_number": wa,
+        "plan": plan_v,
+        "agent_token": generate_agent_token(),
+        "license_key": generate_license_key(),
+        "plan_expires_on": renew_expiry(None, months, today).isoformat(),
+        "onboarding_status": "active",
+    }
+    res = db.table("businesses").insert(row).execute()
+    return res.data[0] if getattr(res, "data", None) else row
+
+
 def ensure_license_key(db, biz: dict) -> str:
     """Return the business's licence key, generating + persisting one if absent.
     Retries on the rare unique-index collision."""

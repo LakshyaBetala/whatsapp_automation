@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Optional
+from urllib.parse import quote
 
 from app.config import settings
+from app.models import PLAN_LABELS, PLAN_LIMITS, Plan
 
 # Days of grace after expiry before suspension. Set once at startup from
 # ADMIN/config; "pay -> keep access, lapse -> short grace, then cut off".
@@ -43,3 +45,28 @@ def days_left(plan_expires_on: Optional[str | date], today: Optional[date] = Non
     today = today or date.today()
     expiry = plan_expires_on if isinstance(plan_expires_on, date) else date.fromisoformat(str(plan_expires_on))
     return (expiry - today).days
+
+
+def _plan_price(plan_value: Optional[str]) -> tuple[Plan, int]:
+    try:
+        plan = Plan(plan_value or "starter")
+    except ValueError:
+        plan = Plan.starter
+    return plan, int(PLAN_LIMITS[plan].get("price", 0))
+
+
+def renewal_payment_line(plan_value: Optional[str]) -> str:
+    """The 'how to pay' block appended to a renewal notice. Empty when no UPI is
+    configured (settings.operator_upi_id), so notices degrade gracefully to a
+    plain 'please renew'. Direct UPI: the owner pays, you confirm + click Renew."""
+    upi = (settings.operator_upi_id or "").strip()
+    if not upi:
+        return ""
+    plan, price = _plan_price(plan_value)
+    label = PLAN_LABELS.get(plan, plan.value.title())
+    name = settings.operator_upi_name or "ASVA"
+    note = f"ASVA {label} renewal"
+    link = f"upi://pay?pa={upi}&pn={quote(name)}&am={price}&cu=INR&tn={quote(note)}"
+    return (f"Pay Rs {price:,} to renew:\n"
+            f"UPI: {upi}\n"
+            f"{link}")
