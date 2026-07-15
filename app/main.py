@@ -10,10 +10,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
 
 from app import scheduler
 from app.config import settings
+from app import site
 from app.routers import (admin, bills, businesses, clients, downloads, eod,
                          health, license, ops, tally, webhooks)
 
@@ -58,14 +58,7 @@ app.include_router(admin.router)              # /admin tick-box page (LAN)
 app.include_router(license.router)            # /license/heartbeat - server-authoritative subscription
 app.include_router(ops.router)                # /ops - operator command center (health + subscriptions)
 app.include_router(downloads.router)          # /download - public software download page
-
-
-@app.get("/", response_class=HTMLResponse)
-def root():
-    """Public ASVA landing page (server-rendered). The machine-readable status
-    that used to live here is at /api."""
-    from app.landing import landing_html
-    return HTMLResponse(landing_html())
+app.include_router(site.router)               # public marketing site: / , /how-it-works, /features, /pricing, /use-cases, sitemap, robots
 
 
 @app.get("/api")
