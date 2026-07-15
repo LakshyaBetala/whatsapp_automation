@@ -159,12 +159,35 @@ LANDING_HTML = """<!doctype html>
   <section id="pricing">
     <div class="kicker">Pricing</div>
     <h2 class="serif">Priced by active debtors</h2>
-    <p class="sub">You pay for the customers ASVA actually chases, not per message. Simple, monthly, direct.</p>
+    <p class="sub">You pay for the customers ASVA actually chases, not per message. Simple, monthly, direct.
+      Every plan sends bills and reminders. Growth and above add the WhatsApp owner assistant.</p>
     <div class="price">
-      <div class="plan"><div class="name">Basic</div><div class="amt">&#8377;699<span>/mo</span></div><p class="who">Up to 300 active debtors</p></div>
-      <div class="plan"><div class="name">Growth</div><div class="amt">&#8377;1,099<span>/mo</span></div><p class="who">Up to 500 active debtors</p></div>
-      <div class="plan best"><div class="tag">MOST POPULAR</div><div class="name">Pro</div><div class="amt">&#8377;1,999<span>/mo</span></div><p class="who">Up to 1,000 active debtors</p></div>
-      <div class="plan"><div class="name">Max</div><div class="amt">&#8377;2,999<span>/mo</span></div><p class="who">Up to 1,300 active debtors</p></div>
+      <div class="plan">
+        <div class="name">Basic</div>
+        <div class="amt">&#8377;699<span>/mo</span></div>
+        <p class="who">Up to 300 active debtors</p>
+        <p class="who">Bills + reminders + digest</p>
+        <p class="who" style="color:#b06a00">No owner assistant</p>
+      </div>
+      <div class="plan best">
+        <div class="tag">MOST POPULAR</div>
+        <div class="name">Growth</div>
+        <div class="amt">&#8377;1,099<span>/mo</span></div>
+        <p class="who">Up to 500 active debtors</p>
+        <p class="who" style="color:#346538">WhatsApp owner assistant</p>
+      </div>
+      <div class="plan">
+        <div class="name">Pro</div>
+        <div class="amt">&#8377;1,999<span>/mo</span></div>
+        <p class="who">Up to 1,000 active debtors</p>
+        <p class="who" style="color:#346538">WhatsApp owner assistant</p>
+      </div>
+      <div class="plan">
+        <div class="name">Custom</div>
+        <div class="amt">Let's talk</div>
+        <p class="who">Larger shops, everything included</p>
+        <a class="who" href="https://wa.me/__WA__?text=Custom%20ASVA%20plan" style="color:#346538">Contact us &rarr;</a>
+      </div>
     </div>
   </section>
 

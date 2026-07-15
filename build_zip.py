@@ -259,6 +259,24 @@ def build_standalone() -> None:
              "tally_agent/agent.py", "desktop/main.js", ".env"))
 
 
+def build_landing() -> None:
+    """ASVA_landing.zip = a single index.html (the marketing site) you can host
+    anywhere (Vercel, Netlify, any static host) at tryasva.com. The i3 also
+    serves this same page at GET /, so hosting it statically is optional."""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, ROOT)
+        from app.landing import landing_html
+        html = landing_html()
+    except Exception as e:  # never block the other builds
+        print(f"  landing skipped: {e}")
+        return
+    out = os.path.join(DESKTOP, "ASVA_landing.zip")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        z.writestr("index.html", html)
+    _report("ASVA_landing.zip", out, 1, ("index.html",))
+
+
 def build_bot() -> None:
     out = os.path.join(DESKTOP, "ASVA_bot.zip")
     n = 0
@@ -285,7 +303,9 @@ if __name__ == "__main__":
     import sys
     which = set(sys.argv[1:]) or {"shop", "bot"}
     if "all" in which:
-        which = {"shop", "bot", "server", "client"}
+        which |= {"shop", "bot", "server", "client", "landing"}
+    if "landing" in which:
+        build_landing()
     if "standalone" in which or "solo" in which:
         build_standalone()
     if "shop" in which:

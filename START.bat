@@ -19,6 +19,13 @@ if "%1"=="watch"   goto run_watch
 REM ---------------- launcher ----------------
 if not exist ".env" goto no_env
 
+echo Checking for updates...
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" updater.py
+) else (
+  python updater.py
+)
+
 echo ================================
 echo   ASVA - starting all services
 echo ================================

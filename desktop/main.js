@@ -3,7 +3,7 @@
 // child processes (replacing START.bat and its cmd windows), and shows the
 // dashboard / QR setup / status in one window with a tray icon.
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -183,7 +183,16 @@ function maybeKickStalledWatcher(backendOk) {
   try { proc.kill(); } catch (e) { /* exit handler respawns it */ }
 }
 
-function startAll() { Object.keys(SPECS).forEach(startService); }
+// Self-update BEFORE starting services, then launch. Blocks up to ~90s on the
+// updater (which no-ops when already current), so a new version is applied on
+// the next open with zero action from the shop. Failure never blocks startup.
+function startAll() {
+  try {
+    const upd = spawnSync(PY, ['updater.py'], { cwd: REPO, timeout: 90000, encoding: 'utf8' });
+    if (upd && upd.stdout) console.log('[update]', upd.stdout.trim());
+  } catch (e) { console.error('updater skipped:', (e && e.message) || e); }
+  Object.keys(SPECS).forEach(startService);
+}
 
 function stopAll() {
   app.isQuitting = true;

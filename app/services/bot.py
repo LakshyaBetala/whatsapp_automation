@@ -22,7 +22,7 @@ from datetime import date
 
 from app.config import settings
 from app.db import require_db
-from app.models import Lang, MessageType, Plan
+from app.models import Lang, MessageType, Plan, plan_has_bot
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
 from app.services.templates import apply_discount, inr
@@ -134,6 +134,12 @@ async def handle(
             )
         log.info("Non-owner %s messaged the bot channel: %s", from_number, text)
         return ""
+
+    # ── Bot assistant is a paid feature (Basic plan does NOT include it) ──
+    if channel == "bot" and is_owner and not plan_has_bot(business.get("plan")):
+        return ("The ASVA assistant is available on the Growth plan and above.\n"
+                "Your bills and reminders keep working. To turn on the assistant "
+                "(LIST, BILL, photo bills, digest), upgrade your plan.")
 
     if is_owner:
         business_id = business["id"]
