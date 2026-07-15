@@ -1,179 +1,237 @@
-# ASVA SERVER SETUP - the complete guide (i3 host + tryasva.com)
+# ASVA - Deploy & Operate Guide
 
-This sets up ONE always-on laptop (your i3) as the whole ASVA server: the public
-landing page, the backend + scheduler, the Command Center health dashboard, and
-the owner bot. Then each shop (starting with father's) runs a thin app that reads
-Tally and sends from the shop's own WhatsApp.
+Everything to take ASVA live and run it day to day. Follow the parts in order the
+first time. After that, the short sections (add a business, ship an update,
+health, subscriptions) are what you come back to.
 
-Everything lives on the i3 and is reached through your domain `tryasva.com` over a
-free Cloudflare Tunnel. Your i3 has a broken screen, so this runs headless, you
-do it all from your main laptop.
+## The map (who runs what)
 
----
+Three machines, two of them yours:
 
-## The map (one i3, one domain)
+| Machine | Runs | WhatsApp | Always on? |
+|---|---|---|---|
+| **i3 host** | backend `:8000` + scheduler + Command Center + landing + the **bot** WhatsApp `:3002` | **9344110272** (ASVA's own number) | yes |
+| **Shop laptop** (your father's) | Tally + a small ASVA app + the **shop** WhatsApp `:3001` | **9444294894** (the shop's own number) | only when the shop is open |
+| **Your laptop** | just a browser to open the Command Center | none | no |
 
-| URL | Serves | Who reaches it |
-|---|---|---|
-| `tryasva.com` , `www.tryasva.com` | the ASVA **landing page** + the API | public |
-| `tryasva.com/ops` | the **Command Center** (health + subscriptions) | you only (locked) |
-| `tryasva.com/admin?token=...` | a shop owner's own dashboard | that shop owner |
-| `link.tryasva.com` | the **bot** WhatsApp QR | you (scan once) |
-
-All of that is one backend on the i3 (port 8000) plus the bot WhatsApp (port 3002).
-The shop's own WhatsApp is NOT here, it stays on the shop's laptop.
+Rules that never change:
+- A **customer** only ever hears from the **shop's own number**. The bot number is for the **owner** only.
+- The **bot** WhatsApp is scanned once on the **i3** (by you). Each **shop** WhatsApp is scanned on **that shop's laptop** (by the shopkeeper). This is why WhatsApp does not keep disconnecting: the number stays on the phone that owns it.
+- The **operator admin key** and the Supabase service key live **only on the i3 and your browser**, never on a shop laptop.
 
 ---
 
-## PART A - the i3 host (do this today)
+## Part A - Host the server on the i3 (do once)
 
-### A0. Reach the headless i3 from your main laptop
-1. On the i3, install **Chrome Remote Desktop** (`remotedesktop.google.com/access`
-   -> "Set up remote access"), sign in, set a PIN. Connect to it from your main
-   laptop's browser. Everything below is done through that.
-2. Auto-login after a power cut: `Win+R` -> `netplwiz` -> untick "Users must
-   enter a user name and password".
+### A1. Get onto the i3
+The i3 has a half-broken screen, so set up remote control once (optional but handy):
+install **Chrome Remote Desktop** on the i3 and on your laptop, sign in with the
+same Google account, and you can drive the i3 from your laptop.
 
-### A1. Install ASVA
-1. Unzip **`ASVA_server.zip`** to `C:\ASVA`.
-2. Backend (once): `python -m venv .venv ; .\.venv\Scripts\Activate.ps1 ; pip install -r requirements.txt`
-3. WhatsApp service (once): `cd wa_service ; npm install ; cd ..`
-4. Open `.env` and fill two things (the rest is already set):
-   - `OPERATOR_UPI_ID=yourvpa@bank` - your UPI, so renewal reminders carry it.
-   - Email alerts: `ALERT_EMAIL_TO=you@gmail.com`, `ALERT_EMAIL_FROM=you@gmail.com`,
-     `SMTP_HOST=smtp.gmail.com`, `SMTP_USER=you@gmail.com`,
-     `SMTP_PASS=<Gmail App password>` (make one at myaccount.google.com ->
-     Security -> App passwords). Blank = alerts still show in /ops, just not mailed.
-   - `PUBLIC_BASE_URL=https://tryasva.com` and `ADMIN_API_KEY=...` are already set.
+### A2. Install and start ASVA
+1. Copy **`ASVA_server.zip`** to the i3 and unzip it to **`C:\ASVA`** (so you have `C:\ASVA\ASVA_HOST.bat`).
+2. Double-click **`ASVA_HOST.bat`**. The first run installs Python and Node dependencies (2 to 3 minutes), then opens two windows and keeps them alive:
+   - **Backend** (port 8000): API, scheduler, Command Center, landing.
+   - **Bot WhatsApp** (port 3002): the owner assistant number.
+3. Leave both windows open. Close only the small launcher window.
 
-### A2. Never sleep
-Right-click **`KEEP_AWAKE.bat`** -> Run as administrator.
+Quick check: on the i3 open `http://localhost:8000/health`. You want `{"status":"ok", ...}`.
 
-### A2b. Publish the shop app for download
-So `tryasva.com/download` can hand out the app:
-1. Make the folder `C:\ASVA\downloads`.
-2. Copy **`ASVA_shop.zip`** (from your Desktop) into `C:\ASVA\downloads`.
-That is it, the website serves it automatically. (You refresh this file on every
-new version, see "Shipping updates" at the bottom.)
+### A3. Never sleep
+Right-click **`KEEP_AWAKE.bat`** -> **Run as administrator**. An always-on server
+must not sleep or the scheduler and WhatsApp stop. Keep the i3 plugged in. The
+screen turning off is fine.
 
-### A3. Move tryasva.com to Cloudflare (off Vercel) + open the tunnel
-The domain is at GoDaddy and the old page is on Vercel. We move DNS to Cloudflare
-and point the whole domain at the i3. The old Vercel page simply stops receiving
-traffic (you can delete that Vercel project later, it is not needed).
+### A4. Publish the downloadable app
+So `tryasva.com/download` and auto-update have something to serve:
+1. Make the folder **`C:\ASVA\downloads`**.
+2. Copy **`ASVA_shop.zip`** into it. Whenever you ship an update (Part G), you replace this file.
 
-1. Create a free `cloudflare.com` account -> **Add a site** -> `tryasva.com` ->
-   Free plan. Let it import existing records. It gives you **two nameservers**.
-2. In **GoDaddy**: domain -> **Nameservers** -> **Change** -> **Enter my own** ->
-   paste the two Cloudflare ones -> Save. Wait for Cloudflare to say "Active".
-3. In **Cloudflare -> DNS**, DELETE any old Vercel records for `@` and `www`
-   (A record to 76.76.21.21, or CNAME to vercel-dns) - the tunnel will own these.
-4. On the i3, download `cloudflared` (rename to `cloudflared.exe`, put in `C:\ASVA`):
-   ```powershell
-   .\cloudflared.exe tunnel login
-   .\cloudflared.exe tunnel create asva
-   .\cloudflared.exe tunnel route dns asva tryasva.com
-   .\cloudflared.exe tunnel route dns asva www.tryasva.com
-   .\cloudflared.exe tunnel route dns asva link.tryasva.com
+### A5. Point tryasva.com at the i3 (Cloudflare Tunnel)
+This gives the i3 a public HTTPS address with no port-forwarding. You need your
+Cloudflare and GoDaddy logins for this part. (Say the word and I will walk you
+through each screen live.)
+
+1. **Cloudflare account**: sign up (free) at cloudflare.com, **Add a site** -> `tryasva.com`, pick the Free plan. Cloudflare shows you two nameservers.
+2. **GoDaddy**: in your GoDaddy domain settings, change the nameservers to the two Cloudflare gave you. (Remove the old Vercel A/CNAME records for the landing; the tunnel replaces them.) This can take a few minutes to a few hours.
+3. **Install cloudflared** on the i3 (download the Windows build from Cloudflare).
+4. In a terminal on the i3:
    ```
-5. Create `C:\Users\<you>\.cloudflared\config.yml`:
+   cloudflared tunnel login
+   cloudflared tunnel create asva
+   cloudflared tunnel route dns asva tryasva.com
+   cloudflared tunnel route dns asva link.tryasva.com
+   ```
+5. Create the config file at `C:\Users\<you>\.cloudflared\config.yml`:
    ```yaml
    tunnel: asva
-   credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
+   credentials-file: C:\Users\<you>\.cloudflared\<TUNNEL-ID>.json
    ingress:
      - hostname: tryasva.com
-       service: http://localhost:8000
-     - hostname: www.tryasva.com
        service: http://localhost:8000
      - hostname: link.tryasva.com
        service: http://localhost:3002
      - service: http_status:404
    ```
+   (`<TUNNEL-ID>` is printed by `tunnel create`; the `.json` sits in the same folder.)
+6. Double-click **`TUNNEL.bat`**. It runs the tunnel and reconnects if it drops.
 
-### A4. Lock the Command Center to you (Cloudflare Access, free)
-So only you can open the health dashboard, even with the URL:
-1. Cloudflare -> **Zero Trust** -> **Access** -> **Applications** -> Add ->
-   Self-hosted. Domain `tryasva.com`, **path `/ops`**.
-2. Policy: **Allow**, rule **Emails** = your Google email. Save.
-Now `tryasva.com/ops` asks for your Cloudflare login first, then the admin key in
-the URL. The landing page (`/`) and the agent endpoints stay public, so shops
-still work; only `/ops` is gated.
+Now `https://tryasva.com` shows the landing, and `https://link.tryasva.com/qr`
+is the bot's QR page.
 
-### A5. Start + link the bot
-- Double-click **`HOST_START.bat`** -> backend (8000) + bot WhatsApp (3002).
-- Double-click **`TUNNEL.bat`**.
-- From your phone open `https://link.tryasva.com/qr` and scan with **your**
-  WhatsApp. That is the only QR you ever scan.
+No domain yet and just want to test? Run `cloudflared tunnel --url http://localhost:8000`
+for a temporary URL that changes each restart.
 
-### A6. Autostart on boot
-On the i3: `Win+R` -> `shell:startup` -> put shortcuts to `HOST_START.bat` and
-`TUNNEL.bat` there. With auto-login + Keep Awake, a reboot self-heals.
+### A6. Lock the Command Center
+The Command Center is protected two ways; use both:
+- **Key**: it only opens at `tryasva.com/ops?key=<ADMIN_API_KEY>`. Your key is the
+  `ADMIN_API_KEY` line in `C:\ASVA\.env` (also printed when the zip was built).
+  Bookmark the full URL with the key.
+- **Cloudflare Access** (recommended): in Cloudflare Zero Trust, add an **Access
+  application** for `tryasva.com/ops*` that only allows **almmatix@gmail.com**.
+  Then even the URL is useless to anyone else.
 
-### A7. Check it
-- `https://tryasva.com` -> the ASVA landing page loads (public).
-- `https://tryasva.com/ops` -> Cloudflare login (your email) -> Command Center,
-  Health tab. Bookmark `https://tryasva.com/ops?key=YOUR_ADMIN_API_KEY`.
-- `https://link.tryasva.com/qr` -> "connected".
+### A7. Scan the bot WhatsApp
+Open `https://link.tryasva.com/qr` (or `http://localhost:3002/qr` on the i3) and
+scan it with the phone holding **9344110272**. This links ASVA's own number for
+owner messages: digests, alerts, and the assistant.
 
----
-
-## PART B - father's shop (do this tomorrow)
-
-### B1. Create the shop in the Command Center
-Open `tryasva.com/ops` -> **+ Add business** -> shop name, owner, the shop's
-WhatsApp number, plan, months paid. It shows a licence key + agent token + a ready
-`config.json`. Copy it.
-
-### B2. Set up the shop app
-1. On father's laptop, quit the old standalone ASVA.
-2. Unzip **`ASVA_shop.zip`** to `C:\ASVA`.
-3. Paste `agent_token` + `business_id` into `tally_agent\config.json`, keep
-   `backend_url` = `https://tryasva.com`, set the Tally `company_name`.
-   (To keep his WhatsApp linked, copy the old `wa_service\.baileys_auth` folder in.)
-4. `SETUP.bat` once, then `START.bat` daily.
-5. Open `localhost:3001/qr` on his laptop and have **father** scan with the
-   **shop's** WhatsApp. That number sends the bills and reminders.
-6. Load the Tally button: copy `ASVA_SendBill.tdl` to `C:\ASVA`, then TallyPrime
-   `F1 -> TDL & Add-On -> F4 -> Load on Startup: Yes`, add the path, restart Tally.
-
-### B3. Confirm
-In `tryasva.com/ops` the shop shows **online** within a minute, its WhatsApp shows
-connected, and a test bill (Send to ASVA in Tally) reaches the customer.
+### A8. Start on boot
+So a power cut does not take you offline: press `Win+R`, type `shell:startup`, and
+drop shortcuts to **`ASVA_HOST.bat`** and **`TUNNEL.bat`** into that folder. On
+every boot the server and tunnel come back by themselves.
 
 ---
 
-## How the pieces talk (so you know what runs where)
-- The **i3** decides WHEN to remind (scheduler), queues each customer message,
-  serves the landing + Command Center, and runs the owner bot. Always on.
-- The **shop laptop** reads Tally, and delivers the queued messages from the
-  shop's own WhatsApp when it is on. The customer only ever hears the shop.
-- Every send is checked against the subscription on the i3 before it goes. No
-  pay -> 3-day grace -> sends stop until you Renew in `/ops`. The shop cannot
-  bypass this.
-- If anything drops (a shop offline, its WhatsApp down, the bot down, a stuck
-  queue), the watchdog on the i3 emails you within minutes.
+## Part B - Set up your father's shop laptop
 
-## Shipping updates (version control)
-When there is a new build:
-1. On your main laptop, `python build_zip.py all` (bumps nothing by itself, just
-   rebuilds the zips from the current code).
-2. Copy the new **`ASVA_shop.zip`** over `C:\ASVA\downloads\ASVA_shop.zip` on the i3.
-3. Record the release in the database so shops get nudged:
-   `insert into app_releases (version, mandatory) values ('1.6.0', false);`
-   (set `mandatory=true` to force it).
-4. Re-unzip `ASVA_server.zip` on the i3 if the SERVER code changed, then restart
-   `HOST_START.bat`.
-Each running shop's app checks in every 30 min and shows "update available" when
-the release version is newer, then the owner re-downloads from `tryasva.com/download`.
-The `tryasva.com/download` page always shows the latest version number.
+### B1. Create the business (on your laptop)
+1. Open `https://tryasva.com/ops?key=...` -> **+ Add business**.
+2. Fill shop name (e.g. RISHAB TRADING COMPANY), owner name, the shop's 10-digit
+   WhatsApp number (9444294894), plan, and paid months.
+3. Click **Create business**. Copy the **agent token** and the **config** shown
+   (the token is shown once).
 
-## Adding a business (the easy flow, any time)
-1. `tryasva.com/ops` -> **+ Add business** -> name, owner, WhatsApp number, plan,
-   months. It gives a licence key + agent token + a ready `config.json`.
-2. Tell the shop: download at `tryasva.com/download`, paste the `config.json`,
-   run `SETUP.bat`, scan their WhatsApp. Live in minutes.
-3. Manage them any time from `/ops`: Renew, Suspend, change plan, watch health.
+### B2. Install on his laptop
+1. On the shop laptop open `https://tryasva.com/download` and download **ASVA for Windows**.
+2. Unzip it to **`C:\ASVA`**.
+3. Open **`tally_agent\config.json`**, paste the config from B1, and set
+   **`company_name`** to his exact Tally company name.
 
-## No domain live yet? (trial in 2 minutes)
-On the i3: `.\cloudflared.exe tunnel --url http://localhost:8000` prints a random
-`https://xxxx.trycloudflare.com`. Use it as `/ops` and the shop `backend_url` to
-test; switch to `tryasva.com` before real use.
+### B3. Run it
+1. Double-click **`SETUP.bat`** once (installs dependencies).
+2. Double-click **`START.bat`**. From now on this is the daily launcher; it also
+   auto-updates ASVA before starting (Part G).
+3. Open `http://localhost:3001/qr` and scan with the shop phone (9444294894).
+
+### B4. The Tally "Send to ASVA" button
+So a freshly saved bill in Tally reaches ASVA: install the TDL button following
+**`TALLY_BUTTON_SETUP.md`** (ships in the shop zip). ASVA exports the bill PDF to
+`C:\ASVA\bills`, ASVA picks it up and sends it, then moves it to `bills\sent`.
+
+### B5. Prove it works
+- Raise a small test bill in Tally for a customer who has a WhatsApp number -> that customer receives the bill on WhatsApp from the shop number.
+- Record a receipt against a bill in Tally -> within a sync the bill flips to paid in ASVA (oldest bills first).
+
+---
+
+## Part C - Add a second (or third) business
+
+Exactly Part B, on that shop's laptop, with its own **+ Add business** entry and
+its own WhatsApp scan. Nothing to change on the i3. The bot stays only on the i3;
+every shop uses its own number. Do **not** copy one shop's `config.json` to
+another - each has its own secret agent token.
+
+---
+
+## Part D - The bot (owner assistant)
+
+- Lives only on the i3, on **9344110272**. Owners message it; it never messages customers.
+- Available on **Growth and above**. A Basic-plan owner who messages it is told the assistant is a Growth feature (their bills and reminders keep working).
+- Useful commands an owner can send it: `HELP`, `LIST` (open debtors), `CHECK <party>` (a party's balance), `REMIND <party>` (send that party a reminder now), `BILL <party>`, `PAID`.
+
+---
+
+## Part E - Subscriptions and payments
+
+There are two separate "payments". Do not mix them up.
+
+### E1. Customer payments (money the shop's customers owe the shop)
+Handled automatically. When your father records a **receipt** in Tally, ASVA reads
+it on the next sync and marks that customer's bills paid, oldest first. He never
+updates two places. Tally stays the source of truth. Nothing for you to do.
+
+### E2. Subscription (money the shop owes YOU)
+Direct UPI, you confirm and click Renew:
+1. **Add business** starts a **30-day** cycle.
+2. Near expiry the owner gets a WhatsApp renewal notice with the amount and a
+   tap-to-pay link to your UPI **9344110272@ybl**.
+3. The owner pays you by UPI. You see it land in your own UPI app.
+4. In the Command Center (Subscriptions tab), click **+1 mo** on that shop. The
+   expiry moves forward and, if they were cut off, **sends resume automatically**
+   on the next message (the server recomputes status live).
+5. **Grace**: for 3 days after expiry sends still go and the owner is warned. After
+   that the account is **suspended** and customer sends stop until you renew.
+6. **Suspend** button cuts a shop off immediately (non-payment). **Renew** reverses it.
+7. **Change plan**: the plan dropdown on each row moves the tier without touching the expiry.
+
+---
+
+## Part F - Health monitoring
+
+Open the Command Center **Health** tab:
+- **System strip**: server, database, bot WhatsApp, email alerts - up or down at a glance.
+- **Job chips**: each scheduled job (reminders, digest, subscription check, watchdog) with when it last ran; a stalled job turns red.
+- **Per shop, today**: online/offline, that shop's WhatsApp up/down, and sent / failed / blocked / queued counts.
+- **14-day traffic**: green sent, red failed.
+- **Needs attention**: open alerts, newest first.
+
+It refreshes every 30 seconds. To also get **emailed** the moment something
+critical drops, fill these in `C:\ASVA\.env` on the i3 and restart `ASVA_HOST.bat`
+(Gmail needs an **app password**, not your normal password):
+```
+ALERT_EMAIL_TO=almmatix@gmail.com
+ALERT_EMAIL_FROM=almmatix@gmail.com
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=almmatix@gmail.com
+SMTP_PASS=<gmail app password>
+```
+The watchdog runs every 5 minutes; it opens an alert once, emails you, and resolves
+it when the problem clears, so you are not spammed.
+
+---
+
+## Part G - Shipping an update (auto-updates every shop)
+
+Every shop's `START.bat` runs `updater.py` first: it asks the server if a newer
+version exists and, if so, downloads and applies the new app while keeping that
+shop's `.env`, `config.json`, and WhatsApp login. So to push an update to
+everyone:
+
+1. Make your change and bump `app_version` in `app/config.py`.
+2. Build a fresh shop zip: `python build_zip.py shop`.
+3. On the i3, replace **`C:\ASVA\downloads\ASVA_shop.zip`** with the new one.
+4. Record the release so shops know to update. In Supabase, insert a row into
+   `app_releases` with the new `version` (set `mandatory` true only if it must
+   not be skipped).
+5. Done. Each shop picks it up the next time it opens ASVA. In the Command Center
+   the shop's version flips to the new number, and the **Outdated** count drops.
+
+---
+
+## Part H - Manual checks (verify everything, anytime)
+
+A two-minute round to confirm the whole system is healthy:
+
+- **Landing**: open `https://tryasva.com` -> the site loads.
+- **API**: open `https://tryasva.com/health` -> `{"status":"ok", ...}`.
+- **Command Center**: open `https://tryasva.com/ops?key=...` -> Health tab all green.
+- **Bot**: from an owner's phone, message **9344110272** `HELP` -> it replies.
+- **Shop send**: father raises a test bill -> the customer gets it on WhatsApp.
+- **Payment sync**: record a receipt in Tally -> the bill flips to paid in ASVA.
+- **Subscription**: a shop near expiry shows the renewal notice; clicking **+1 mo** moves its date.
+- **Update**: after Part G, the shop's version updates in the Command Center within a day.
+
+If any check fails, the Health tab (and your email, once SMTP is set) will point
+at which piece is down.

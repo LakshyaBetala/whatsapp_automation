@@ -32,7 +32,26 @@ SKIP_DIRS = {
     ".mypy_cache", ".ruff_cache",
 }
 SKIP_SUFFIX = (".pyc", ".pyo", ".zip", ".log", ".spec", ".bak")
-SKIP_NAMES = {".DS_Store", "Thumbs.db"}
+# .admin_key is the operator's Command Center master key. It is a build-side
+# artifact only (the app reads ADMIN_API_KEY from .env, never this file), so it
+# must NEVER travel in ANY zip - least of all a shop laptop, where it would grant
+# control over every business through the shared database.
+SKIP_NAMES = {".DS_Store", "Thumbs.db", ".admin_key"}
+
+# Never ship on a shop / standalone laptop: host + operator launchers and docs,
+# plus dev/test clutter. Keeps a customer build clean and free of operator tools.
+SHOP_STRIP = {
+    "ASVA_HOST.bat", "HOST_START.bat", "TUNNEL.bat", "KEEP_AWAKE.bat",
+    "HOST_SETUP.md", "GO_LIVE.md", "LOCAL_DEPLOY.md",
+    "CLAUDE.md", "TESTING.md", "TEST_GUIDE.md",
+    "pytest.ini", "railway.json", "Procfile", "onboard.py", "renew.py",
+}
+
+
+def _shop_strip(rel: str) -> bool:
+    if rel in SHOP_STRIP:
+        return True
+    return "/" not in rel and rel.startswith("test_") and rel.endswith(".py")
 
 # Files that belong ONLY to the bot (kept out of the shop zip).
 BOT_ONLY = {"ASVA_BOT.bat", ".env.bot", "BOT_SETUP.md"}
@@ -48,7 +67,8 @@ BOT_FILES = {"ASVA_BOT.bat", ".env.bot", "requirements.txt", "BOT_SETUP.md", "TE
 HOST_SKIP_TOP = {"Asva", "tally_agent", "desktop", "dashboard"}
 # Shop / bot / dev launchers that don't belong on the host.
 HOST_SKIP_FILES = {"START.bat", "ASVA.vbs", "DASHBOARD.bat", "AGENT_ONLY.bat",
-                   "SHOP_AGENT_SETUP.md", "build_zip.py"} | BOT_ONLY
+                   "SHOP_AGENT_SETUP.md", "build_zip.py",
+                   "HOST_START.bat"} | BOT_ONLY  # ASVA_HOST.bat is the one launcher
 
 # The SHOP CLIENT is the thin agent: read Tally, push to the host. Nothing else.
 CLIENT_DIRS = ("tally_agent/", "Asva/")
@@ -183,7 +203,7 @@ def build_server() -> None:
                 z.write(ap, rel)
             n += 1
     _report("ASVA_server.zip", out, n,
-            ("HOST_START.bat", "TUNNEL.bat", "KEEP_AWAKE.bat", "HOST_SETUP.md",
+            ("ASVA_HOST.bat", "TUNNEL.bat", "KEEP_AWAKE.bat", "HOST_SETUP.md",
              "app/main.py", "wa_service/index.js", ".env"))
     print(f"  Command Center key (also saved to .admin_key): {key}")
     print(f"  Open after start:  http://localhost:8000/ops?key={key}")
@@ -214,7 +234,7 @@ def build_shop() -> None:
     n = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for ap, rel in _walk():
-            if rel in BOT_ONLY or rel == "build_zip.py":
+            if rel in BOT_ONLY or rel == "build_zip.py" or _shop_strip(rel):
                 continue
             if rel == ".env":
                 z.writestr(".env", _shop_env())   # transformed
@@ -249,7 +269,7 @@ def build_standalone() -> None:
     n = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for ap, rel in _walk():
-            if rel in BOT_ONLY or rel == "build_zip.py":
+            if rel in BOT_ONLY or rel == "build_zip.py" or _shop_strip(rel):
                 continue
             if rel == ".env":
                 z.writestr(".env", _solo_env())
