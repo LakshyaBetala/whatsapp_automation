@@ -341,8 +341,9 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <h3>Shop created</h3>
   <p class="sub" id="r_name"></p>
   <div class="warnbox">Next: on the shop laptop, download the app at <b>tryasva.com/download</b>,
-    paste the config below into <b>tally_agent\config.json</b>, run <b>SETUP.bat</b>, then scan
-    the shop WhatsApp at localhost:3001/qr. Copy the agent token now - it is shown only once.</div>
+    replace <b>tally_agent\config.json</b> with the complete config below, change
+    <b>company_name</b> to their exact Tally company name, run <b>SETUP.bat</b>, then scan the
+    shop WhatsApp at localhost:3001/qr. Copy the agent token now - it is shown only once.</div>
   <div class="kv"><div class="l">Licence key</div><div class="v"><span id="r_lk"></span><button class="copy" onclick="cp('r_lk')">Copy</button></div></div>
   <div class="kv"><div class="l">Agent token (secret)</div><div class="v"><span id="r_tok"></span><button class="copy" onclick="cp('r_tok')">Copy</button></div></div>
   <div class="kv"><div class="l">Shop config.json (paste on the shop laptop)</div><div class="v"><span id="r_cfg"></span><button class="copy" onclick="cp('r_cfg')">Copy</button></div></div>
@@ -391,7 +392,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 const KEY = new URLSearchParams(location.search).get('key') || '';
 const inr = n => (n||0).toLocaleString('en-IN');
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
-const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Basic',growth:'Growth',pro:'Pro',max:'Max'};
+const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Basic',growth:'Growth',pro:'Pro',max:'Custom'};
 let PUBLIC_URL='';
 
 async function load(){
@@ -477,8 +478,17 @@ async function doAdd(){
   const x=await post('/license/create-business',body);
   btn.disabled=false;btn.textContent='Create business';
   if(!x.ok){document.getElementById('addErr').textContent=x.j.detail||'Could not create.';return;}
-  const cfg=JSON.stringify({backend_url:PUBLIC_URL||'https://YOUR-SERVER-URL',
-    agent_token:x.j.agent_token},null,2);
+  const cfg=JSON.stringify({
+    backend_url:PUBLIC_URL||'https://tryasva.com',
+    business_id:x.j.business_id,
+    agent_token:x.j.agent_token,
+    company_name:'YOUR TALLY COMPANY NAME',
+    tally_host:'localhost',
+    tally_port:9000,
+    watch_interval_seconds:300,
+    folder_poll_seconds:8,
+    bill_pdf_dir:'C:\\ASVA\\bills'
+  },null,2);
   document.getElementById('r_name').textContent=x.j.business_name+' - '+PLABEL[x.j.plan]+', paid till '+x.j.plan_expires_on;
   document.getElementById('r_lk').textContent=x.j.license_key;
   document.getElementById('r_tok').textContent=x.j.agent_token;

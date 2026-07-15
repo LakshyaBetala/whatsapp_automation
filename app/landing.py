@@ -7,7 +7,7 @@ your real details before going live.
 """
 from __future__ import annotations
 
-CONTACT_WA = "919444294894"          # wa.me number for "Talk to us" (change me)
+CONTACT_WA = "919344110272"          # ASVA's own WhatsApp (the bot/company number) - where prospects reach us. NOT a shop's number.
 CONTACT_EMAIL = "hello@tryasva.com"  # change me
 
 LANDING_HTML = """<!doctype html>

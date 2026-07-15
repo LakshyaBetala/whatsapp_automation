@@ -159,7 +159,8 @@ def _client_config_template() -> str:
         "company_name": "YOUR TALLY COMPANY NAME",
         "tally_host": "localhost",
         "tally_port": 9000,
-        "watch_interval_seconds": 30,
+        "watch_interval_seconds": 300,
+        "folder_poll_seconds": 8,
         "bill_pdf_dir": "C:\\ASVA\\bills",
     }, indent=2) + "\n"
 
