@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     admin_api_key: str = ""
     # 30-day billing cycle: one paid "month" = this many days.
     subscription_cycle_days: int = 30
+    # Folder the website serves the downloadable shop app from (put ASVA_shop.zip
+    # here on the host). Relative to where the backend runs (C:\ASVA).
+    downloads_dir: str = "downloads"
     # Days AFTER expiry that sends still go (owner is warned) before the account
     # is suspended. Like a paid app: pay -> access continues; lapse -> a short
     # grace, then cut off. Max 3.

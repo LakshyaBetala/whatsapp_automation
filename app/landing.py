@@ -107,6 +107,7 @@ LANDING_HTML = """<!doctype html>
       <a href="#how">How it works</a>
       <a href="#why">Why ASVA</a>
       <a href="#pricing">Pricing</a>
+      <a href="/download">Download</a>
       <a href="mailto:__EMAIL__">Contact</a>
     </div>
   </nav>

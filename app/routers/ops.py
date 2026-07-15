@@ -340,7 +340,9 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <button class="x" onclick="closeAdd()">&times;</button>
   <h3>Shop created</h3>
   <p class="sub" id="r_name"></p>
-  <div class="warnbox">Copy the agent token now. It is shown only once and is what the shop's app uses to log in to this server.</div>
+  <div class="warnbox">Next: on the shop laptop, download the app at <b>tryasva.com/download</b>,
+    paste the config below into <b>tally_agent\config.json</b>, run <b>SETUP.bat</b>, then scan
+    the shop WhatsApp at localhost:3001/qr. Copy the agent token now - it is shown only once.</div>
   <div class="kv"><div class="l">Licence key</div><div class="v"><span id="r_lk"></span><button class="copy" onclick="cp('r_lk')">Copy</button></div></div>
   <div class="kv"><div class="l">Agent token (secret)</div><div class="v"><span id="r_tok"></span><button class="copy" onclick="cp('r_tok')">Copy</button></div></div>
   <div class="kv"><div class="l">Shop config.json (paste on the shop laptop)</div><div class="v"><span id="r_cfg"></span><button class="copy" onclick="cp('r_cfg')">Copy</button></div></div>

@@ -49,6 +49,13 @@ The shop's own WhatsApp is NOT here, it stays on the shop's laptop.
 ### A2. Never sleep
 Right-click **`KEEP_AWAKE.bat`** -> Run as administrator.
 
+### A2b. Publish the shop app for download
+So `tryasva.com/download` can hand out the app:
+1. Make the folder `C:\ASVA\downloads`.
+2. Copy **`ASVA_shop.zip`** (from your Desktop) into `C:\ASVA\downloads`.
+That is it, the website serves it automatically. (You refresh this file on every
+new version, see "Shipping updates" at the bottom.)
+
 ### A3. Move tryasva.com to Cloudflare (off Vercel) + open the tunnel
 The domain is at GoDaddy and the old page is on Vercel. We move DNS to Cloudflare
 and point the whole domain at the i3. The old Vercel page simply stops receiving
@@ -144,6 +151,27 @@ connected, and a test bill (Send to ASVA in Tally) reaches the customer.
   bypass this.
 - If anything drops (a shop offline, its WhatsApp down, the bot down, a stuck
   queue), the watchdog on the i3 emails you within minutes.
+
+## Shipping updates (version control)
+When there is a new build:
+1. On your main laptop, `python build_zip.py all` (bumps nothing by itself, just
+   rebuilds the zips from the current code).
+2. Copy the new **`ASVA_shop.zip`** over `C:\ASVA\downloads\ASVA_shop.zip` on the i3.
+3. Record the release in the database so shops get nudged:
+   `insert into app_releases (version, mandatory) values ('1.6.0', false);`
+   (set `mandatory=true` to force it).
+4. Re-unzip `ASVA_server.zip` on the i3 if the SERVER code changed, then restart
+   `HOST_START.bat`.
+Each running shop's app checks in every 30 min and shows "update available" when
+the release version is newer, then the owner re-downloads from `tryasva.com/download`.
+The `tryasva.com/download` page always shows the latest version number.
+
+## Adding a business (the easy flow, any time)
+1. `tryasva.com/ops` -> **+ Add business** -> name, owner, WhatsApp number, plan,
+   months. It gives a licence key + agent token + a ready `config.json`.
+2. Tell the shop: download at `tryasva.com/download`, paste the `config.json`,
+   run `SETUP.bat`, scan their WhatsApp. Live in minutes.
+3. Manage them any time from `/ops`: Renew, Suspend, change plan, watch health.
 
 ## No domain live yet? (trial in 2 minutes)
 On the i3: `.\cloudflared.exe tunnel --url http://localhost:8000` prints a random
