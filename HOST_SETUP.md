@@ -27,9 +27,9 @@ Rules that never change:
 
 Both the website and the app use Cloudflare, so do this first.
 
-1. Sign up free at **cloudflare.com** -> **Add a site** -> `tryasva.com` -> Free plan. Cloudflare shows you **two nameservers**.
-2. In **GoDaddy** (where tryasva.com is registered), open the domain's DNS/nameserver settings and change the nameservers to the two Cloudflare gave you. Remove the old Vercel records for the current landing.
-3. Wait for Cloudflare to show the domain as **Active** (a few minutes to a few hours).
+1. Sign up free at **cloudflare.com** -> **Add a site** -> `tryasva.com` -> Free plan. Cloudflare shows you **two nameservers** (like `xxx.ns.cloudflare.com`).
+2. In **Namecheap**: **Account -> Domain List -> Manage** on tryasva.com -> **Nameservers** -> switch to **Custom DNS** -> paste the two Cloudflare nameservers -> save (green check). This hands all DNS to Cloudflare, replacing the old Vercel setup.
+3. Wait for Cloudflare to show the domain as **Active** (a few minutes to a few hours; Cloudflare emails you).
 
 (Say "start Cloudflare" any time and I will walk you through these screens live.)
 
@@ -49,25 +49,16 @@ Right-click **`KEEP_AWAKE.bat`** -> **Run as administrator**. Keep the i3 plugge
 Make **`C:\ASVA\downloads`** and copy **`ASVA_shop.zip`** into it. (You replace this file on every update, Guide "Updates".)
 
 ### 4. Give the app a public address (Cloudflare Tunnel)
-On the i3, install **cloudflared**, then:
-```
-cloudflared tunnel login
-cloudflared tunnel create asva
-cloudflared tunnel route dns asva app.tryasva.com
-cloudflared tunnel route dns asva link.tryasva.com
-```
-Create `C:\Users\<you>\.cloudflared\config.yml`:
-```yaml
-tunnel: asva
-credentials-file: C:\Users\<you>\.cloudflared\<TUNNEL-ID>.json
-ingress:
-  - hostname: app.tryasva.com
-    service: http://localhost:8000
-  - hostname: link.tryasva.com
-    service: http://localhost:3002
-  - service: http_status:404
-```
-Double-click **`TUNNEL.bat`**. Now `https://app.tryasva.com/health` works from anywhere.
+Easiest way (no config files, and it auto-starts on boot as a Windows service):
+1. Cloudflare dashboard -> **Zero Trust** (make a free team name if asked).
+2. **Networks -> Tunnels -> Create a tunnel -> Cloudflared** -> name it `asva` -> Save.
+3. Under **Install connector**, pick **Windows**, copy the command, run it in an **admin PowerShell** on the i3. Wait for the connector to show **Connected**, then **Next**.
+4. **Public Hostnames -> Add a public hostname**, twice:
+   - Subdomain `app`, Domain `tryasva.com`, Type **HTTP**, URL `localhost:8000`
+   - Subdomain `link`, Domain `tryasva.com`, Type **HTTP**, URL `localhost:3002`
+5. Save. `https://app.tryasva.com/health` now works from anywhere, and the tunnel survives reboots (you can skip `TUNNEL.bat` and its startup shortcut).
+
+Advanced alternative (CLI + `TUNNEL.bat`): `cloudflared tunnel login` -> `create asva` -> `route dns asva app.tryasva.com` (and `link.tryasva.com`) -> write the `config.yml` shown in the `TUNNEL.bat` header -> run `TUNNEL.bat`.
 
 ### 5. Lock the Command Center
 - Open it only at `https://app.tryasva.com/ops?key=<ADMIN_API_KEY>`. Your key is the `ADMIN_API_KEY` line in `C:\ASVA\.env`. Bookmark the full URL.
@@ -77,7 +68,8 @@ Double-click **`TUNNEL.bat`**. Now `https://app.tryasva.com/health` works from a
 Open `https://link.tryasva.com/qr` (or `http://localhost:3002/qr` on the i3) and scan with the phone holding **9344110272**.
 
 ### 7. Start on boot
-`Win+R` -> `shell:startup` -> drop shortcuts to **`ASVA_HOST.bat`** and **`TUNNEL.bat`** there.
+`Win+R` -> `shell:startup` -> drop a shortcut to **`ASVA_HOST.bat`** there. (The
+dashboard tunnel from step 4 already runs as a service, so it needs no shortcut.)
 
 ---
 
