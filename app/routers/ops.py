@@ -344,6 +344,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
     replace <b>tally_agent\config.json</b> with the complete config below, change
     <b>company_name</b> to their exact Tally company name, run <b>SETUP.bat</b>, then scan the
     shop WhatsApp at localhost:3001/qr. Copy the agent token now - it is shown only once.</div>
+  <div class="kv"><div class="l">Download link (send to the shop)</div><div class="v"><span id="r_dl"></span><button class="copy" onclick="cp('r_dl')">Copy</button></div></div>
   <div class="kv"><div class="l">Licence key</div><div class="v"><span id="r_lk"></span><button class="copy" onclick="cp('r_lk')">Copy</button></div></div>
   <div class="kv"><div class="l">Agent token (secret)</div><div class="v"><span id="r_tok"></span><button class="copy" onclick="cp('r_tok')">Copy</button></div></div>
   <div class="kv"><div class="l">Shop config.json (paste on the shop laptop)</div><div class="v"><span id="r_cfg"></span><button class="copy" onclick="cp('r_cfg')">Copy</button></div></div>
@@ -490,6 +491,7 @@ async function doAdd(){
     bill_pdf_dir:'C:\\ASVA\\bills'
   },null,2);
   document.getElementById('r_name').textContent=x.j.business_name+' - '+PLABEL[x.j.plan]+', paid till '+x.j.plan_expires_on;
+  document.getElementById('r_dl').textContent=(PUBLIC_URL||'https://app.tryasva.com')+'/download/ASVA_shop.zip?token='+encodeURIComponent(x.j.agent_token);
   document.getElementById('r_lk').textContent=x.j.license_key;
   document.getElementById('r_tok').textContent=x.j.agent_token;
   document.getElementById('r_cfg').textContent=cfg;

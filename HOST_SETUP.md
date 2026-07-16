@@ -108,10 +108,12 @@ To reship the website after a copy change: `python build_zip.py website`, then r
 ### 1. Create the business (on your laptop)
 Open `https://app.tryasva.com/ops?key=...` -> **+ Add business** -> fill shop name,
 owner, the shop's 10-digit WhatsApp (9444294894), plan, months -> **Create business**.
-Copy the **agent token** and the **config** shown (the token is shown once).
+Copy the **Download link**, the **agent token**, and the **config** shown (the
+token is shown once). The download is gated, so the shop needs this personal
+Download link - a random visitor cannot pull the app.
 
 ### 2. Install on his laptop
-1. Open **`tryasva.com`** and click **Download** -> get **ASVA for Windows**.
+1. Open the **Download link** you copied -> get **ASVA for Windows**.
 2. Unzip to **`C:\ASVA`**.
 3. Open **`tally_agent\config.json`**, paste the config from step 1, and set **`company_name`** to his exact Tally company name. (The config already points `backend_url` at `https://app.tryasva.com`.)
 

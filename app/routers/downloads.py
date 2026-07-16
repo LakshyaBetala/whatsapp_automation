@@ -1,18 +1,23 @@
-"""Public software download page + file serving, on the website.
+"""Software download page + gated file serving.
 
-GET /download        -> a simple page: current version + a Download button.
-GET /download/<file> -> the actual zip (only an allow-listed name, no traversal).
+GET /download            -> page: current version + (with a valid token) a button.
+GET /download/<file>?token=  -> the actual zip.
+
+The zip is GATED: the shop build still carries the Supabase key, so only an
+onboarded shop (a valid agent_token) or the operator (the admin key) may pull it.
+You get a ready-to-send download link on the Add Business screen. This gate is
+removed once the shop becomes a credential-free thin client.
 
 Put the built ASVA_shop.zip in settings.downloads_dir (default C:/ASVA/downloads)
 on the host. Version control: the page shows the latest app_releases version, and
-each running shop learns "update available" from its own /license/heartbeat, so a
-shop is nudged to re-download when you ship a new build + insert a new release row.
+each running shop learns "update available" from its own /license/heartbeat.
 """
 from __future__ import annotations
 
 import os
+import secrets
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from app.config import settings
@@ -30,6 +35,25 @@ def _path(real: str) -> str:
     return os.path.join(settings.downloads_dir or "downloads", real)
 
 
+def _token_ok(token: str | None) -> bool:
+    """A download is allowed for the operator (admin key) or any onboarded shop
+    (a real agent_token). Keeps the key-bearing zip off open public access."""
+    if not token:
+        return False
+    admin = (settings.admin_api_key or "").strip()
+    if admin and secrets.compare_digest(token, admin):
+        return True
+    db = get_client()
+    if db is None:
+        return False
+    try:
+        r = (db.table("businesses").select("id")
+             .eq("agent_token", token).limit(1).execute())
+        return bool(r.data)
+    except Exception:
+        return False
+
+
 def _latest_version() -> str:
     db = get_client()
     if db is not None:
@@ -44,10 +68,13 @@ def _latest_version() -> str:
 
 
 @router.get("/download/{name}")
-def download_file(name: str):
+def download_file(name: str, token: str = Query("")):
     real = ALLOWED.get(name)
     if not real:
         raise HTTPException(status_code=404, detail="Unknown download")
+    if not _token_ok(token):
+        raise HTTPException(status_code=403,
+                            detail="This download needs your ASVA link. Ask your ASVA contact for it.")
     p = _path(real)
     if not os.path.exists(p):
         raise HTTPException(status_code=404,
@@ -56,22 +83,29 @@ def download_file(name: str):
 
 
 @router.get("/download", response_class=HTMLResponse)
-def download_page():
+def download_page(token: str = Query("")):
     from app.site import WA_TRY, page_shell
     ver = _latest_version()
     p = _path("ASVA_shop.zip")
     ready = os.path.exists(p)
     size = f"{os.path.getsize(p) / 1e6:.0f} MB" if ready else ""
-    btn = (f'<a class="btn btn-p" href="/download/ASVA_shop.zip">Download ASVA for Windows ({size})</a>'
-           if ready else
-           '<div class="undernote" style="color:#8a5a00">The download is being published. Please check back shortly.</div>')
+    if not _token_ok(token):
+        btn = (f'<a class="btn btn-p" href="{WA_TRY}">Get my download link</a>')
+        note = ('<p class="undernote" style="color:#8a5a00">This download opens with the personal link '
+                'from your ASVA setup. Message us and we will onboard you and send it.</p>')
+    elif ready:
+        btn = (f'<a class="btn btn-p" href="/download/ASVA_shop.zip?token={token}">Download ASVA for Windows ({size})</a>')
+        note = ''
+    else:
+        btn = '<div class="undernote" style="color:#8a5a00">The download is being published. Please check back shortly.</div>'
+        note = ''
     body = f"""<div class="wrap">
  <section class="page-hero reveal">
   <span class="eyebrow">Download &middot; Version {ver}</span>
   <h1>Download ASVA for Windows</h1>
   <p class="lede">The shop app reads your TallyPrime and sends bills and reminders on WhatsApp
     from your own number. Windows 10 or 11, TallyPrime, and your ASVA licence details.</p>
-  <div class="cta-row">{btn}<a class="btn btn-s" href="{WA_TRY}">Get my licence</a></div>
+  <div class="cta-row">{btn}</div>{note}
  </section>
  <section>
   <div class="sechead"><span class="eyebrow">Setup</span><h2>Up and running in a few minutes</h2></div>

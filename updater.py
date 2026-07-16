@@ -75,7 +75,10 @@ def main() -> None:
     print(f"[update] new version {latest} available (you have {have}). Updating now...")
 
     try:
-        with urllib.request.urlopen(f"{base}/download/ASVA_shop.zip", timeout=180) as r:
+        # The download is gated (the zip carries the DB key); authenticate with
+        # this shop's own agent token, same as every other call to the host.
+        dl = f"{base}/download/ASVA_shop.zip?token={urllib.parse.quote(token)}"
+        with urllib.request.urlopen(dl, timeout=180) as r:
             blob = r.read()
         z = zipfile.ZipFile(io.BytesIO(blob))
     except Exception as e:
