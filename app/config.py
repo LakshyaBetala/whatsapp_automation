@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
     public_base_url: str = "http://localhost:8000"
+    # The public marketing site can be hosted separately (free static host) while
+    # this app runs the API/dashboard/downloads. On the i3 app set
+    # SERVE_MARKETING=false so the app domain (app.tryasva.com) redirects
+    # marketing paths to the static site and is not indexed (no duplicate SEO).
+    serve_marketing: bool = True
+    marketing_url: str = "https://tryasva.com"   # where the static website lives
     # Ops secret for subscription/renewal actions (POST /license/renew). The
     # CLIENT never renews itself - only you, the operator, with this key. Set
     # ADMIN_API_KEY in .env; while it stays empty, all ops endpoints refuse.

@@ -30,6 +30,7 @@ SKIP_DIRS = {
     "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache",
     ".wwebjs_auth", ".wwebjs_cache", ".baileys_auth", "dist", "build", ".idea", ".vscode",
     ".mypy_cache", ".ruff_cache",
+    ".claude",   # dev tooling config; can carry a token - never ship it
 }
 SKIP_SUFFIX = (".pyc", ".pyo", ".zip", ".log", ".spec", ".bak")
 # .admin_key is the operator's Command Center master key. It is a build-side
@@ -45,6 +46,7 @@ SHOP_STRIP = {
     "HOST_SETUP.md", "GO_LIVE.md", "LOCAL_DEPLOY.md",
     "CLAUDE.md", "TESTING.md", "TEST_GUIDE.md",
     "pytest.ini", "railway.json", "Procfile", "onboard.py", "renew.py",
+    "DASHBOARD.bat",   # embeds a token; not needed on a shop
 }
 
 
@@ -143,6 +145,8 @@ def _shop_env() -> str:
         "ENABLE_OUTBOX_SEND": "true",         # drain the host's queue from here
         "PLATFORM_WA_URL": "",                # owner alerts come from the host bot
         "ADMIN_API_KEY": "",                  # never a Command Center on a shop
+        "WEBHOOK_VERIFY_TOKEN": "",           # Meta webhook not used by a shop
+        "GEMINI_API_KEY": "",                 # OCR runs host-side, not on a shop
     })
 
 
@@ -154,7 +158,9 @@ def _server_env(admin_key: str) -> str:
     alerts, bot replies) go via the BOT WhatsApp on :3002 (you scan that one)."""
     return _env_transform({
         "ADMIN_API_KEY": admin_key,
-        "PUBLIC_BASE_URL": "https://tryasva.com",     # landing + API + /ops, all on the i3
+        "PUBLIC_BASE_URL": "https://app.tryasva.com",  # the APP (API + /ops + /download) on the i3
+        "SERVE_MARKETING": "false",                    # website is a separate static host
+        "MARKETING_URL": "https://tryasva.com",        # where the static site lives
         "PLATFORM_WA_URL": "http://localhost:3002",  # the bot number (owner-facing)
         "ENABLE_REMINDER_SWEEP": "true",
         "ENABLE_EOD_DIGEST": "true",
@@ -174,7 +180,7 @@ def _client_config_template() -> str:
     """A clean config.json for a shop laptop - operator fills the 3 values from
     the Add Business screen. No real tokens ever ship in a generic build."""
     return json.dumps({
-        "backend_url": "https://tryasva.com",
+        "backend_url": "https://app.tryasva.com",
         "business_id": "PASTE_FROM_ADD_BUSINESS",
         "agent_token": "PASTE_FROM_ADD_BUSINESS",
         "company_name": "YOUR TALLY COMPANY NAME",
@@ -230,17 +236,23 @@ def build_shop_client() -> None:
 
 
 def build_shop() -> None:
+    """The PUBLIC shop download (served at /download). Ships a clean config
+    TEMPLATE - never a real agent token - so it is safe to hand to any shop. The
+    operator pastes each shop's real config from the Add Business screen."""
     out = os.path.join(DESKTOP, "ASVA_shop.zip")
     n = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for ap, rel in _walk():
-            if rel in BOT_ONLY or rel == "build_zip.py" or _shop_strip(rel):
+            if (rel in BOT_ONLY or rel == "build_zip.py" or _shop_strip(rel)
+                    or rel in CLIENT_SKIP):        # never ship a real token/config
                 continue
             if rel == ".env":
                 z.writestr(".env", _shop_env())   # transformed
             else:
                 z.write(ap, rel)
             n += 1
+        z.writestr("tally_agent/config.json", _client_config_template())
+        n += 1
     _report("ASVA_shop.zip", out, n,
             ("SETUP.bat", "START.bat", "ASVA.vbs", "Asva/Asva.exe",
              "tally_agent/agent.py", "desktop/main.js", ".env"))
@@ -299,6 +311,31 @@ def build_landing() -> None:
     _report("ASVA_landing.zip", out, 1, ("index.html",))
 
 
+def build_website() -> None:
+    """ASVA_website.zip = the full multi-page marketing site as static files
+    (index.html + one .html per page + sitemap.xml + robots.txt + llms.txt +
+    vercel.json). Upload to a FREE static host at tryasva.com: Cloudflare Pages
+    (drag-drop, and the domain is already on Cloudflare), Vercel, or Netlify.
+    The Download link points at https://app.tryasva.com (the i3 app)."""
+    import sys as _sys
+    import tempfile
+    _sys.path.insert(0, ROOT)
+    try:
+        from app.site import export_static
+    except Exception as e:
+        print(f"  website skipped: {e}")
+        return
+    tmp = tempfile.mkdtemp(prefix="asva_web_")
+    files = export_static(tmp, base="https://tryasva.com",
+                          app_base="https://app.tryasva.com")
+    out = os.path.join(DESKTOP, "ASVA_website.zip")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for fn in files:
+            z.write(os.path.join(tmp, fn), fn)
+    _report("ASVA_website.zip", out, len(files),
+            ("index.html", "pricing.html", "sitemap.xml", "robots.txt", "llms.txt"))
+
+
 def build_bot() -> None:
     out = os.path.join(DESKTOP, "ASVA_bot.zip")
     n = 0
@@ -325,7 +362,9 @@ if __name__ == "__main__":
     import sys
     which = set(sys.argv[1:]) or {"shop", "bot"}
     if "all" in which:
-        which |= {"shop", "bot", "server", "client", "landing"}
+        which |= {"shop", "bot", "server", "client", "landing", "website"}
+    if "website" in which:
+        build_website()
     if "landing" in which:
         build_landing()
     if "standalone" in which or "solo" in which:

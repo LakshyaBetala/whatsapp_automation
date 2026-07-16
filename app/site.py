@@ -12,14 +12,20 @@ monospace utility face for labels and figures. Edit CONTACT_WA / CONTACT_EMAIL.
 from __future__ import annotations
 
 import json
+import os
 from urllib.parse import quote
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import (HTMLResponse, PlainTextResponse,
+                               RedirectResponse, Response)
 
 from app.config import settings
 
 router = APIRouter(tags=["site"])
+
+# When exporting the static site, _base() is pinned to the public website domain
+# regardless of this app's own PUBLIC_BASE_URL. None = use settings.
+_BASE_OVERRIDE: str | None = None
 
 CONTACT_WA = "919344110272"           # ASVA's own WhatsApp (company/bot number)
 CONTACT_EMAIL = "almmatix@gmail.com"
@@ -39,6 +45,8 @@ KEYWORDS_DEFAULT = (
 
 
 def _base() -> str:
+    if _BASE_OVERRIDE:
+        return _BASE_OVERRIDE.rstrip("/")
     return (settings.public_base_url or "https://tryasva.com").rstrip("/")
 
 
@@ -618,6 +626,57 @@ _AI_AGENTS = [
 ]
 
 
+# Marketing path -> static-site filename (Vercel/Pages clean URLs serve these).
+_STATIC_FILES = {
+    "/": "index.html", "/how-it-works": "how-it-works.html",
+    "/features": "features.html", "/pricing": "pricing.html",
+    "/use-cases": "use-cases.html",
+}
+
+
+def export_static(dest_dir: str, *, base: str = "https://tryasva.com",
+                  app_base: str = "https://app.tryasva.com") -> list[str]:
+    """Render the whole marketing site to static files for a free host (Cloudflare
+    Pages / Vercel / Netlify). Canonical + sitemap use `base` (the website domain);
+    the Download link points at `app_base` (the i3 app), which serves the file."""
+    global _BASE_OVERRIDE
+    os.makedirs(dest_dir, exist_ok=True)
+    written: list[str] = []
+    _BASE_OVERRIDE = base
+    try:
+        for path, fn in _STATIC_FILES.items():
+            html = render(path).replace('href="/download"', f'href="{app_base}/download"')
+            with open(os.path.join(dest_dir, fn), "w", encoding="utf-8") as f:
+                f.write(html)
+            written.append(fn)
+        urls = "".join(
+            f"<url><loc>{base}{p if p != '/' else '/'}</loc>"
+            f"<changefreq>weekly</changefreq><priority>{'1.0' if p == '/' else '0.8'}</priority></url>"
+            for p in _STATIC_FILES)
+        sitemap = ('<?xml version="1.0" encoding="UTF-8"?>'
+                   '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                   f"{urls}</urlset>")
+        robots = (f"# ASVA - {TAGLINE}\n"
+                  f"# Search engines and AI assistants are welcome to read and cite this site.\n\n"
+                  f"User-agent: *\nAllow: /\n\n"
+                  + "\n\n".join(f"User-agent: {a}\nAllow: /" for a in _AI_AGENTS)
+                  + f"\n\nSitemap: {base}/sitemap.xml\n")
+        llms = llms_txt().replace(f"{base}/download", f"{app_base}/download")
+        extra = {
+            "sitemap.xml": sitemap,
+            "robots.txt": robots,
+            "llms.txt": llms,
+            "vercel.json": json.dumps({"cleanUrls": True, "trailingSlash": False}, indent=2),
+        }
+        for fn, content in extra.items():
+            with open(os.path.join(dest_dir, fn), "w", encoding="utf-8") as f:
+                f.write(content)
+            written.append(fn)
+        return written
+    finally:
+        _BASE_OVERRIDE = None
+
+
 def robots_txt() -> str:
     blocks = "\n\n".join(f"User-agent: {a}\nAllow: /" for a in _AI_AGENTS)
     return (f"# ASVA - {TAGLINE}\n"
@@ -669,29 +728,38 @@ Billing is direct by UPI, no setup fee, cancel anytime.
 
 
 # ── routes ──────────────────────────────────────────────────────────────────
+def _serve(path: str):
+    """Serve a marketing page, or (on the i3 app, SERVE_MARKETING=false) redirect
+    to the static website so the app domain is not a duplicate of it."""
+    if settings.serve_marketing:
+        return HTMLResponse(render(path))
+    target = (settings.marketing_url or "https://tryasva.com").rstrip("/") + (path if path != "/" else "/")
+    return RedirectResponse(target, status_code=307)
+
+
 @router.get("/", response_class=HTMLResponse)
 def home_page():
-    return HTMLResponse(render("/"))
+    return _serve("/")
 
 
 @router.get("/how-it-works", response_class=HTMLResponse)
 def how_page():
-    return HTMLResponse(render("/how-it-works"))
+    return _serve("/how-it-works")
 
 
 @router.get("/features", response_class=HTMLResponse)
 def features_page():
-    return HTMLResponse(render("/features"))
+    return _serve("/features")
 
 
 @router.get("/pricing", response_class=HTMLResponse)
 def pricing_page():
-    return HTMLResponse(render("/pricing"))
+    return _serve("/pricing")
 
 
 @router.get("/use-cases", response_class=HTMLResponse)
 def use_cases_page():
-    return HTMLResponse(render("/use-cases"))
+    return _serve("/use-cases")
 
 
 @router.get("/sitemap.xml")
@@ -701,6 +769,9 @@ def sitemap():
 
 @router.get("/robots.txt", response_class=PlainTextResponse)
 def robots():
+    # The app domain must not be indexed - SEO lives on the static website.
+    if not settings.serve_marketing:
+        return PlainTextResponse("User-agent: *\nDisallow: /\n")
     return PlainTextResponse(robots_txt())
 
 

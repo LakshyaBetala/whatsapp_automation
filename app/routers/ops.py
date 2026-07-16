@@ -340,7 +340,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <button class="x" onclick="closeAdd()">&times;</button>
   <h3>Shop created</h3>
   <p class="sub" id="r_name"></p>
-  <div class="warnbox">Next: on the shop laptop, download the app at <b>tryasva.com/download</b>,
+  <div class="warnbox">Next: on the shop laptop, open <b>tryasva.com</b> and click <b>Download</b>,
     replace <b>tally_agent\config.json</b> with the complete config below, change
     <b>company_name</b> to their exact Tally company name, run <b>SETUP.bat</b>, then scan the
     shop WhatsApp at localhost:3001/qr. Copy the agent token now - it is shown only once.</div>
