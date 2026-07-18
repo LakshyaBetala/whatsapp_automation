@@ -82,3 +82,34 @@ def test_parse_ledger_contacts_prefers_mobile_field():
 
 def test_parse_ledger_contacts_bad_xml():
     assert parse_ledger_contacts("<not-closed") == {}
+
+
+def test_two_numbers_back_to_back_takes_first():
+    # A shop typed both numbers with only a slash between them - take the FIRST.
+    assert extract_indian_mobile("9876543210/9123456789") == "919876543210"
+
+
+def test_number_stored_as_ledger_alias():
+    # Some shops type the mobile as the ledger ALIAS (a 2nd NAME under
+    # LANGUAGENAME.LIST), not in the contact field or address.
+    xml = """<ENVELOPE><BODY><DATA><COLLECTION>
+      <LEDGER NAME="ALIAS SHOP">
+        <LANGUAGENAME.LIST><NAME.LIST>
+          <NAME>ALIAS SHOP</NAME><NAME>9812345678</NAME>
+        </NAME.LIST></LANGUAGENAME.LIST>
+      </LEDGER>
+    </COLLECTION></DATA></BODY></ENVELOPE>"""
+    assert parse_ledger_contacts(xml)["ALIAS SHOP"] == "919812345678"
+
+
+def test_contact_field_beats_alias_and_address():
+    xml = """<ENVELOPE><BODY><DATA><COLLECTION>
+      <LEDGER NAME="PRIORITY SHOP">
+        <LANGUAGENAME.LIST><NAME.LIST>
+          <NAME>PRIORITY SHOP</NAME><NAME>9000000002</NAME>
+        </NAME.LIST></LANGUAGENAME.LIST>
+        <LEDGERMOBILE>9000000001</LEDGERMOBILE>
+        <ADDRESS.LIST><ADDRESS>call 9000000003</ADDRESS></ADDRESS.LIST>
+      </LEDGER>
+    </COLLECTION></DATA></BODY></ENVELOPE>"""
+    assert parse_ledger_contacts(xml)["PRIORITY SHOP"] == "919000000001"

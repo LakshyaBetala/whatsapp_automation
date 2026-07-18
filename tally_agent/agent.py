@@ -482,6 +482,12 @@ async def run_apply_outstanding(config: dict):
         } for b in bills],
         "all_parties": debtor_names,
         "ledger_balances": ledger_balances,
+        # Keep customer numbers current in the backend (source of truth = Tally).
+        # Reuses the masters we already fetched above - no extra Tally read.
+        "contacts": [
+            {"name": d["name"], "whatsapp_number": d.get("whatsapp_number")}
+            for d in debtors if d.get("whatsapp_number")
+        ],
     }
     log_and_print(f"Refreshing outstanding from Tally: {len(bills)} bills, "
                   f"{len(ledger_balances)} parties owing (ledger totals authoritative)...")

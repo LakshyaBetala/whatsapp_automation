@@ -253,9 +253,11 @@ async def import_outstanding(payload: TallyImportPayload):
                     phones_added += 1
             else:
                 updates = {}
-                # Backfill phone if Tally has one and we don't (never
-                # overwrite a manually-set number)
-                if phone and not existing.get("whatsapp_number"):
+                # Tally is the source of truth for the customer's number: set it
+                # if we have none, OR if it changed in Tally (the shop corrected
+                # or updated the mobile). Only overwrite when Tally actually has a
+                # number, so a blank Tally field never wipes an existing one.
+                if phone and phone != existing.get("whatsapp_number"):
                     updates["whatsapp_number"] = phone
                     phones_added += 1
                 # Adopt Tally credit terms only while the client still has
@@ -517,12 +519,40 @@ class TallyOpenBill(BaseModel):
     amount: float                     # Tally's NET outstanding for this bill
 
 
+class TallyContact(BaseModel):
+    name: str                              # tally ledger name
+    whatsapp_number: Optional[str] = None  # agent-extracted number (field/alias/address)
+
+
+def _sync_contacts(db, biz: str, contacts: list, clients_by_ledger: dict) -> int:
+    """Keep customer WhatsApp numbers in step with Tally (the source of truth).
+    Runs every refresh but is cheap: only the few clients whose number actually
+    changed get written. Update-only - never creates clients here."""
+    updated = 0
+    for ct in contacts or []:
+        phone = _normalize_phone(ct.whatsapp_number)
+        if not phone:
+            continue
+        c = clients_by_ledger.get(ct.name)
+        if c and phone != c.get("whatsapp_number"):
+            try:
+                db.table("clients").update({"whatsapp_number": phone}).eq("id", c["id"]).execute()
+                c["whatsapp_number"] = phone
+                updated += 1
+            except Exception:
+                log.exception("contact number sync failed for %s", ct.name)
+    if updated:
+        log.info("Synced %d customer WhatsApp number(s) from Tally", updated)
+    return updated
+
+
 class TallyOutstandingsPayload(BaseModel):
     business_id: uuid.UUID
     agent_token: str
     company_name: str
     bills: list[TallyOpenBill]
     all_parties: list[str] = []       # every debtor ledger (to clear fully-paid ones)
+    contacts: list[TallyContact] = [] # {name, whatsapp_number} - keeps numbers current
     # Ledger ClosingBalance per party (Tally's authoritative "what they owe
     # today" total). This is the source of truth for the amount; the bill-wise
     # list above only breaks it into aged bills WHEN it reconciles. Sending
@@ -558,6 +588,9 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
         if c.get("tally_ledger_name")
     }
     clients_by_id = {c["id"]: c for c in clients_by_ledger.values()}
+
+    # Refresh customer numbers from Tally before anything else (cheap, targeted).
+    _sync_contacts(db, biz, payload.contacts, clients_by_ledger)
 
     incoming = defaultdict(list)
     for b in payload.bills:

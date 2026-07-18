@@ -92,7 +92,11 @@ def extract_indian_mobile(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
     cleaned = re.sub(r'[\s\-\(\)\.\/]', '', text)
-    m = re.search(r'(?:\+?91|0)?([6-9]\d{9})(?!\d)', cleaned)
+    # Leftmost match = the FIRST number in reading order. We deliberately do NOT
+    # require a non-digit boundary after it: when two numbers are typed back to
+    # back (e.g. "9876543210/9123456789") that boundary rule would skip to the
+    # LAST one - we want the first.
+    m = re.search(r'(?:\+?91|0)?([6-9]\d{9})', cleaned)
     if not m:
         return None
     return '91' + m.group(1)
@@ -109,19 +113,43 @@ def parse_credit_days(raw: Optional[str]) -> Optional[int]:
     return days if 0 < days <= 365 else None
 
 
+def _alias_texts(ledger: ET.Element):
+    """Alias / mailing-name strings for a ledger. A ledger's aliases are the
+    extra <NAME> entries under <LANGUAGENAME.LIST> (the first NAME is the primary
+    name). Many shops type the customer's mobile as the alias instead of in the
+    contact field, so we must look here too. Also covers MAILINGNAME and any
+    tag literally containing 'ALIAS'."""
+    for lang in ledger.iter('LANGUAGENAME.LIST'):
+        for nm in lang.iter('NAME'):
+            if nm.text:
+                yield nm.text
+    for el in ledger.iter('MAILINGNAME'):
+        if el.text:
+            yield el.text
+    for el in ledger.iter():
+        if 'ALIAS' in el.tag.upper() and el.text:
+            yield el.text
+
+
 def _phone_from_ledger(ledger: ET.Element) -> Optional[str]:
-    """Best mobile for a LEDGER element: dedicated fields first, then
-    address lines (many shops type the mobile into the address)."""
-    candidates = [
-        ledger.findtext('LEDGERMOBILE', ''),
-        ledger.findtext('LEDGERPHONE', ''),
-        ledger.findtext('LEDGERCONTACT', ''),
-    ]
+    """Best mobile for a LEDGER element, in priority order:
+      1. the dedicated contact fields (Mobile / Phone / Contact),
+      2. the ledger ALIAS / mailing name (some shops store the number there),
+      3. the address lines (first number wins).
+    Covers every place a shop might have typed the customer's number."""
+    # 1. dedicated contact fields
+    for tag in ('LEDGERMOBILE', 'LEDGERPHONE', 'LEDGERCONTACT'):
+        phone = extract_indian_mobile(ledger.findtext(tag, ''))
+        if phone:
+            return phone
+    # 2. alias / mailing name
+    for txt in _alias_texts(ledger):
+        phone = extract_indian_mobile(txt)
+        if phone:
+            return phone
+    # 3. address lines - first number in reading order
     for addr in ledger.iter('ADDRESS'):
-        if addr.text:
-            candidates.append(addr.text)
-    for candidate in candidates:
-        phone = extract_indian_mobile(candidate)
+        phone = extract_indian_mobile(addr.text or '')
         if phone:
             return phone
     return None
