@@ -1,0 +1,19 @@
+[Unit]
+Description=ASVA bot WhatsApp (owner assistant, YOUR number, port 3002)
+After=network-online.target asva-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__/wa_service
+Environment=PORT=3002
+Environment=WA_CHANNEL=bot
+Environment=SESSION_ID=bot
+Environment=BACKEND_URL=http://localhost:8000
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=6
+
+[Install]
+WantedBy=multi-user.target

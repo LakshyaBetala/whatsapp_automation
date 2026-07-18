@@ -37,6 +37,13 @@ Both the website and the app use Cloudflare, so do this first.
 
 ## GUIDE 1 - Host the server on the i3
 
+> **On Ubuntu/Linux?** Skip the `.bat` steps below and follow
+> **`deploy/linux/README.md`** instead: unzip `ASVA_server.zip`, run
+> `bash deploy/linux/setup_asva.sh`, and it installs everything as `systemd`
+> services that start on boot and restart themselves (no login, no lock screen,
+> PDF libraries install cleanly). Steps 3-6 here (publish download, tunnel, lock
+> `/ops`, scan bot) are the same. The steps below are the Windows path.
+
 ### 1. Install and start
 1. Copy **`ASVA_server.zip`** to the i3 and unzip to **`C:\ASVA`**.
 2. Double-click **`ASVA_HOST.bat`**. First run installs dependencies (2 to 3 min), then keeps two windows alive: **Backend** (:8000) and **Bot WhatsApp** (:3002).
