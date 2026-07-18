@@ -33,7 +33,26 @@ fi
 echo "    node $(node --version)"
 
 echo "==> [3/6] Python environment..."
-[ -d .venv ] || python3 -m venv .venv
+# pydantic-core (and other wheels) don't build on very new Python yet (3.14+).
+# Pick an interpreter that HAS prebuilt wheels; if the system only has a too-new
+# Python, fetch a supported 3.12 via uv (works on any Ubuntu, no distro packages).
+PYBIN=""
+for c in python3.12 python3.11 python3.13 python3.10; do
+  command -v "$c" >/dev/null 2>&1 && { PYBIN="$c"; break; }
+done
+if [ -z "$PYBIN" ] && python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] <= (3,13) else 1)'; then
+  PYBIN="python3"
+fi
+if [ -z "$PYBIN" ]; then
+  echo "    system Python ($(python3 -V 2>&1)) is too new for the libraries - fetching a supported 3.12 via uv..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  rm -rf .venv
+  uv venv --seed --python 3.12 .venv
+else
+  echo "    using $PYBIN"
+  [ -d .venv ] || "$PYBIN" -m venv .venv
+fi
 ./.venv/bin/pip install --upgrade pip --quiet
 ./.venv/bin/pip install -r requirements.txt --quiet
 
