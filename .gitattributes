@@ -1,0 +1,4 @@
+# Linux host files MUST stay LF - CRLF makes bash/systemd fail on Ubuntu.
+*.sh              text eol=lf
+*.service         text eol=lf
+deploy/linux/**   text eol=lf
