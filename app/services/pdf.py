@@ -59,6 +59,21 @@ async def upload_pdf_base64(bill_id: str, invoice_number: str, pdf_b64: str) -> 
     return db.storage.from_(BUCKET_NAME).get_public_url(file_path)
 
 
+def delete_pdf(bill_id: str, invoice_number: str) -> None:
+    """Store-forward-delete: remove a stored invoice from Storage once it has
+    been delivered, so no customer's bill lingers in the bucket. We keep the
+    exported Tally PDF only long enough to hand it to the send, then drop it.
+    Best-effort - a failed delete never affects the (already-sent) bill."""
+    try:
+        db = require_db()
+        file_path = f"{bill_id or invoice_number}/{invoice_number}.pdf"
+        db.storage.from_(BUCKET_NAME).remove([file_path])
+        log.info("Deleted stored invoice %s after delivery", file_path)
+    except Exception:
+        log.warning("Could not delete stored invoice %s/%s (continuing)",
+                    bill_id, invoice_number)
+
+
 def _format_date(d: date | str | None) -> str:
     """Render a date in Indian DD-MM-YYYY format."""
     if d is None:
