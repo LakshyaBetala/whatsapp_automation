@@ -314,6 +314,15 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .al .age{color:#7c9787;font-size:.78rem;margin-left:auto;flex:none}
  .allclear{color:#46d67e;padding:18px;text-align:center;font-weight:600}
  .sect{font-size:.74rem;color:#8fae9c;text-transform:uppercase;letter-spacing:.06em;margin:6px 2px 8px}
+ /* Pairing code - the hero of onboarding. Big enough to read aloud over a phone. */
+ .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:2.3rem;letter-spacing:.16em;
+   font-weight:700;color:#8ef0b0;background:#0f1a13;border:1px solid #2f8f52;border-radius:14px;
+   padding:18px 10px;text-align:center;margin:12px 0 6px;user-select:all}
+ .codehint{color:#8fae9c;font-size:.82rem;text-align:center;margin-bottom:14px}
+ .steps{background:#17211b;border:1px solid #24332a;border-radius:12px;padding:14px 16px;margin-bottom:14px}
+ .steps ol{margin:0;padding-left:20px} .steps li{margin:5px 0;color:#cfe3d6}
+ details.adv{margin-top:6px;border-top:1px solid #223029;padding-top:10px}
+ details.adv summary{cursor:pointer;color:#8fae9c;font-size:.82rem}
 </style></head><body>
 <div class="top">
   <h1>ASVA Command Center</h1>
@@ -340,15 +349,35 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <button class="x" onclick="closeAdd()">&times;</button>
   <h3>Shop created</h3>
   <p class="sub" id="r_name"></p>
-  <div class="warnbox">Next: on the shop laptop, open <b>tryasva.com</b> and click <b>Download</b>,
-    replace <b>tally_agent\config.json</b> with the complete config below, change
-    <b>company_name</b> to their exact Tally company name, run <b>SETUP.bat</b>, then scan the
-    shop WhatsApp at localhost:3001/qr. Copy the agent token now - it is shown only once.</div>
-  <div class="kv"><div class="l">Download link (send to the shop)</div><div class="v"><span id="r_dl"></span><button class="copy" onclick="cp('r_dl')">Copy</button></div></div>
-  <div class="kv"><div class="l">Licence key</div><div class="v"><span id="r_lk"></span><button class="copy" onclick="cp('r_lk')">Copy</button></div></div>
-  <div class="kv"><div class="l">Agent token (secret)</div><div class="v"><span id="r_tok"></span><button class="copy" onclick="cp('r_tok')">Copy</button></div></div>
-  <div class="kv"><div class="l">Shop config.json (paste on the shop laptop)</div><div class="v"><span id="r_cfg"></span><button class="copy" onclick="cp('r_cfg')">Copy</button></div></div>
+  <div class="code" id="r_code"></div>
+  <div class="codehint">Read this code to the shop over the phone. Valid <span id="r_codeexp">24 hours</span>, one use only.</div>
+  <div class="steps"><ol>
+    <li>They open <b>tryasva.com</b> and click <b>Download</b>.</li>
+    <li>They run the installer and type this code.</li>
+    <li>They pick their Tally company and scan their own WhatsApp.</li>
+  </ol></div>
+  <div class="kv"><div class="l">Licence key (for support)</div><div class="v"><span id="r_lk"></span><button class="copy" onclick="cp('r_lk')">Copy</button></div></div>
+  <details class="adv"><summary>Advanced: manual setup (old flow)</summary>
+    <div class="kv"><div class="l">Agent token (secret)</div><div class="v"><span id="r_tok"></span><button class="copy" onclick="cp('r_tok')">Copy</button></div></div>
+    <div class="kv"><div class="l">Shop config.json</div><div class="v"><span id="r_cfg"></span><button class="copy" onclick="cp('r_cfg')">Copy</button></div></div>
+  </details>
   <button class="go" onclick="closeAdd()">Done</button>
+ </div>
+</div>
+
+<div class="modal" id="pairModal">
+ <div class="card">
+  <button class="x" onclick="closePair()">&times;</button>
+  <h3>Pairing code</h3>
+  <p class="sub" id="p_name"></p>
+  <div class="code" id="p_code"></div>
+  <div class="codehint">Valid 24 hours, one use only.</div>
+  <div class="steps"><ol>
+    <li>Install ASVA on that shop's laptop (or reinstall over the old one).</li>
+    <li>Type this code when it asks.</li>
+    <li>It reconnects to <b>this same business</b>, so every reminder and setting is kept.</li>
+  </ol></div>
+  <button class="go" onclick="closePair()">Done</button>
  </div>
 </div>
 <div class="wrap">
@@ -382,7 +411,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
    <thead><tr>
      <th>Business</th><th>Status</th><th>Plan</th><th>Expiry</th><th class="num">Days</th>
      <th>Last seen</th><th>Version</th><th class="num">Msgs (mo)</th><th class="num">Fail (today)</th>
-     <th>Renew</th><th>Cut off</th>
+     <th>Renew</th><th>Cut off</th><th>Pair</th>
    </tr></thead>
    <tbody id="rows"></tbody>
   </table></div>
@@ -411,7 +440,7 @@ async function load(){
     document.getElementById('kpis').innerHTML = K.map(k=>
       '<div class="kpi '+(k[2])+'"><div class="n">'+inr(t[k[0]])+'</div><div class="l">'+k[1]+'</div></div>').join('');
     document.getElementById('rows').innerHTML = d.businesses.map(rowHtml).join('') ||
-      '<tr><td colspan="11" class="muted" style="padding:22px">No businesses yet.</td></tr>';
+      '<tr><td colspan="12" class="muted" style="padding:22px">No businesses yet.</td></tr>';
   }catch(e){document.getElementById('msg').textContent='Could not load. Retrying...';}
 }
 function rowHtml(b){
@@ -432,6 +461,7 @@ function rowHtml(b){
     '<td class="num">'+(b.failed_today||0)+'</td>'+
     '<td><button class="btn" onclick="renew(\''+b.id+'\',1)">+1 mo</button></td>'+
     '<td><button class="btn sus" onclick="suspend(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Suspend</button></td>'+
+    '<td><button class="btn" onclick="pairCode(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Get code</button></td>'+
   '</tr>';
 }
 function flash(t){var m=document.getElementById('msg');m.textContent=t;setTimeout(()=>{if(m.textContent===t)m.textContent='';},4000);}
@@ -452,6 +482,19 @@ async function suspend(id,name){
   const x=await post('/license/suspend',{admin_key:KEY,business_id:id});
   flash(x.ok?'Suspended':(x.j.detail||'Suspend failed')); load();
 }
+// ── Pairing codes ─────────────────────────────────────────────────────────
+// Re-pair an EXISTING shop onto a fresh install. The code binds to the same
+// business_id, so its reminders and settings (which live in the DB) carry over
+// untouched - this is the safe way to move a shop off an older install.
+async function pairCode(id,name){
+  const x=await post('/license/mint-code',{admin_key:KEY,business_id:id,ttl_hours:24});
+  if(!x.ok){flash(x.j.detail||'Could not create a code');return;}
+  document.getElementById('p_name').textContent=name;
+  document.getElementById('p_code').textContent=x.j.code_display||x.j.code;
+  document.getElementById('pairModal').classList.add('show');
+}
+function closePair(){document.getElementById('pairModal').classList.remove('show');}
+
 // ── Add business ──────────────────────────────────────────────────────────
 function openAdd(){
   document.getElementById('f_plan').innerHTML =
@@ -491,7 +534,7 @@ async function doAdd(){
     bill_pdf_dir:'C:\\ASVA\\bills'
   },null,2);
   document.getElementById('r_name').textContent=x.j.business_name+' - '+PLABEL[x.j.plan]+', paid till '+x.j.plan_expires_on;
-  document.getElementById('r_dl').textContent=(PUBLIC_URL||'https://app.tryasva.com')+'/download/ASVA_shop.zip?token='+encodeURIComponent(x.j.agent_token);
+  document.getElementById('r_code').textContent=x.j.pairing_code_display||x.j.pairing_code||'(code unavailable)';
   document.getElementById('r_lk').textContent=x.j.license_key;
   document.getElementById('r_tok').textContent=x.j.agent_token;
   document.getElementById('r_cfg').textContent=cfg;
