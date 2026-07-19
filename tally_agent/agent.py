@@ -641,6 +641,63 @@ async def run_add_company(config: dict, name: str):
     log_and_print("Now run:  agent --import-masters   (one-time, brings its debtors in)")
 
 
+# ── Setup-wizard commands ────────────────────────────────────────────────
+# Each prints exactly one JSON line on stdout and exits, so the desktop wizard
+# can drive setup without reimplementing Tally's XML quirks in JavaScript.
+
+def _emit(obj: dict, failed: bool = False) -> None:
+    import json as _json
+    print(_json.dumps(obj))
+    if failed:
+        sys.exit(1)
+
+
+def _cli_pair(code: str, backend: str | None) -> None:
+    """Redeem a one-time setup code and write config.json."""
+    from pair import DEFAULT_BACKEND, PairError, pair_and_write
+    try:
+        cfg = pair_and_write(code, backend_url=backend or DEFAULT_BACKEND)
+    except PairError as e:
+        return _emit({"ok": False, "error": str(e)}, failed=True)
+    _emit({"ok": True, "business_id": cfg["business_id"],
+           "business_name": cfg.get("business_name", ""),
+           "company_name": cfg.get("company_name", "")})
+
+
+def _cli_list_companies(host, port) -> None:
+    """Companies open in Tally, so the owner taps theirs instead of typing it."""
+    from pair import PairError, list_tally_companies
+    try:
+        names = list_tally_companies(host or "localhost", int(port or 9000))
+    except PairError as e:
+        return _emit({"ok": False, "error": str(e)}, failed=True)
+    except Exception:
+        return _emit({"ok": False, "error": "Could not read companies from Tally."},
+                     failed=True)
+    _emit({"ok": True, "companies": names})
+
+
+def _cli_set_company(name: str) -> None:
+    """Persist the chosen Tally company without disturbing anything else."""
+    import json as _json
+    import os as _os
+    from pair import default_config_path
+    path = default_config_path()
+    cfg = {}
+    if _os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                cfg = _json.load(f) or {}
+        except Exception:
+            cfg = {}
+    cfg["company_name"] = name
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(cfg, f, ensure_ascii=False, indent=2)
+    _os.replace(tmp, path)
+    _emit({"ok": True, "company_name": name})
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tally Sync Agent")
     parser.add_argument('--import-masters', action='store_true', help='Run one-time import of all debtors')
@@ -650,8 +707,25 @@ def main():
     parser.add_argument('--refresh-outstanding', action='store_true', help='Apply Tally bill-by-bill outstanding as the source of truth (accurate amounts + dates)')
     parser.add_argument('--companies', action='store_true', help='List companies open in Tally (and which are connected to ASVA)')
     parser.add_argument('--add-company', metavar='NAME', help='Connect another Tally company to ASVA (its own separate data)')
+    # --- Setup wizard commands (machine-readable JSON on stdout) ---
+    parser.add_argument('--pair', metavar='CODE', help='Connect this install to its business with a one-time setup code')
+    parser.add_argument('--list-companies-json', action='store_true', help='Print Tally companies as JSON (setup wizard)')
+    parser.add_argument('--set-company', metavar='NAME', help='Save the chosen Tally company (setup wizard)')
+    parser.add_argument('--backend', metavar='URL', help='Server URL to pair against')
+    parser.add_argument('--tally-host', default='localhost')
+    parser.add_argument('--tally-port', default=9000)
 
     args = parser.parse_args()
+
+    # Setup commands run BEFORE load_config(): a fresh install has no config
+    # yet, which is the entire point of pairing. They print one JSON line so
+    # the wizard can show the owner a clean message instead of a traceback.
+    if args.pair:
+        return _cli_pair(args.pair, args.backend)
+    if args.list_companies_json:
+        return _cli_list_companies(args.tally_host, args.tally_port)
+    if args.set_company:
+        return _cli_set_company(args.set_company)
 
     if not (args.import_masters or args.sync or args.watch or args.check_outstanding
             or args.refresh_outstanding or args.companies or args.add_company):

@@ -48,12 +48,36 @@ function pageUrls(backend, token) {
     accountsUrl: `${backend}/admin/accounts${q}`,
   };
 }
+// Where this shop's identity lives. Packaged: beside the bundled Tally reader
+// (which resolves config.json next to its own exe). Dev: the repo's tally_agent.
+// Older installs kept it in Asva/, so that path is still honoured.
+const AGENT_DIR = app.isPackaged ? path.join(process.resourcesPath, 'agent')
+                                 : path.join(REPO, 'tally_agent');
+const CONFIG_PATH = path.join(AGENT_DIR, 'config.json');
+const LEGACY_CONFIG_PATH = path.join(REPO, 'Asva', 'config.json');
+
+function configPath() {
+  if (fs.existsSync(CONFIG_PATH)) return CONFIG_PATH;
+  if (fs.existsSync(LEGACY_CONFIG_PATH)) return LEGACY_CONFIG_PATH;
+  return CONFIG_PATH;                       // where a fresh pairing will write
+}
+function readConfigFile() {
+  try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch (e) { return null; }
+}
+// Unpaired = no identity yet, so the app opens the setup wizard instead of the
+// dashboard. This is what lets the installer ship with no secret inside.
+function isPaired() {
+  const c = readConfigFile();
+  return !!(c && c.agent_token && c.business_id);
+}
+
 function loadConfig() {
   let token = '';
   let backend = 'http://localhost:8000';
   let companies = [];
   try {
-    const c = JSON.parse(fs.readFileSync(path.join(REPO, 'Asva', 'config.json'), 'utf8'));
+    const c = readConfigFile() || {};
+    if (!c.agent_token) throw new Error('unpaired');
     token = c.agent_token || '';
     if (c.backend_url) backend = c.backend_url.replace(/\/+$/, '');
     const primaryName = c.company_name || c.business_name || 'Company 1';
@@ -187,11 +211,52 @@ function maybeKickStalledWatcher(backendOk) {
 // updater (which no-ops when already current), so a new version is applied on
 // the next open with zero action from the shop. Failure never blocks startup.
 function startAll() {
+  // An unpaired install has no business to serve - the services would just
+  // crash-loop on a missing config. Setup starts them when it finishes.
+  if (!isPaired()) {
+    console.log('[main] not paired yet - waiting for setup');
+    return;
+  }
   try {
     const upd = spawnSync(PY, ['updater.py'], { cwd: REPO, timeout: 90000, encoding: 'utf8' });
     if (upd && upd.stdout) console.log('[update]', upd.stdout.trim());
   } catch (e) { console.error('updater skipped:', (e && e.message) || e); }
   Object.keys(SPECS).forEach(startService);
+}
+
+// ── Setup wizard plumbing ─────────────────────────────────────────────────
+// The bundled Tally reader does the actual work (it owns the hard-won Tally
+// XML handling); we just run it and read one JSON line. Every failure returns
+// a message written for a shopkeeper - never a traceback.
+function agentSpec(args) {
+  return app.isPackaged
+    ? { cmd: path.join(AGENT_DIR, 'asva-agent.exe'), args, cwd: AGENT_DIR }
+    : { cmd: PY, args: ['tally_agent/agent.py', ...args], cwd: REPO };
+}
+
+function runAgent(args, timeoutMs = 90000) {
+  return new Promise((resolve) => {
+    const spec = agentSpec(args);
+    let out = '';
+    let proc;
+    try {
+      proc = spawn(spec.cmd, spec.args, { cwd: spec.cwd, windowsHide: true });
+    } catch (e) {
+      return resolve({ ok: false, error: 'Setup helper could not start.' });
+    }
+    const done = (v) => { clearTimeout(timer); resolve(v); };
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch (_) {}
+      done({ ok: false, error: 'That took too long. Please try again.' });
+    }, timeoutMs);
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.on('error', () => done({ ok: false, error: 'Setup helper could not start.' }));
+    proc.on('exit', () => {
+      const line = out.trim().split(/\r?\n/).filter(Boolean).pop() || '';
+      try { done(JSON.parse(line)); }
+      catch (e) { done({ ok: false, error: 'Setup did not complete. Please try again.' }); }
+    });
+  });
 }
 
 function stopAll() {
@@ -319,7 +384,9 @@ function createWindow() {
     },
   });
   mainWindow.setMenuBarVisibility(false);
-  const loadUI = () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // A fresh install opens the setup wizard; a paired one opens the dashboard.
+  const loadUI = () => mainWindow.loadFile(path.join(
+    __dirname, 'renderer', isPaired() ? 'index.html' : 'setup.html'));
   loadUI();
   // If the whole UI process dies or hangs (the "everything goes blank" case),
   // rebuild it automatically instead of leaving a blank window.
@@ -384,6 +451,28 @@ ipcMain.handle('tally-reload', () => new Promise((resolve) => {
   if (!CONFIG.token) return resolve({ ok: false, detail: 'no token' });
   httpPostJson(`${CONFIG.backendUrl}/admin/reload`, { token: CONFIG.token },
     (ok, j) => resolve(ok ? j : { ok: false, detail: 'backend down' }));
+}));
+
+// ── Setup wizard IPC ──────────────────────────────────────────────────────
+ipcMain.handle('pair-redeem', (e, code) => runAgent(['--pair', String(code || '').trim()]));
+ipcMain.handle('pair-companies', () => runAgent(['--list-companies-json']));
+ipcMain.handle('pair-finish', async (e, company) => {
+  if (company) {
+    const r = await runAgent(['--set-company', String(company)]);
+    if (!r.ok) return r;
+  }
+  Object.assign(CONFIG, loadConfig());   // pick up the identity we just wrote
+  startAll();                            // WhatsApp + Tally reader come up now
+  return { ok: true };
+});
+ipcMain.handle('open-dashboard', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  }
+  return true;
+});
+ipcMain.handle('wa-status', () => new Promise((resolve) => {
+  ping('http://localhost:3001/api/wa/status', (ok, b) => resolve(parseWa(ok, b)));
 }));
 
 // Single instance - double-clicking the launcher again just focuses the app

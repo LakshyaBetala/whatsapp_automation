@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ASVA Setup</title>
+<style>
+  /* Large type, one decision per screen. The people using this are busy shop
+     owners, often older, who should never have to guess what to do next. */
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:#f6f7f5;color:#1d2420;
+       display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+  .card{background:#fff;border:1px solid #e3e7e2;border-radius:16px;max-width:560px;width:100%;
+        padding:40px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .brand{font-weight:800;letter-spacing:.18em;font-size:.8rem;color:#2f8f52;margin-bottom:8px}
+  h1{font-size:1.7rem;margin:0 0 8px;font-weight:700}
+  p.sub{color:#5d6b62;margin:0 0 24px;font-size:1.02rem;line-height:1.5}
+  .steps{display:flex;gap:8px;margin-bottom:26px}
+  .pip{height:4px;flex:1;background:#e3e7e2;border-radius:999px}
+  .pip.on{background:#2f8f52}
+  input[type=text]{width:100%;font-size:1.9rem;letter-spacing:.14em;text-align:center;padding:16px;
+        border:2px solid #d6ddd7;border-radius:12px;font-family:ui-monospace,Menlo,monospace;
+        text-transform:uppercase;outline:none}
+  input[type=text]:focus{border-color:#2f8f52}
+  button{font-size:1.05rem;font-weight:600;padding:14px 22px;border-radius:10px;border:0;
+         background:#1d2420;color:#fff;cursor:pointer;width:100%;margin-top:18px}
+  button:disabled{opacity:.55;cursor:default}
+  button.ghost{background:#fff;color:#1d2420;border:1px solid #d6ddd7;margin-top:10px}
+  .err{background:#fdecea;border:1px solid #f5c6c0;color:#9f2f2d;padding:12px 14px;
+       border-radius:10px;margin-top:16px;font-size:.95rem;display:none}
+  .list{display:flex;flex-direction:column;gap:10px;max-height:280px;overflow-y:auto;margin-top:6px}
+  .co{border:2px solid #d6ddd7;border-radius:10px;padding:15px 16px;cursor:pointer;font-size:1.05rem;
+      background:#fff;text-align:left;width:100%;margin:0}
+  .co.sel{border-color:#2f8f52;background:#f1f8f3}
+  .qrbox{text-align:center;padding:10px}
+  .qrbox img{width:260px;height:260px;border:1px solid #e3e7e2;border-radius:12px;background:#fff}
+  .hint{color:#5d6b62;font-size:.92rem;margin-top:14px;line-height:1.55}
+  .ok{color:#2f8f52;font-weight:700;font-size:1.15rem}
+  .spin{color:#5d6b62;font-size:.95rem;margin-top:12px}
+  ol{padding-left:20px;margin:10px 0 0;color:#5d6b62;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brand">ASVA</div>
+  <div class="steps"><div class="pip on" id="p1"></div><div class="pip" id="p2"></div><div class="pip" id="p3"></div></div>
+
+  <!-- Step 1: the code -->
+  <section id="s1">
+    <h1>Enter your setup code</h1>
+    <p class="sub">The person who set up ASVA for you will read out an 8 character code.</p>
+    <input type="text" id="code" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" autofocus>
+    <div class="err" id="e1"></div>
+    <button id="b1">Connect</button>
+  </section>
+
+  <!-- Step 2: the Tally company -->
+  <section id="s2" style="display:none">
+    <h1>Choose your company</h1>
+    <p class="sub">Pick the company ASVA should read from Tally.</p>
+    <div class="list" id="colist"></div>
+    <div class="err" id="e2"></div>
+    <button id="b2" disabled>Continue</button>
+    <button class="ghost" id="b2r">Tally is not open, try again</button>
+  </section>
+
+  <!-- Step 3: WhatsApp -->
+  <section id="s3" style="display:none">
+    <h1>Connect WhatsApp</h1>
+    <p class="sub">Scan this with the phone that has your shop's WhatsApp. Your bills go out from your own number.</p>
+    <div class="qrbox" id="qrbox">
+      <div class="spin">Starting WhatsApp, please wait...</div>
+    </div>
+    <ol>
+      <li>Open WhatsApp on your shop phone</li>
+      <li>Tap Settings, then Linked devices</li>
+      <li>Tap Link a device and scan the square above</li>
+    </ol>
+    <button class="ghost" id="b3">Skip for now</button>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function show(n){
+  for (const i of [1,2,3]) {
+    $('s'+i).style.display = (i===n) ? '' : 'none';
+    $('p'+i).className = 'pip' + (i<=n ? ' on' : '');
+  }
+}
+function fail(box, msg){ const e=$(box); e.textContent=msg; e.style.display='block'; }
+function clearErr(box){ $(box).style.display='none'; }
+
+// ── Step 1: redeem the code ──────────────────────────────────────────────
+$('code').addEventListener('input', (ev) => {
+  // Accept the code however it is typed: lowercase, spaces, with or without
+  // the dash. Retyping a code because of formatting is a terrible first
+  // experience, so we normalise instead of scolding.
+  let v = ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  ev.target.value = v.length > 4 ? v.slice(0, 4) + '-' + v.slice(4) : v;
+});
+$('b1').addEventListener('click', async () => {
+  clearErr('e1');
+  const code = $('code').value.replace(/[^A-Z0-9]/gi, '');
+  if (code.length !== 8) return fail('e1', 'Please enter all 8 characters of your code.');
+  $('b1').disabled = true; $('b1').textContent = 'Connecting...';
+  const r = await window.asva.pairRedeem(code);
+  $('b1').disabled = false; $('b1').textContent = 'Connect';
+  if (!r || !r.ok) return fail('e1', (r && r.error) || 'Could not connect. Please try again.');
+  if (r.business_name) $('s2').querySelector('p.sub').textContent =
+    'Connected to ' + r.business_name + '. Pick the company ASVA should read from Tally.';
+  show(2); loadCompanies();
+});
+
+// ── Step 2: pick the Tally company ───────────────────────────────────────
+let chosen = null;
+async function loadCompanies(){
+  clearErr('e2');
+  chosen = null; $('b2').disabled = true;
+  $('colist').innerHTML = '<div class="spin">Reading companies from Tally...</div>';
+  const r = await window.asva.pairCompanies();
+  if (!r || !r.ok) {
+    $('colist').innerHTML = '';
+    return fail('e2', (r && r.error) || 'Could not read companies from Tally.');
+  }
+  const names = r.companies || [];
+  if (!names.length) {
+    $('colist').innerHTML = '';
+    return fail('e2', 'No company is open in Tally right now. Open your company in Tally, then try again.');
+  }
+  $('colist').innerHTML = '';
+  names.forEach((n) => {
+    const b = document.createElement('button');
+    b.className = 'co'; b.textContent = n;
+    b.onclick = () => {
+      chosen = n;
+      [...document.querySelectorAll('.co')].forEach(x => x.classList.remove('sel'));
+      b.classList.add('sel');
+      $('b2').disabled = false;
+    };
+    $('colist').appendChild(b);
+  });
+  if (names.length === 1) $('colist').firstChild.click();   // the common case
+}
+$('b2r').addEventListener('click', loadCompanies);
+$('b2').addEventListener('click', async () => {
+  $('b2').disabled = true; $('b2').textContent = 'Saving...';
+  const r = await window.asva.pairFinish(chosen);
+  $('b2').textContent = 'Continue';
+  if (!r || !r.ok) { $('b2').disabled = false; return fail('e2', (r && r.error) || 'Could not save.'); }
+  show(3); startWaPolling();
+});
+
+// ── Step 3: WhatsApp QR ──────────────────────────────────────────────────
+let waTimer = null;
+async function pollWa(){
+  const s = await window.asva.waStatus();
+  const box = $('qrbox');
+  if (s && s.ready) {
+    clearInterval(waTimer);
+    box.innerHTML = '<div class="ok">WhatsApp is connected.</div>' +
+      '<div class="hint">Setup is complete. ASVA will now send your bills and reminders.</div>';
+    const done = document.createElement('button');
+    done.textContent = 'Open ASVA';
+    done.onclick = () => window.asva.openDashboard();
+    box.appendChild(done);
+    $('b3').style.display = 'none';
+    return;
+  }
+  if (s && s.qr && String(s.qr).startsWith('data:')) {
+    box.innerHTML = '<img alt="WhatsApp QR code" src="' + s.qr + '">';
+  } else if (s && s.reachable) {
+    box.innerHTML = '<div class="spin">Preparing the QR code...</div>';
+  }
+}
+// WhatsApp has just been started by pair-finish, so give it a moment before
+// the first poll, then check every 2.5s until it reports connected.
+function startWaPolling(){
+  if (waTimer) clearInterval(waTimer);
+  setTimeout(pollWa, 1500);
+  waTimer = setInterval(pollWa, 2500);
+}
+$('b3').addEventListener('click', () => window.asva.openDashboard());
+</script>
+</body>
+</html>
