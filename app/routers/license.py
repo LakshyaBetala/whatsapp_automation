@@ -21,6 +21,7 @@ from app.config import settings
 from app.db import require_db
 from app.models import Plan
 from app.services import license as lic
+from app.services import pairing
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/license", tags=["license"])
@@ -123,6 +124,13 @@ async def create_business(payload: CreateBizPayload):
         log.exception("create_business failed")
         raise HTTPException(status_code=409,
                             detail="Could not create - is that WhatsApp number already used?")
+    # Mint a one-time pairing code so the operator can onboard the shop by
+    # reading a short code aloud - the shop never types the agent_token.
+    code = None
+    try:
+        code = pairing.mint(db, biz["id"], note="new-business")
+    except Exception:
+        log.exception("pairing code mint failed (continuing; token still returned)")
     log.info("Onboarded business %s (%s)", biz.get("id"), biz.get("business_name"))
     return {
         "ok": True,
@@ -134,7 +142,53 @@ async def create_business(payload: CreateBizPayload):
         "license_key": biz["license_key"],
         "plan": biz["plan"],
         "plan_expires_on": str(biz.get("plan_expires_on"))[:10],
+        "pairing_code": code["code"] if code else None,
+        "pairing_code_display": code["code_display"] if code else None,
+        "pairing_expires_on": code["expires_at"] if code else None,
     }
+
+
+class PairPayload(BaseModel):
+    code: str
+
+
+@router.post("/pair")
+async def pair(payload: PairPayload):
+    """PUBLIC: a fresh install redeems a one-time pairing code (minted by the
+    operator) to receive its business identity + agent_token. The code IS the
+    bearer credential - single use, short-lived - so there is deliberately no
+    admin key here. Nothing secret ships in the installer; this is how it learns
+    which shop it belongs to."""
+    db = require_db()
+    try:
+        out = pairing.redeem(db, payload.code)
+    except pairing.PairingError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    log.info("Paired an install to business %s", out["business_id"])
+    return {"ok": True, **out}
+
+
+class MintCodePayload(BaseModel):
+    admin_key: str
+    business_id: str
+    ttl_hours: int = 24
+    note: Optional[str] = None
+
+
+@router.post("/mint-code")
+async def mint_code(payload: MintCodePayload):
+    """OPS ONLY: mint a pairing code for an EXISTING business - e.g. re-pair a
+    shop onto a fresh install (its DB-stored reminders carry over untouched)."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    r = (db.table("businesses").select("id, business_name")
+         .eq("id", payload.business_id).limit(1).execute()).data
+    if not r:
+        raise HTTPException(status_code=404, detail="Business not found")
+    out = pairing.mint(db, payload.business_id,
+                       ttl_hours=payload.ttl_hours, note=payload.note or "re-pair")
+    return {"ok": True, "business_id": payload.business_id,
+            "business_name": r[0].get("business_name") or "", **out}
 
 
 class RenewPayload(BaseModel):
