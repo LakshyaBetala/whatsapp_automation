@@ -98,6 +98,17 @@ class Settings(BaseSettings):
     send_via_outbox: bool = False       # true ONLY on the bot laptop
     enable_outbox_send: bool = True     # false ONLY on the bot laptop
 
+    # --- Send window (quiet hours) for CUSTOMER-facing queued sends ---
+    # The queue waits while the shop laptop is off, so without a window a laptop
+    # switched on at 11pm would deliver a whole day's reminders at midnight:
+    # rude to the customer and a textbook WhatsApp ban signal. Queued sends only
+    # leave between these hours (shop-local, settings.timezone); outside them the
+    # queue simply waits. Owner-facing sends (digest/alerts) are NOT affected -
+    # they go from the bot number and keep their own schedule.
+    enforce_send_window: bool = True
+    send_window_start_hour: int = 9      # inclusive
+    send_window_end_hour: int = 19       # exclusive (last send before 7pm)
+
     # --- Monitoring + email alerts (operator health center) ---
     # The watchdog job builds a health snapshot every few minutes and emails the
     # operator when something needs attention (server/bot/shop WhatsApp down,
