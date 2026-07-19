@@ -28,7 +28,15 @@ router = APIRouter(tags=["download"])
 # Public download name -> real file on disk. Only these may be fetched.
 ALLOWED = {
     "ASVA_shop.zip": "ASVA_shop.zip",
+    "ASVA-Setup.exe": "ASVA-Setup.exe",
 }
+
+# Downloads that need NO token. The installer carries no secret: no database
+# key, no agent token, no config. A fresh install knows nothing until the owner
+# types a pairing code, so gating it would only break the website's Download
+# button for no security gain. The legacy zip stays gated - it still ships the
+# service-role key.
+PUBLIC = {"ASVA-Setup.exe"}
 
 
 def _path(real: str) -> str:
@@ -72,14 +80,16 @@ def download_file(name: str, token: str = Query("")):
     real = ALLOWED.get(name)
     if not real:
         raise HTTPException(status_code=404, detail="Unknown download")
-    if not _token_ok(token):
+    if name not in PUBLIC and not _token_ok(token):
         raise HTTPException(status_code=403,
                             detail="This download needs your ASVA link. Ask your ASVA contact for it.")
     p = _path(real)
     if not os.path.exists(p):
         raise HTTPException(status_code=404,
                             detail="Not available yet - the host has not published this file.")
-    return FileResponse(p, filename=real, media_type="application/zip")
+    media = ("application/vnd.microsoft.portable-executable"
+             if real.lower().endswith(".exe") else "application/zip")
+    return FileResponse(p, filename=real, media_type=media)
 
 
 @router.get("/download", response_class=HTMLResponse)
