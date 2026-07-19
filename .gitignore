@@ -60,3 +60,8 @@ agent.log
 wa_service/.wwebjs_auth/
 wa_service/.wwebjs_cache/
 wa_service/.baileys_auth/
+
+# Installer build artifacts (large binaries, rebuilt by build_installer.ps1)
+dist_installer/
+dist_agent/
+build_agent/

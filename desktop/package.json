@@ -1,12 +1,57 @@
 {
   "name": "asva-desktop",
-  "version": "1.0.0",
-  "description": "ASVA control center - supervises the backend, WhatsApp services and Tally watcher, and shows the dashboard in one window.",
+  "version": "1.6.0",
+  "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "^32.0.0"
+    "electron": "^32.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.asva.shop",
+    "productName": "ASVA",
+    "copyright": "ASVA",
+    "directories": {
+      "output": "../dist_installer",
+      "buildResources": "."
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "icon.ico",
+      "icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../wa_service",
+        "to": "wa_service",
+        "filter": ["**/*", "!node_modules/.cache/**", "!.baileys_auth/**"]
+      },
+      {
+        "from": "../dist_agent",
+        "to": "agent",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "icon.ico",
+      "artifactName": "ASVA-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "shortcutName": "ASVA",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
