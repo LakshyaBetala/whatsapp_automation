@@ -96,40 +96,41 @@ def download_file(name: str, token: str = Query("")):
 def download_page(token: str = Query("")):
     from app.site import WA_TRY, page_shell
     ver = _latest_version()
-    p = _path("ASVA_shop.zip")
+    p = _path("ASVA-Setup.exe")
     ready = os.path.exists(p)
     size = f"{os.path.getsize(p) / 1e6:.0f} MB" if ready else ""
-    if not _token_ok(token):
-        btn = (f'<a class="btn btn-p" href="{WA_TRY}">Get my download link</a>')
-        note = ('<p class="undernote" style="color:#8a5a00">This download opens with the personal link '
-                'from your ASVA setup. Message us and we will onboard you and send it.</p>')
-    elif ready:
-        btn = (f'<a class="btn btn-p" href="/download/ASVA_shop.zip?token={token}">Download ASVA for Windows ({size})</a>')
+    # The installer is public and carries no secret, so the button always works.
+    if ready:
+        btn = (f'<a class="btn btn-p" href="/download/ASVA-Setup.exe">'
+               f'Download ASVA for Windows ({size})</a>')
         note = ''
     else:
-        btn = '<div class="undernote" style="color:#8a5a00">The download is being published. Please check back shortly.</div>'
-        note = ''
+        btn = (f'<a class="btn btn-p" href="{WA_TRY}">Talk to us on WhatsApp</a>')
+        note = ('<p class="undernote" style="color:#8a5a00">The new installer is being published. '
+                'Message us and we will set you up right away.</p>')
     body = f"""<div class="wrap">
  <section class="page-hero reveal">
   <span class="eyebrow">Download &middot; Version {ver}</span>
   <h1>Download ASVA for Windows</h1>
-  <p class="lede">The shop app reads your TallyPrime and sends bills and reminders on WhatsApp
-    from your own number. Windows 10 or 11, TallyPrime, and your ASVA licence details.</p>
+  <p class="lede">One installer. It reads your TallyPrime and sends bills and reminders on
+    WhatsApp from your own number. You need Windows 10 or 11, TallyPrime, and the setup
+    code we give you. Nothing else to install.</p>
   <div class="cta-row">{btn}</div>{note}
  </section>
  <section>
-  <div class="sechead"><span class="eyebrow">Setup</span><h2>Up and running in a few minutes</h2></div>
+  <div class="sechead"><span class="eyebrow">Setup</span><h2>Three steps, about five minutes</h2></div>
   <div class="flow reveal">
-   <div class="row"><div class="idx">1</div><div><h3>Unzip to C:\\ASVA</h3>
-     <p>Extract the download to the <b>C:\\ASVA</b> folder on the shop PC.</p></div></div>
-   <div class="row"><div class="idx">2</div><div><h3>Paste your licence</h3>
-     <p>Open <b>tally_agent\\config.json</b> and paste the <b>business id</b> and <b>agent token</b> from your ASVA setup, then set your Tally company name.</p></div></div>
-   <div class="row"><div class="idx">3</div><div><h3>Run SETUP, then START</h3>
-     <p>Run <b>SETUP.bat</b> once, then <b>START.bat</b> each day. ASVA keeps itself updated from here on.</p></div></div>
-   <div class="row"><div class="idx">4</div><div><h3>Scan WhatsApp</h3>
-     <p>Open <b>localhost:3001/qr</b> and scan with the shop's phone. That links your own number for bills and reminders.</p></div></div>
+   <div class="row"><div class="idx">1</div><div><h3>Run the installer</h3>
+     <p>Open the file you just downloaded and it installs itself. No settings to choose,
+       and nothing else to install first.</p></div></div>
+   <div class="row"><div class="idx">2</div><div><h3>Type your setup code</h3>
+     <p>We read you a short code such as <b>K7P2-9M4T</b>. Type it in and ASVA connects
+       itself to your shop. There is nothing to copy or paste.</p></div></div>
+   <div class="row"><div class="idx">3</div><div><h3>Pick your company and scan WhatsApp</h3>
+     <p>Choose your company from the list ASVA reads out of Tally, then scan the square with
+       your shop's phone, the same way you use WhatsApp Web. That is the whole setup.</p></div></div>
   </div>
-  <p class="undernote">Don't have your licence details yet? <a href="{WA_TRY}" style="color:var(--accent)">Message us</a> and we will set you up.</p>
+  <p class="undernote">Don't have a setup code yet? <a href="{WA_TRY}" style="color:var(--accent)">Message us</a> and we will get you started.</p>
  </section>
 </div>"""
     return HTMLResponse(page_shell(

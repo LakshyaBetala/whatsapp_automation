@@ -480,7 +480,8 @@ FAQ = [
     ("Does ASVA change my Tally data?", "Never. ASVA reads your ledger and confirms payments back from Tally. It does not post or edit vouchers."),
     ("Do messages come from my number or ASVA's?", "Your own WhatsApp number, so customers recognise your shop and trust the message."),
     ("Will it spam my customers?", "No. Reminders follow each party's credit terms, respect a daily cap, and stop as soon as a customer replies."),
-    ("What do I need to run it?", "A Windows PC with TallyPrime and your WhatsApp. ASVA installs next to Tally in a few minutes."),
+    ("What do I need to run it?", "A Windows PC with TallyPrime and your WhatsApp. Download one installer, type the short setup code we read out to you, pick your company and scan WhatsApp. About five minutes, and there is nothing else to install."),
+    ("Is it hard to set up?", "No. There are no files to edit and no settings to figure out. If you can link WhatsApp Web, you can set up ASVA, and we stay on the phone with you while you do it."),
     ("Can I try it first?", "Yes. Message us and we will connect your Tally and set up your first batch with you."),
 ]
 
