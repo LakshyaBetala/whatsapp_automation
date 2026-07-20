@@ -21,6 +21,7 @@ from app.config import settings
 from app.db import require_db
 from app.models import Plan
 from app.services import license as lic
+from app.services import outbox
 from app.services import pairing
 
 log = logging.getLogger(__name__)
@@ -166,6 +167,40 @@ async def pair(payload: PairPayload):
         raise HTTPException(status_code=400, detail=str(e))
     log.info("Paired an install to business %s", out["business_id"])
     return {"ok": True, **out}
+
+
+class OutboxPullPayload(BaseModel):
+    agent_token: str
+    limit: int = 15
+
+
+@router.post("/outbox/pull")
+async def outbox_pull(payload: OutboxPullPayload):
+    """THIN CLIENT: a keyless shop pulls its own queued customer sends to deliver
+    from its WhatsApp. The agent_token scopes this to that one business; the
+    server withholds everything outside the shop's send window."""
+    db = require_db()
+    biz = _biz_by_token(db, payload.agent_token)
+    return {"ok": True, "items": outbox.pull(db, biz["id"], limit=payload.limit)}
+
+
+class OutboxAckPayload(BaseModel):
+    agent_token: str
+    id: str
+    status: str
+    attempts: int = 1
+    error: Optional[str] = None
+
+
+@router.post("/outbox/ack")
+async def outbox_ack(payload: OutboxAckPayload):
+    """THIN CLIENT: report the outcome of a delivery the shop attempted. On a
+    confirmed send the server mirrors the audit row and drops the stored PDF."""
+    db = require_db()
+    biz = _biz_by_token(db, payload.agent_token)
+    ok = outbox.ack(db, biz["id"], payload.id, payload.status,
+                    payload.attempts, payload.error)
+    return {"ok": ok}
 
 
 class MintCodePayload(BaseModel):

@@ -104,17 +104,40 @@ function loadConfig() {
 }
 const CONFIG = loadConfig();
 
-// ── Child-process supervision ─────────────────────────────────────────────
-// Use the .venv Python that SETUP.bat built (3.11-3.13). A bare `python` on the
-// machine may be 3.14, which has no pydantic-core wheel and fails to import.
+// ── Child-process supervision (thin client) ────────────────────────────────
+// The packaged shop runs NO local backend and needs NO Python or system Node:
+//   - wa_service runs on Electron's OWN Node runtime (ELECTRON_RUN_AS_NODE),
+//   - the Tally reader + the outbox drainer are the bundled asva-agent.exe.
+// In dev (unpackaged) we fall back to plain `node` and the repo's Python so the
+// same file still runs from source.
+const WA_DIR = app.isPackaged ? path.join(process.resourcesPath, 'wa_service')
+                              : path.join(REPO, 'wa_service');
+const AGENT_EXE = path.join(AGENT_DIR, 'asva-agent.exe');
+const USE_AGENT_EXE = app.isPackaged && fs.existsSync(AGENT_EXE);
+// Dev-only Python (the packaged app never touches Python).
 const VENV_PY = path.join(REPO, '.venv', 'Scripts', 'python.exe');
 const PY = fs.existsSync(VENV_PY) ? VENV_PY : 'python';
+
+// wa_service on Electron's bundled Node in the packaged app; plain node in dev.
+const NODE_CMD = app.isPackaged ? process.execPath : 'node';
+const NODE_ENV = app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {};
+
+// The Tally reader / drainer: bundled exe when packaged, source in dev.
+function agentService(extraArgs) {
+  return USE_AGENT_EXE
+    ? { cmd: AGENT_EXE, args: extraArgs, cwd: AGENT_DIR, env: {} }
+    : { cmd: PY, args: ['-u', 'tally_agent/agent.py', ...extraArgs], cwd: REPO, env: {} };
+}
+
 // ONE number, one wa_service instance:
-//   whatsapp (3001) = the shop's own number  -> bills, reminders, customer replies
+//   whatsapp (3001) = the shop's own number -> bills, reminders, customer replies
+//   watcher         = reads Tally, pushes to the server (app.tryasva.com)
+//   drainer         = delivers the server's queued sends from this shop's number
 const SPECS = {
-  backend: { cmd: PY, args: ['-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000'], cwd: REPO, env: {} },
-  whatsapp: { cmd: 'node', args: ['index.js'], cwd: path.join(REPO, 'wa_service'), env: { PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop' } },
-  watcher: { cmd: PY, args: ['-u', 'tally_agent/agent.py', '--watch'], cwd: REPO, env: {} },
+  whatsapp: { cmd: NODE_CMD, args: [path.join(WA_DIR, 'index.js')], cwd: WA_DIR,
+              env: { ...NODE_ENV, PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop' } },
+  watcher: agentService(['--watch']),
+  drainer: agentService(['--drain-outbox']),
 };
 const services = {}; // name -> { proc, restarts }
 const logs = {};     // name -> ring buffer of recent output lines
@@ -217,10 +240,14 @@ function startAll() {
     console.log('[main] not paired yet - waiting for setup');
     return;
   }
-  try {
-    const upd = spawnSync(PY, ['updater.py'], { cwd: REPO, timeout: 90000, encoding: 'utf8' });
-    if (upd && upd.stdout) console.log('[update]', upd.stdout.trim());
-  } catch (e) { console.error('updater skipped:', (e && e.message) || e); }
+  // Dev only: the source-tree Python updater. The packaged app updates via its
+  // own installer, not by overwriting files, so there is no Python to run.
+  if (!app.isPackaged) {
+    try {
+      const upd = spawnSync(PY, ['updater.py'], { cwd: REPO, timeout: 90000, encoding: 'utf8' });
+      if (upd && upd.stdout) console.log('[update]', upd.stdout.trim());
+    } catch (e) { console.error('updater skipped:', (e && e.message) || e); }
+  }
   Object.keys(SPECS).forEach(startService);
 }
 
@@ -229,8 +256,8 @@ function startAll() {
 // XML handling); we just run it and read one JSON line. Every failure returns
 // a message written for a shopkeeper - never a traceback.
 function agentSpec(args) {
-  return app.isPackaged
-    ? { cmd: path.join(AGENT_DIR, 'asva-agent.exe'), args, cwd: AGENT_DIR }
+  return USE_AGENT_EXE
+    ? { cmd: AGENT_EXE, args, cwd: AGENT_DIR }
     : { cmd: PY, args: ['tally_agent/agent.py', ...args], cwd: REPO };
 }
 

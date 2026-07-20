@@ -103,6 +103,72 @@ async def send_to_backend(url: str, endpoint: str, token: str, payload: dict):
         resp.raise_for_status()
         return resp.json()
 
+
+# ── Outbox drain (thin client) ────────────────────────────────────────────
+# The shop has no database key. It pulls its own queued customer sends from the
+# server and delivers each from the shop's WhatsApp (localhost:3001), then acks
+# the outcome. The server owns the queue, the send window, and the audit trail;
+# this loop is only the WhatsApp exit. A transient failure (shop WhatsApp not
+# linked) leaves the item queued for the next cycle - nothing is ever lost.
+
+def _shop_wa_url(config: dict) -> str:
+    return str(config.get("shop_wa_url") or "http://localhost:3001").rstrip("/")
+
+
+def _drain_transient(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+        return True                                   # wa_service not up yet
+    msg = str(exc).lower()
+    return "503" in msg or "not ready" in msg         # up, but WhatsApp not linked
+
+
+async def _drain_once(config: dict) -> int:
+    import random
+    base = config["backend_url"].rstrip("/")
+    token = config["agent_token"]
+    wa = _shop_wa_url(config)
+    sent = 0
+    async with httpx.AsyncClient(timeout=60.0) as http:
+        r = await http.post(f"{base}/license/outbox/pull",
+                            json={"agent_token": token, "limit": 10})
+        if r.status_code != 200:
+            return 0
+        items = r.json().get("items", [])
+        for i, it in enumerate(items):
+            if sent:
+                await asyncio.sleep(random.uniform(8, 20))   # human pacing
+            status, err = "sent", None
+            try:
+                resp = await http.post(f"{wa}/api/wa/send", json=it["payload"])
+                resp.raise_for_status()
+                data = resp.json()
+                if not data.get("success", True):
+                    raise RuntimeError(data.get("error", "wa_service reported failure"))
+                sent += 1
+            except Exception as exc:                          # noqa: BLE001
+                status = "queued" if _drain_transient(exc) else "failed"
+                err = str(exc)[:300]
+            await http.post(f"{base}/license/outbox/ack",
+                            json={"agent_token": token, "id": it["id"],
+                                  "status": status, "attempts": it.get("attempts", 0) + 1,
+                                  "error": err})
+            if status == "queued":
+                break               # shop WhatsApp offline - stop, retry next cycle
+    return sent
+
+
+async def run_drain_outbox(config: dict, interval: int = 20) -> None:
+    log_and_print("Outbox drainer started (delivers queued sends from this shop's WhatsApp).")
+    while True:
+        try:
+            n = await _drain_once(config)
+            if n:
+                log_and_print(f"Outbox: delivered {n} message(s).")
+        except Exception as e:                                # never let the loop die
+            log_and_print(f"Outbox drainer error (continuing): {e}", is_error=True)
+        await asyncio.sleep(interval)
+
+
 async def check_company(config: dict):
     """Warn early if the configured company is not loaded in Tally."""
     try:
@@ -711,6 +777,7 @@ def main():
     parser.add_argument('--pair', metavar='CODE', help='Connect this install to its business with a one-time setup code')
     parser.add_argument('--list-companies-json', action='store_true', help='Print Tally companies as JSON (setup wizard)')
     parser.add_argument('--set-company', metavar='NAME', help='Save the chosen Tally company (setup wizard)')
+    parser.add_argument('--drain-outbox', action='store_true', help='Deliver queued customer sends from this shop\'s WhatsApp (thin client)')
     parser.add_argument('--backend', metavar='URL', help='Server URL to pair against')
     parser.add_argument('--tally-host', default='localhost')
     parser.add_argument('--tally-port', default=9000)
@@ -728,12 +795,22 @@ def main():
         return _cli_set_company(args.set_company)
 
     if not (args.import_masters or args.sync or args.watch or args.check_outstanding
-            or args.refresh_outstanding or args.companies or args.add_company):
+            or args.refresh_outstanding or args.companies or args.add_company
+            or args.drain_outbox):
         print("Please specify --import-masters, --sync, --watch, --check-outstanding, "
-              "--refresh-outstanding, --companies or --add-company \"NAME\"")
+              "--refresh-outstanding, --companies, --add-company \"NAME\" or --drain-outbox")
         sys.exit(1)
 
     config = load_config()
+
+    # The outbox drainer needs only the backend + token + local WhatsApp, not
+    # Tally - so it skips Tally discovery and runs on its own (its own process).
+    if args.drain_outbox:
+        try:
+            asyncio.run(run_drain_outbox(config))
+        except KeyboardInterrupt:
+            log_and_print("Outbox drainer stopped.")
+        return
 
     # Auto-discover host and port
     host, port = asyncio.run(auto_discover_tally(config))
