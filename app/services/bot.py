@@ -166,6 +166,10 @@ async def handle(
         if upper in ("DIGEST", "REPORT", "SUMMARY", "AAJ"):
             return await _handle_digest(business_id)
 
+        # ── SENT - the parties reminded today, by name ────────────────
+        if upper in ("SENT", "SENT TODAY", "REMINDED", "REMINDERS"):
+            return await _handle_sent_today(business_id)
+
         # ── DIGEST 9PM / DIGEST TIME 21 - set the daily summary time ──
         dt_match = re.match(r"DIGEST(?:\s+TIME)?\s+(\d{1,2})\s*(AM|PM)?$", upper)
         if dt_match:
@@ -260,6 +264,9 @@ async def handle(
             f"{line}\n"
             "DIGEST\n"
             "Get today's summary now.\n"
+            f"{line}\n"
+            "SENT\n"
+            "See who got reminders today.\n"
             f"{line}\n\n"
             "Need help? Type: TEAM your message"
         )
@@ -1128,6 +1135,67 @@ async def _handle_digest(business_id: str) -> str:
     if not p.get("would_send"):
         return "Today's summary: no new bills and no payments. All quiet."
     return p.get("rendered_message") or "The summary came back empty. Please try again in a minute."
+
+
+def _day_start_utc_iso() -> str:
+    """Start of TODAY in the business timezone, as a UTC ISO string. messages
+    stores created_at in UTC, so we compute the local midnight then convert -
+    otherwise 'today' would drift by the UTC offset (5.5h for IST)."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    local = datetime.now(ZoneInfo(settings.timezone))
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight.astimezone(timezone.utc).isoformat()
+
+
+async def _handle_sent_today(business_id: str) -> str:
+    """SENT - the parties ASVA reminded today, BY NAME. The digest gives only a
+    count; owners asked to see exactly who was chased, so they can eyeball the
+    list and catch a wrong send before a customer complains."""
+    db = require_db()
+    rows = (
+        db.table("messages")
+        .select("client_id, delivery_status, clients(name)")
+        .eq("business_id", business_id)
+        .eq("type", MessageType.reminder.value)
+        .gte("created_at", _day_start_utc_iso())
+        .execute()
+    ).data or []
+
+    delivered: dict[str, int] = {}
+    queued = 0
+    failed = 0
+    for r in rows:
+        name = (r.get("clients") or {}).get("name") or "Unknown"
+        status = r.get("delivery_status")
+        if status in ("sent", "delivered"):
+            delivered[name] = delivered.get(name, 0) + 1
+        elif status == "queued":
+            queued += 1
+        elif status in ("failed", "limit_reached", "suspended"):
+            failed += 1
+
+    if not delivered:
+        if queued:
+            return (f"No reminders have gone out yet today.\n"
+                    f"{queued} are in the queue and will send from your shop number.")
+        return "No reminders have gone out today yet."
+
+    total = sum(delivered.values())
+    lines = [f"Reminders sent today ({total}):", ""]
+    for i, (name, n) in enumerate(sorted(delivered.items()), 1):
+        if i > 30:
+            lines.append(f"...and {len(delivered) - 30} more parties")
+            break
+        lines.append(f"{i}. {name}" + (f" (x{n})" if n > 1 else ""))
+    tail = []
+    if queued:
+        tail.append(f"{queued} more waiting to send")
+    if failed:
+        tail.append(f"{failed} could not be sent")
+    if tail:
+        lines.append("\n" + ", ".join(tail) + ".")
+    return "\n".join(lines)
 
 
 async def _handle_owner_msg(business: dict, rest: str) -> str:
