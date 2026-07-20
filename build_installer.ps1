@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 Set-Location $root
 
-Write-Host "==> [1/4] Building the Tally reader (PyInstaller)..." -ForegroundColor Cyan
+Write-Host "==> [1/5] Building the Tally reader (PyInstaller)..." -ForegroundColor Cyan
 $py = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { $py = "python" }
 & $py -m pip install pyinstaller --quiet
@@ -33,16 +33,38 @@ if (-not (Test-Path "$root\dist_agent\asva-agent.exe")) {
     throw "PyInstaller did not produce dist_agent\asva-agent.exe"
 }
 
-Write-Host "==> [2/4] WhatsApp service dependencies (production only)..." -ForegroundColor Cyan
+Write-Host "==> [2/5] WhatsApp service dependencies (production only)..." -ForegroundColor Cyan
 Push-Location "$root\wa_service"
 npm install --omit=dev --no-audit --no-fund
 Pop-Location
 
-Write-Host "==> [3/4] Desktop app dependencies..." -ForegroundColor Cyan
+Write-Host "==> [3/5] Desktop app dependencies..." -ForegroundColor Cyan
 Push-Location "$root\desktop"
 npm install --no-audit --no-fund
 
-Write-Host "==> [4/4] Packaging the installer (electron-builder)..." -ForegroundColor Cyan
+# electron-builder fetches a code-signing bundle that contains macOS symlinks
+# (libcrypto.dylib / libssl.dylib). Windows refuses to create symlinks without
+# Developer Mode or Administrator, so the build dies with "A required privilege
+# is not held by the client" - even though those macOS files are useless here.
+# Prime the cache ourselves, excluding darwin, so a normal user can build.
+Write-Host "==> [4/5] Preparing the signing cache (skipping macOS files)..." -ForegroundColor Cyan
+$signCache = "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign"
+$signDir = "$signCache\winCodeSign-2.6.0"
+if (-not (Test-Path "$signDir\rcedit-x64.exe")) {
+    New-Item -ItemType Directory -Force $signCache | Out-Null
+    $archive = "$signCache\winCodeSign-2.6.0.7z"
+    if (-not (Test-Path $archive)) {
+        Invoke-WebRequest -UseBasicParsing -OutFile $archive `
+            -Uri "https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z"
+    }
+    if (Test-Path $signDir) { Remove-Item $signDir -Recurse -Force }
+    & "$root\desktop\node_modules\7zip-bin\win\x64\7za.exe" x -bd -y "-o$signDir" $archive "-x!darwin" | Out-Null
+    Write-Host "    signing cache ready."
+} else {
+    Write-Host "    already cached."
+}
+
+Write-Host "==> [5/5] Packaging the installer (electron-builder)..." -ForegroundColor Cyan
 npm run dist
 Pop-Location
 
