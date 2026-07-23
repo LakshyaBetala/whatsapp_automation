@@ -16,7 +16,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.config import settings
 from app.db import get_client
 from app.jobs import (eod_digest, keepalive, monitor, outbox_sweep,
-                      reminder_sweep, subscription_check)
+                      reminder_checkpoint, reminder_sweep, subscription_check)
 from app.services import monitoring
 
 log = logging.getLogger(__name__)
@@ -76,6 +76,19 @@ def start() -> AsyncIOScheduler:
         )
     else:
         log.info("Reminder sweep DISABLED (ENABLE_REMINDER_SWEEP=false)")
+
+    # Morning checkpoint: an hour before each business's reminder_hour, preview
+    # today's reminder list to the owner so they can HOLD anyone already paid.
+    # Hourly; each business fires once/day at its own checkpoint hour (dedup via
+    # checkpoint_date). Rides on the same deployment as the sweep.
+    if settings.enable_reminder_checkpoint and settings.enable_reminder_sweep:
+        sched.add_job(
+            _tracked("reminder_checkpoint", reminder_checkpoint.run),
+            CronTrigger(minute=settings.reminder_sweep_minute),
+            id="reminder_checkpoint",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
 
     # Subscription lifecycle: warn before expiry, flip to grace/suspended.
     if settings.enable_subscription_check:

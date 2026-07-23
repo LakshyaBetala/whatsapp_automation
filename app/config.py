@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Release version of THIS build. Bump on every shipped zip. The dashboard
     # compares it against the newest row in app_releases (Supabase) and shows
     # an update banner when a newer version exists - Tally-style update notice.
-    app_version: str = "1.6.0"
+    app_version: str = "1.7.0"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
@@ -108,6 +108,13 @@ class Settings(BaseSettings):
     enforce_send_window: bool = True
     send_window_start_hour: int = 9      # inclusive
     send_window_end_hour: int = 19       # exclusive (last send before 7pm)
+
+    # --- Morning pre-reminder checkpoint (Option A: hold + nudge, never mark paid) ---
+    # Before the sweep sends, ASVA messages the owner today's reminder list so they
+    # can HOLD anyone who already paid (reply PAID <n|name>). Fires this many hours
+    # before each business's reminder_hour, giving the owner a window to reply.
+    enable_reminder_checkpoint: bool = True
+    checkpoint_lead_hours: int = 1
 
     # --- Monitoring + email alerts (operator health center) ---
     # The watchdog job builds a health snapshot every few minutes and emails the

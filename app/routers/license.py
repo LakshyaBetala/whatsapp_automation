@@ -14,7 +14,7 @@ import logging
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
@@ -37,6 +37,33 @@ def _require_admin(admin_key: Optional[str]) -> None:
                             detail="Renewal is disabled: set ADMIN_API_KEY in the server .env first.")
     if not admin_key or not secrets.compare_digest(admin_key, configured):
         raise HTTPException(status_code=401, detail="Invalid admin key")
+
+
+async def _send_welcome(business_id: str, owner_name: str | None, code_display: str) -> None:
+    """Best-effort: greet a newly onboarded owner on WhatsApp (from the bot
+    number) and hand them their setup code + download link, so onboarding starts
+    the instant they are added. Never fails the create-business request."""
+    from app.services import whatsapp
+    name = (owner_name or "").strip()
+    body = (
+        f"Namaste{', ' + name if name else ''}. I am ASVA, your new collections assistant.\n\n"
+        "From today I will read your TallyPrime and send your bills and payment reminders "
+        "on WhatsApp from your own number, so you get paid faster without chasing anyone. "
+        "Each evening I will send you a short summary, and you can ask me anything right here.\n\n"
+        "Let's get you set up. Your setup code is:\n"
+        f"{code_display}\n"
+        "(valid 24 hours, one use)\n\n"
+        "On your Tally computer:\n"
+        "1. Open tryasva.com/download and install ASVA.\n"
+        "2. Type this code when it asks.\n"
+        "3. Pick your company and scan your WhatsApp.\n\n"
+        "That is all, about five minutes. Reply HELP any time to see what I can do."
+    )
+    try:
+        await whatsapp.notify_owner(business_id, body)
+        log.info("Sent welcome + setup code to owner of business %s", business_id)
+    except Exception:
+        log.exception("welcome message failed (business %s)", business_id)
 
 
 class HeartbeatPayload(BaseModel):
@@ -108,7 +135,7 @@ class CreateBizPayload(BaseModel):
 
 
 @router.post("/create-business")
-async def create_business(payload: CreateBizPayload):
+async def create_business(payload: CreateBizPayload, background_tasks: BackgroundTasks):
     """OPS ONLY: onboard a new shop. Creates the business row and mints its
     agent_token + licence key + first paid cycle, and returns them so the
     operator can drop the token into the new shop's config. The agent_token is
@@ -132,6 +159,11 @@ async def create_business(payload: CreateBizPayload):
         code = pairing.mint(db, biz["id"], note="new-business")
     except Exception:
         log.exception("pairing code mint failed (continuing; token still returned)")
+    # Greet the new owner on WhatsApp and hand them the setup code, in the
+    # background so the operator's Create response stays instant.
+    if code:
+        background_tasks.add_task(_send_welcome, biz["id"],
+                                  biz.get("owner_name"), code["code_display"])
     log.info("Onboarded business %s (%s)", biz.get("id"), biz.get("business_name"))
     return {
         "ok": True,
@@ -220,8 +252,10 @@ async def mint_code(payload: MintCodePayload):
          .eq("id", payload.business_id).limit(1).execute()).data
     if not r:
         raise HTTPException(status_code=404, detail="Business not found")
-    out = pairing.mint(db, payload.business_id,
-                       ttl_hours=payload.ttl_hours, note=payload.note or "re-pair")
+    # Idempotent: reuse the business's current live code if it still has one, so
+    # pressing "Get code" repeatedly shows the SAME code instead of a new pile.
+    out = pairing.active_code(db, payload.business_id) or pairing.mint(
+        db, payload.business_id, ttl_hours=payload.ttl_hours, note=payload.note or "re-pair")
     return {"ok": True, "business_id": payload.business_id,
             "business_name": r[0].get("business_name") or "", **out}
 

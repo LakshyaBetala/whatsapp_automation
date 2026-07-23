@@ -67,6 +67,12 @@ def log_and_print(msg: str, is_error=False):
         logging.info(msg)
         print(msg)
 
+# Identifiable User-Agent on every call to the ASVA server. Without it,
+# Cloudflare's bot check bans the request (HTTP 403, "error code: 1010") and the
+# whole thin client silently stops working. See tally_agent/pair.py.
+USER_AGENT = "Mozilla/5.0 (compatible; ASVA-Agent/1.6.0; +https://tryasva.com)"
+
+
 async def post_to_tally(host: str, port: int, payload: str, timeout: float = 180.0) -> bytes:
     url = f"http://{host}:{port}"
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -84,7 +90,7 @@ async def check_pending_refresh(config: dict) -> bool:
     try:
         base = config['backend_url'].rstrip('/')
         params = {"business_id": config['business_id'], "agent_token": config['agent_token']}
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
             resp = await client.get(f"{base}/tally/pending-refresh", params=params)
             resp.raise_for_status()
             return bool(resp.json().get("requested"))
@@ -96,7 +102,8 @@ async def send_to_backend(url: str, endpoint: str, token: str, payload: dict):
     full_url = f"{url.rstrip('/')}/{endpoint.lstrip('/')}"
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
     }
     async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(full_url, json=payload, headers=headers)
@@ -128,7 +135,7 @@ async def _drain_once(config: dict) -> int:
     token = config["agent_token"]
     wa = _shop_wa_url(config)
     sent = 0
-    async with httpx.AsyncClient(timeout=60.0) as http:
+    async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}) as http:
         r = await http.post(f"{base}/license/outbox/pull",
                             json={"agent_token": token, "limit": 10})
         if r.status_code != 200:
@@ -687,7 +694,7 @@ async def run_add_company(config: dict, name: str):
         log_and_print(f"Could not verify against Tally ({e}) - continuing.", is_error=True)
 
     base = config['backend_url'].rstrip('/')
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}) as client:
         resp = await client.post(f"{base}/tally/companies/register", json={
             "account_token": config['agent_token'],
             "company_name": name,
@@ -764,6 +771,120 @@ def _cli_set_company(name: str) -> None:
     _emit({"ok": True, "company_name": name})
 
 
+def _cli_diagnose() -> None:
+    """Self-diagnosis for the setup wizard / dashboard. Prints ONE JSON line:
+    {ok, checks:[{name, ok, detail}]}. Each red check carries a plain-language
+    fix, so the owner (or the operator, remotely) can see exactly what is wrong
+    instead of guessing. This is the tool that turns 'it doesn't work' into 'the
+    server is unreachable' or 'Tally is closed'."""
+    import json as _json
+    import os as _os
+    from urllib import error as _er
+    from urllib import request as _rq
+    try:
+        from pair import DEFAULT_BACKEND, USER_AGENT, default_config_path
+    except ImportError:
+        from tally_agent.pair import DEFAULT_BACKEND, USER_AGENT, default_config_path
+
+    checks = []
+
+    def add(name, ok, detail=""):
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    def _get(url, timeout=12):
+        return _rq.urlopen(_rq.Request(url, headers={"User-Agent": USER_AGENT}), timeout=timeout)
+
+    # 1. Paired?
+    cfg = {}
+    path = default_config_path()
+    if _os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                cfg = _json.load(f) or {}
+        except Exception:
+            cfg = {}
+    paired = bool(cfg.get("agent_token") and cfg.get("business_id"))
+    add("Set up (paired to your shop)", paired,
+        "" if paired else "Not set up yet - enter your setup code.")
+
+    backend = (cfg.get("backend_url") or DEFAULT_BACKEND).rstrip("/")
+    token = cfg.get("agent_token") or ""
+    company = cfg.get("company_name") or ""
+    tally_host = cfg.get("tally_host") or "localhost"
+    tally_port = int(cfg.get("tally_port") or 9000)
+
+    # 2. Server reachable? (names the two field failures: firewall block / offline)
+    server_ok = False
+    try:
+        server_ok = _get(f"{backend}/health").status == 200
+        add("ASVA server reachable", server_ok,
+            "" if server_ok else "The server answered but is not healthy.")
+    except _er.HTTPError as e:
+        low = b""
+        try:
+            low = e.read()
+        except Exception:
+            pass
+        low = low.decode("utf-8", "replace").lower()
+        if e.code == 403 or "1010" in low:
+            add("ASVA server reachable", False,
+                "Blocked by the firewall (bot check). Ask your ASVA contact to allow the app.")
+        elif "1033" in low or e.code >= 520:
+            add("ASVA server reachable", False,
+                "Server is offline or restarting. Try again in a minute.")
+        else:
+            add("ASVA server reachable", False, f"Server said {e.code}.")
+    except Exception:
+        add("ASVA server reachable", False,
+            "No internet on this computer, or the server address is wrong.")
+
+    # 3. Token accepted?
+    if paired and server_ok:
+        try:
+            ok = _get(f"{backend}/license/status?token={token}").status == 200
+            add("Your shop is recognised", ok,
+                "" if ok else "Re-pair with a fresh code.")
+        except _er.HTTPError as e:
+            add("Your shop is recognised", False,
+                "Token not accepted - re-pair with a fresh code." if e.code == 401
+                else f"Server said {e.code}.")
+        except Exception:
+            add("Your shop is recognised", False, "Could not check right now.")
+
+    # 4. Tally open + right company?
+    try:
+        try:
+            from tally_agent import tally_xml
+        except ImportError:
+            import tally_xml
+        body = tally_xml.build_company_list_query().encode("utf-8")
+        req = _rq.Request(f"http://{tally_host}:{tally_port}", data=body,
+                          headers={"Content-Type": "text/xml"}, method="POST")
+        raw = _rq.urlopen(req, timeout=12).read()
+        companies = tally_xml.parse_companies(tally_xml.sanitize_xml(raw))
+        add("TallyPrime is open", True, "")
+        if company:
+            match = company in companies
+            add("Your company is loaded", match, "" if match else
+                f"'{company}' is not open. Open now: {', '.join(companies) or 'none'}.")
+    except Exception:
+        add("TallyPrime is open", False,
+            "Open TallyPrime and turn on its HTTP server (port 9000).")
+
+    # 5. Shop WhatsApp linked?
+    try:
+        wa = str(cfg.get("shop_wa_url") or "http://localhost:3001").rstrip("/")
+        d = _json.loads(_rq.urlopen(_rq.Request(f"{wa}/api/wa/status"), timeout=8)
+                        .read().decode("utf-8", "replace"))
+        ready = bool(d.get("ready"))
+        add("Shop WhatsApp connected", ready,
+            "" if ready else "Scan the QR to link your shop's WhatsApp.")
+    except Exception:
+        add("Shop WhatsApp connected", False, "WhatsApp is not running yet.")
+
+    _emit({"ok": all(c["ok"] for c in checks), "checks": checks})
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tally Sync Agent")
     parser.add_argument('--import-masters', action='store_true', help='Run one-time import of all debtors')
@@ -778,6 +899,7 @@ def main():
     parser.add_argument('--list-companies-json', action='store_true', help='Print Tally companies as JSON (setup wizard)')
     parser.add_argument('--set-company', metavar='NAME', help='Save the chosen Tally company (setup wizard)')
     parser.add_argument('--drain-outbox', action='store_true', help='Deliver queued customer sends from this shop\'s WhatsApp (thin client)')
+    parser.add_argument('--diagnose', action='store_true', help='Check server/Tally/WhatsApp connectivity and print JSON (setup wizard / doctor)')
     parser.add_argument('--backend', metavar='URL', help='Server URL to pair against')
     parser.add_argument('--tally-host', default='localhost')
     parser.add_argument('--tally-port', default=9000)
@@ -793,6 +915,8 @@ def main():
         return _cli_list_companies(args.tally_host, args.tally_port)
     if args.set_company:
         return _cli_set_company(args.set_company)
+    if args.diagnose:
+        return _cli_diagnose()
 
     if not (args.import_masters or args.sync or args.watch or args.check_outstanding
             or args.refresh_outstanding or args.companies or args.add_company

@@ -23,6 +23,7 @@ from datetime import date
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan, plan_has_bot
+from app.services import checkpoint
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
 from app.services.templates import apply_discount, inr
@@ -50,6 +51,31 @@ log = logging.getLogger(__name__)
 # Greeting / help keywords that should ALWAYS get a reply, even from a number
 # we do not recognise (so a new customer or a pilot tester is never ghosted).
 _GREETING = ("HI", "HELLO", "HELP", "MENU", "START", "?", "HEY", "NAMASTE")
+
+
+def _checkpoint_hold(db, business_id: str, cp: dict, arg: str) -> str | None:
+    """Hold a party in today's morning checkpoint by number (1-based) or name.
+    Returns a reply, or None if the arg names no party in today's list (the
+    caller then treats the message as a normal PAID)."""
+    items = cp.get("items") or []
+    target = None
+    if arg.isdigit():
+        i = int(arg)
+        if 1 <= i <= len(items):
+            target = items[i - 1]
+    else:
+        low = arg.lower()
+        matches = [it for it in items if low in str(it.get("name", "")).lower()]
+        if len(matches) == 1:
+            target = matches[0]
+        elif len(matches) > 1:
+            names = ", ".join(it["name"] for it in matches[:5])
+            return f"'{arg}' matches more than one: {names}. Reply PAID with the number instead."
+    if not target:
+        return None
+    checkpoint.hold(db, business_id, target["id"])
+    return (f"Held {target['name']}, I will not remind them today.\n"
+            f"Please enter their payment in Tally so your books stay correct.")
 
 
 def _last10(n: str) -> str:
@@ -148,6 +174,28 @@ async def handle(
         if media_b64:
             return await _handle_photo_bill(business, media_b64, media_type)
 
+        # ── Morning checkpoint replies (only while today's preview is live) ──
+        #    Placed ABOVE the photo-bill "OK" so OK / HOLD / PAID <n> answer the
+        #    morning list when one is live; otherwise they fall through (photo
+        #    confirm and the normal PAID still work; YES/HAAN always confirm a
+        #    photo). A PAID naming no listed party also falls through.
+        if upper in ("OK", "SEND", "SEND ALL", "HOLD", "HOLD ALL", "PAUSE", "RUKO") \
+                or upper.startswith("PAID "):
+            _cp = checkpoint.get_today(db, business_id)
+            if _cp is not None:
+                if upper.startswith("PAID "):
+                    arg = re.match(r"PAID\s+(.+)", text.strip(), re.IGNORECASE).group(1).strip()
+                    reply = _checkpoint_hold(db, business_id, _cp, arg)
+                    if reply:
+                        return reply
+                elif upper in ("HOLD", "HOLD ALL", "PAUSE", "RUKO"):
+                    n = checkpoint.hold_all(db, business_id)
+                    return (f"Held all {n} reminders for today. Nothing will go out; "
+                            f"they come back tomorrow." if n
+                            else "There is nothing queued to hold today.")
+                else:   # OK / SEND
+                    return "Okay, I will send today's reminders as planned. I'll summarise tonight."
+
         # ── Photo-bill confirmation / correction commands ─────────────
         if upper in ("YES", "HAAN", "HA", "OK", "CONFIRM"):
             return await _confirm_photo_bill(business)
@@ -233,42 +281,29 @@ async def handle(
                 business_id, business.get("business_name", ""), from_number, team_match.group(1).strip())
 
         # ── HELP / unrecognised ──────────────────────────────────────
-        # For 20-70 year old shop owners: 7 commands, one simple example each,
-        # clear separators, plain words. "Ramesh" is only an example name.
+        # For 20-70 year old shop owners: grouped by intent, one bold example
+        # per command, plain words, WhatsApp *bold* headers. "Ramesh" is only an
+        # example name. Tight on purpose: every real command, no wall of dashes.
         prefix = ("" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START")
-                  else "Sorry, I did not understand that.\nHere is what I can do:\n\n")
-        line = "------------------------"
+                  else "Sorry, I did not understand that. Here is what I can do:\n\n")
         return (
             prefix
-            + "ASVA - your collection helper.\n"
-            "Type a command with your party's name.\n"
-            "(Below \"Ramesh\" is only an example.)\n\n"
-            f"{line}\n"
-            "LIST\n"
-            "See everyone who owes you.\n"
-            f"{line}\n"
-            "CHECK Ramesh\n"
-            "See one party's balance.\n"
-            f"{line}\n"
-            "REMIND Ramesh\n"
-            "Send a payment reminder now.\n"
-            f"{line}\n"
-            "BILL Ramesh 12500\n"
-            "Add a new bill. Or send a photo of it.\n"
-            f"{line}\n"
-            "PAID Ramesh\n"
-            "Mark a payment as received.\n"
-            f"{line}\n"
-            "STOP Ramesh\n"
-            "Stop reminders. START to resume.\n"
-            f"{line}\n"
-            "DIGEST\n"
-            "Get today's summary now.\n"
-            f"{line}\n"
-            "SENT\n"
-            "See who got reminders today.\n"
-            f"{line}\n\n"
-            "Need help? Type: TEAM your message"
+            + "*ASVA*, your collection helper.\n"
+            "Send a command with a party's name. Ramesh below is only an example.\n\n"
+            "*SEE YOUR MONEY*\n"
+            "*LIST*: everyone who owes you\n"
+            "*CHECK Ramesh*: one party's balance\n"
+            "*DIGEST*: today's summary\n"
+            "*SENT*: who was reminded today\n\n"
+            "*GET PAID*\n"
+            "*REMIND Ramesh*: remind one party now\n"
+            "*REMIND TOP 10*: chase the 10 biggest\n"
+            "*BILL Ramesh 12500*: add a bill, or send its photo\n"
+            "*PAID Ramesh*: mark a payment received\n\n"
+            "*MANAGE A PARTY*\n"
+            "*STOP Ramesh*: pause reminders (START to resume)\n"
+            "*TERMS Ramesh 45*: set credit days\n\n"
+            "Need help? Send *TEAM* with your message."
         )
 
     # ── Customer message (not owner) ──────────────────────────────────

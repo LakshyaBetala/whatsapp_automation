@@ -28,7 +28,7 @@ from decimal import Decimal
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
-from app.services import whatsapp
+from app.services import checkpoint, whatsapp
 from app.services.templates import inr
 
 log = logging.getLogger(__name__)
@@ -293,6 +293,10 @@ async def run() -> None:
         log.info("Reminder sweep - nothing to do (no active businesses)")
         return
 
+    # Parties the owner HELD in this morning's checkpoint (already paid). One
+    # query, tolerant of a missing migration 027 -> {} (checkpoint off).
+    held = checkpoint.held_sets(db, list(businesses.keys()))
+
     # ── Fetch ALL open bills with client data in one query ────────────
     bills_resp = (
         db.table("bills")
@@ -340,6 +344,10 @@ async def run() -> None:
     for (biz_id, client_id), p in parties.items():
         try:
             biz, client = p["biz"], p["client"]
+            # Owner held this party in this morning's checkpoint (already paid).
+            if client_id in held.get(biz_id, set()):
+                skipped += 1
+                continue
             if cap > 0 and sent_per_biz.get(biz_id, 0) >= cap:
                 skipped += 1
                 continue

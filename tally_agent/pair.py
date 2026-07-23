@@ -26,6 +26,15 @@ DEFAULT_BACKEND = "https://app.tryasva.com"
 DEFAULT_TALLY_HOST = "localhost"
 DEFAULT_TALLY_PORT = 9000
 
+# A real, identifiable User-Agent on every call to the server. Cloudflare's
+# Browser Integrity Check / Bot Fight Mode bans the default "Python-urllib/x"
+# signature (HTTP 403, "error code: 1010"), which silently breaks EVERY
+# agent->server request: pairing, sync, outbox, heartbeat. The
+# "Mozilla/5.0 (compatible; ...)" form is the well-behaved-bot convention: it
+# passes the browser check yet still names us honestly. Keep in sync with
+# tally_agent/agent.py and desktop/main.js.
+USER_AGENT = "Mozilla/5.0 (compatible; ASVA-Agent/1.6.0; +https://tryasva.com)"
+
 
 class PairError(Exception):
     """Pairing failed, with a message safe to show the shop owner as-is."""
@@ -40,18 +49,42 @@ def default_config_path() -> str:
 
 
 def _detail_from_http_error(err: urllib.error.HTTPError) -> str:
-    """FastAPI puts the human message in {"detail": ...}; fall back to a plain
-    sentence rather than leaking a stack trace at a shopkeeper."""
+    """Turn an HTTP error into ONE plain sentence the shop owner can act on.
+
+    The old version collapsed every non-400 into "could not complete setup",
+    which hid the two failures we actually hit in the field: Cloudflare blocking
+    the agent (403 / "error code: 1010") and the server being unreachable
+    (Cloudflare 5xx / "error code: 1033"). Naming them saves an hour of blind
+    guessing."""
+    raw = b""
     try:
-        body = json.loads(err.read().decode("utf-8", "replace"))
-        detail = body.get("detail")
+        raw = err.read()
+    except Exception:
+        pass
+    text = raw.decode("utf-8", "replace")
+    low = text.lower()
+    code = getattr(err, "code", 0) or 0
+
+    # FastAPI's own message, when the request actually reached the app.
+    try:
+        detail = json.loads(text).get("detail")
         if isinstance(detail, str) and detail.strip():
             return detail.strip()
     except Exception:
         pass
-    if err.code == 400:
+
+    if code == 400:
         return "That code is not valid. Please check it and try again."
-    return "The server could not complete setup. Please try again."
+    if code == 403 or "1010" in low:
+        return ("A firewall blocked the app before it reached ASVA. Your code is "
+                "fine - ask your ASVA contact to allow the app, then press Connect "
+                "again.")
+    if code in (502, 503, 504) or code >= 520 or "1033" in low:
+        return ("Cannot reach the ASVA server right now - it may be offline or "
+                "restarting. Wait a minute and press Connect again.")
+    if code >= 500:
+        return "The server hit an error finishing setup. Please try again in a moment."
+    return f"Setup could not complete (server said {code}). Please try again."
 
 
 def redeem(code: str, backend_url: str = DEFAULT_BACKEND, timeout: int = 30) -> dict:
@@ -63,15 +96,18 @@ def redeem(code: str, backend_url: str = DEFAULT_BACKEND, timeout: int = 30) -> 
     payload = json.dumps({"code": cleaned}).encode("utf-8")
     req = urllib.request.Request(
         f"{base}/license/pair", data=payload,
-        headers={"Content-Type": "application/json"}, method="POST")
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.load(resp)
     except urllib.error.HTTPError as e:
         raise PairError(_detail_from_http_error(e))
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise PairError("Could not reach the ASVA server. Check this computer's "
+                        "internet connection and try again.")
     except Exception:
-        raise PairError("Could not reach the ASVA server. Check the internet "
-                        "connection and try again.")
+        raise PairError("Setup could not complete. Please try again.")
     if not data.get("agent_token") or not data.get("business_id"):
         raise PairError("Setup did not complete. Please ask for a fresh code.")
     return data

@@ -425,10 +425,19 @@ function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'
 const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Basic',growth:'Growth',pro:'Pro',max:'Custom'};
 let PUBLIC_URL='';
 
+// A failed data/health fetch is one of two things. A 401/403 means the operator key
+// went stale (a redeploy rotates it), so bounce to the key screen where a single
+// re-entry fixes it - not the old dead-end "reload with the key" that just kept
+// failing. Anything else is a transient blip the 30s auto-refresh clears on its own.
+function fetchFailed(r,label){
+  if(r.status===401||r.status===403){ location.href='/ops'; return; }
+  document.getElementById('msg').textContent=(label||'Data')+' is slow right now. Retrying...';
+}
+
 async function load(){
   try{
     const r = await fetch('/ops/data?key='+encodeURIComponent(KEY));
-    if(!r.ok){document.getElementById('msg').textContent='Session error - reload with the key.';return;}
+    if(!r.ok){ fetchFailed(r,'Command Center'); return; }
     const d = await r.json();
     PUBLIC_URL = d.public_url || '';
     document.getElementById('sv').textContent = d.server_version;
@@ -563,7 +572,7 @@ function sysCard(icon,label,state,cls){return '<div class="c"><div class="big '+
 async function loadHealth(){
   try{
     const r=await fetch('/ops/health?key='+encodeURIComponent(KEY));
-    if(!r.ok){document.getElementById('msg').textContent='Session error - reload with the key.';return;}
+    if(!r.ok){ fetchFailed(r,'Health'); return; }
     const d=await r.json();
     const sy=d.system||{}, bw=sy.bot_wa||{};
     const bot = !bw.configured ? ['not set','unk'] : (bw.ok ? ['Connected','ok'] : ['DOWN','down']);

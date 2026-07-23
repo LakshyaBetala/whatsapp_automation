@@ -74,6 +74,22 @@ def mint(db, business_id: str, ttl_hours: int = DEFAULT_TTL_HOURS,
     raise RuntimeError(f"could not mint a pairing code ({last_err})")
 
 
+def active_code(db, business_id: str) -> dict | None:
+    """The newest still-valid (unused, unexpired) code for this business, or
+    None. This is what makes 'Get code' idempotent: pressing it again returns
+    the SAME code instead of piling up a fresh one each time - a code is a
+    bearer credential, so we hand out the fewest that are live at once."""
+    r = (db.table("pairing_codes").select("code, expires_at")
+         .eq("business_id", business_id).is_("used_at", "null")
+         .gt("expires_at", _now().isoformat())
+         .order("created_at", desc=True).limit(1).execute()).data
+    if not r:
+        return None
+    c = r[0]
+    return {"code": c["code"], "code_display": format_code(c["code"]),
+            "expires_at": c["expires_at"]}
+
+
 def redeem(db, raw_code: str) -> dict:
     """Consume a code (single use) and return the bound business's identity,
     including its secret agent_token. Raises PairingError on any problem."""

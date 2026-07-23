@@ -19,9 +19,20 @@ echo "    (keeping .env, downloads/, and the WhatsApp session)"
 unzip -o "$ZIP" -x ".env" "downloads/*" "wa_service/.baileys_auth/*" -d "$HERE"
 ./.venv/bin/pip install -r requirements.txt --quiet
 sudo systemctl restart asva-backend asva-bot
-sleep 4
-if curl -fsS http://localhost:8000/health; then
-  echo; echo "==> Updated and restarted."
+
+# The backend takes ~8-12s to boot (imports + Supabase connect + scheduler), so
+# POLL /health for up to 40s instead of giving one premature 4-second verdict
+# (that produced a scary but false "not answering" every update).
+echo -n "==> Waiting for the backend to come up"
+ok=0
+for _ in $(seq 1 20); do
+  if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then ok=1; break; fi
+  echo -n "."; sleep 2
+done
+echo
+if [ "$ok" = "1" ]; then
+  curl -fsS http://localhost:8000/health; echo
+  echo "==> Updated and restarted."
 else
-  echo; echo "!! Backend not answering - check: journalctl -u asva-backend -n 60 --no-pager"
+  echo "!! Backend still not answering after 40s - check: journalctl -u asva-backend -n 60 --no-pager"
 fi

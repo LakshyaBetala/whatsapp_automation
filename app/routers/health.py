@@ -9,7 +9,7 @@ from app.db import get_client
 router = APIRouter(tags=["ops"])
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 def health():
     db_ok = False
     if get_client() is not None:

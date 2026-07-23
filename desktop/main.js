@@ -10,6 +10,9 @@ const path = require('path');
 const fs = require('fs');
 
 const REPO = path.join(__dirname, '..'); // desktop/ lives inside the repo root
+// Identifiable User-Agent so Cloudflare's bot check never blocks the app's own
+// calls to the server (heartbeat, health, reload). Matches tally_agent.
+const USER_AGENT = 'Mozilla/5.0 (compatible; ASVA-Desktop/1.6.0; +https://tryasva.com)';
 let mainWindow = null;
 let tray = null;
 app.isQuitting = false;
@@ -298,7 +301,7 @@ function stopAll() {
 function ping(url, cb) {
   let req;
   try {
-    req = http.get(url, { timeout: 2500 }, (res) => {
+    req = http.get(url, { timeout: 2500, headers: { 'User-Agent': USER_AGENT } }, (res) => {
       let body = '';
       res.on('data', (d) => (body += d));
       res.on('end', () => cb(res.statusCode === 200, body));
@@ -318,7 +321,7 @@ function httpPostJson(url, bodyObj, cb) {
     req = http.request({
       hostname: u.hostname, port: u.port || 80, path: u.pathname + u.search,
       method: 'POST', timeout: 8000,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length, 'User-Agent': USER_AGENT },
     }, (res) => {
       let body = '';
       res.on('data', (d) => (body += d));
@@ -483,6 +486,8 @@ ipcMain.handle('tally-reload', () => new Promise((resolve) => {
 // ── Setup wizard IPC ──────────────────────────────────────────────────────
 ipcMain.handle('pair-redeem', (e, code) => runAgent(['--pair', String(code || '').trim()]));
 ipcMain.handle('pair-companies', () => runAgent(['--list-companies-json']));
+// Connection doctor - runs the agent's --diagnose and returns its JSON verdict.
+ipcMain.handle('run-diagnose', () => runAgent(['--diagnose'], 40000));
 ipcMain.handle('pair-finish', async (e, company) => {
   if (company) {
     const r = await runAgent(['--set-company', String(company)]);

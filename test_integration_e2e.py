@@ -55,6 +55,9 @@ class _Q:
     def neq(self, f, v):
         self._filters.append(("neq", f, v)); return self
 
+    def gt(self, f, v):
+        self._filters.append(("gt", f, v)); return self
+
     def order(self, *a, **k):
         return self
 
@@ -74,6 +77,8 @@ class _Q:
             if op == "neq" and r.get(f) == v:
                 return False
             if op == "in" and r.get(f) not in v:
+                return False
+            if op == "gt" and not (r.get(f) is not None and str(r.get(f)) > str(v)):
                 return False
             if op == "is" and v == "null" and r.get(f) is not None:
                 return False
@@ -114,6 +119,9 @@ class FakeDB:
 @pytest.fixture
 def client(monkeypatch):
     db = FakeDB()
+    async def _noop_welcome(*a, **k):   # don't hit real WhatsApp/DB in tests
+        return None
+    monkeypatch.setattr(lic_mod, "_send_welcome", _noop_welcome)
     monkeypatch.setattr(lic_mod, "require_db", lambda: db)
     monkeypatch.setattr(ops_mod, "require_db", lambda: db)
     monkeypatch.setattr(dl_mod, "get_client", lambda: db)
@@ -174,7 +182,9 @@ def test_repair_existing_business_keeps_the_same_identity(client):
         "admin_key": ADMIN, "business_id": first["business_id"]})
     assert r.status_code == 200
     recode = r.json()["code"]
-    assert recode != first["pairing_code"]
+    # Idempotent Get-code: while the first code is still valid and unused, "Get
+    # code" hands back the SAME one rather than piling up new codes.
+    assert recode == first["pairing_code"]
 
     r = client.post("/license/pair", json={"code": recode})
     assert r.status_code == 200

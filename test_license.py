@@ -176,11 +176,12 @@ def test_create_business_rejects_bad_input():
 def test_create_business_endpoint_admin_gate(monkeypatch):
     import asyncio
     from app.routers import license as lr
-    from fastapi import HTTPException
+    from fastapi import BackgroundTasks, HTTPException
     monkeypatch.setattr(lr.settings, "admin_api_key", "s3cret")
     try:
         asyncio.run(lr.create_business(lr.CreateBizPayload(
-            admin_key="wrong", owner_name="x", whatsapp_number="9876543210")))
+            admin_key="wrong", owner_name="x", whatsapp_number="9876543210"),
+            BackgroundTasks()))
         assert False, "should have refused"
     except HTTPException as e:
         assert e.status_code == 401
