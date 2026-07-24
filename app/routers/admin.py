@@ -3004,11 +3004,12 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("english"))
 async def admin_accounts(token: str = Query(...), lang: str = Query("english")):
     db = require_db()
     biz = (db.table("businesses")
-           .select("id, business_name, upi_vpa, upi_vpa_2, upi_vpa_3, bank_account_name, bank_account_no, bank_ifsc, bank_name")
+           .select("id, business_name, upi_vpa, upi_vpa_2, upi_vpa_3, bank_account_name, bank_account_no, bank_ifsc, bank_name, share_data")
            .eq("agent_token", token).limit(1).execute())
     if not biz.data:
         raise HTTPException(status_code=401, detail="Invalid token")
     b = biz.data[0]
+    share_on = bool(b.get("share_data", True))
 
     def val(k):
         return (b.get(k) or "").replace('"', "&quot;")
@@ -3037,8 +3038,23 @@ async def admin_accounts(token: str = Query(...), lang: str = Query("english")):
  <div class="hint">UPI na ho to reminder me ye bank details (A/C + IFSC) bheji jayengi.</div>
  <div style="margin-top:18px"><button onclick="save()">Save</button><span id="msg" class="okmsg"></span></div>
 </div>
+<div class="card" style="margin-top:16px;max-width:560px">
+ <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;font-weight:600">
+   <input type="checkbox" id="share" onchange="saveShare()" {'checked' if share_on else ''} style="width:18px;height:18px">
+   Share anonymous payment data
+ </label>
+ <div class="hint" style="margin-top:8px">On by default. ASVA uses payment patterns only, no names and no bill details, to keep improving how it helps every shop. Turn it off and your data is never shared or used for others.<span id="smsg" class="okmsg"></span></div>
+</div>
 <script>
 const TOKEN = {token!r};
+async function saveShare() {{
+  const on = document.getElementById('share').checked;
+  const r = await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{token: TOKEN, share_data: on}})}});
+  const m = document.getElementById('smsg');
+  m.textContent = r.ok ? '  Saved' : '  Failed';
+  setTimeout(() => {{ m.textContent = ''; }}, 2500);
+}}
 async function save() {{
   document.getElementById('msg').textContent = 'Saving...';
   const r = await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
@@ -3070,20 +3086,28 @@ class AccountsPayload(BaseModel):
     bank_account_no: Optional[str] = None
     bank_ifsc: Optional[str] = None
     bank_name: Optional[str] = None
+    share_data: Optional[bool] = None
 
 
 @router.post("/admin/accounts/save")
 async def admin_accounts_save(payload: AccountsPayload):
     biz = _biz_by_token(payload.token)
     db = require_db()
-    update = {
-        "upi_vpa": (payload.upi_vpa or "").strip() or None,
-        "upi_vpa_2": (payload.upi_vpa_2 or "").strip() or None,
-        "upi_vpa_3": (payload.upi_vpa_3 or "").strip() or None,
-        "bank_account_name": (payload.bank_account_name or "").strip() or None,
-        "bank_account_no": (payload.bank_account_no or "").strip() or None,
-        "bank_ifsc": (payload.bank_ifsc or "").strip().upper() or None,
-        "bank_name": (payload.bank_name or "").strip() or None,
+    # Only update the fields actually sent, so the data-sharing toggle (which
+    # posts share_data alone) never wipes the UPI/bank fields, and vice versa.
+    update: dict = {}
+    text_fields = {
+        "upi_vpa": payload.upi_vpa, "upi_vpa_2": payload.upi_vpa_2,
+        "upi_vpa_3": payload.upi_vpa_3, "bank_account_name": payload.bank_account_name,
+        "bank_account_no": payload.bank_account_no, "bank_ifsc": payload.bank_ifsc,
+        "bank_name": payload.bank_name,
     }
-    db.table("businesses").update(update).eq("id", biz["id"]).execute()
+    for k, v in text_fields.items():
+        if v is not None:
+            cleaned = v.strip().upper() if k == "bank_ifsc" else v.strip()
+            update[k] = cleaned or None
+    if payload.share_data is not None:
+        update["share_data"] = bool(payload.share_data)
+    if update:
+        db.table("businesses").update(update).eq("id", biz["id"]).execute()
     return {"ok": True}
