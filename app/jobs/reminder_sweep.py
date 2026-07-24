@@ -309,7 +309,7 @@ async def run() -> None:
         .select(
             "id, invoice_number, amount, outstanding, status, due_date, "
             "invoice_date, business_id, client_id, "
-            "clients(id, name, whatsapp_number, language, reminders_enabled, credit_days, "
+            "clients(id, name, whatsapp_number, language, reminders_enabled, excluded, credit_days, "
             "reminder_batch, reminder_anchor, created_at)"
         )
         .in_("status", ["pending", "partial", "overdue"])
@@ -362,6 +362,10 @@ async def run() -> None:
                 skipped += 1
                 continue
             if not client.get("reminders_enabled", True):
+                skipped += 1
+                continue
+            # Owner put this party on the do-not-chase (excluded) list.
+            if client.get("excluded"):
                 skipped += 1
                 continue
             # Holiday (calendar-marked) pauses the day; catch-up next working day.

@@ -36,7 +36,7 @@ async def _due_parties(db, biz: dict, today: date) -> list[dict]:
     send-hour/cap gating - so the preview is 'who is due today'."""
     bills = (db.table("bills")
              .select("id, outstanding, status, due_date, invoice_date, client_id, "
-                     "clients(id, name, whatsapp_number, reminders_enabled, credit_days, "
+                     "clients(id, name, whatsapp_number, reminders_enabled, excluded, credit_days, "
                      "reminder_anchor, created_at)")
              .in_("status", ["pending", "partial", "overdue"])
              .eq("business_id", biz["id"]).execute()).data or []
@@ -49,7 +49,8 @@ async def _due_parties(db, biz: dict, today: date) -> list[dict]:
     out: list[dict] = []
     for cid, p in parties.items():
         c = p["client"]
-        if not c.get("reminders_enabled", True) or not c.get("whatsapp_number"):
+        if (not c.get("reminders_enabled", True) or c.get("excluded")
+                or not c.get("whatsapp_number")):
             continue
         anchor = None
         araw = c.get("reminder_anchor") or c.get("created_at")

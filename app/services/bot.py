@@ -247,6 +247,14 @@ async def handle(
             client_name = start_match.group(1).strip()
             return await _handle_start(business_id, client_name)
 
+        # ── EXCLUDE / INCLUDE <name> - the do-not-chase list ─────────
+        excl_match = re.match(r"EXCLUDE\s+(.+)", upper)
+        if excl_match:
+            return await _handle_exclude(business_id, excl_match.group(1).strip(), True)
+        incl_match = re.match(r"INCLUDE\s+(.+)", upper)
+        if incl_match:
+            return await _handle_exclude(business_id, incl_match.group(1).strip(), False)
+
         # ── PAID <name> ──────────────────────────────────────────────
         paid_match = re.match(r"PAID\s+(.+)", upper)
         if paid_match:
@@ -313,6 +321,7 @@ async def handle(
             "*CHASE Ramesh*: resume a party on hold\n\n"
             "*MANAGE A PARTY*\n"
             "*STOP Ramesh*: pause reminders (START to resume)\n"
+            "*EXCLUDE Ramesh*: never chase (INCLUDE to undo)\n"
             "*TERMS Ramesh 45*: set credit days\n\n"
             "Need help? Send *TEAM* with your message."
         )
@@ -1499,6 +1508,23 @@ async def _find_client_by_name(business_id: str, name: str) -> dict | None:
     except Exception:
         return None
     return r[0] if r else None
+
+
+async def _handle_exclude(business_id: str, name: str, exclude: bool) -> str:
+    """Move a party on/off the do-not-chase list. Excluded parties get no more
+    reminders and do not appear in the morning 'who to chase' checkpoint."""
+    db = require_db()
+    c = await _find_client_by_name(business_id, name)
+    if not c:
+        return f"No party named '{name}' found. Check the spelling and try again."
+    try:
+        db.table("clients").update({"excluded": bool(exclude)}).eq("id", c["id"]).execute()
+    except Exception:
+        return "Could not update that right now. Please try again."
+    if exclude:
+        return (f"OK. {c['name']} is on your do-not-chase list. No more reminders, "
+                f"and they will not show in your daily list. Send INCLUDE {c['name']} to undo.")
+    return f"OK. {c['name']} is back on. They will be reminded again."
 
 
 async def _handle_chase(business_id: str, name: str) -> str:
