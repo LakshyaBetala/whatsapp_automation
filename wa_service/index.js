@@ -13,15 +13,36 @@
 //   GET  /qr             -> human QR page
 //   POST /api/wa/send    -> { phone, message, pdf_base64?, media_base64?, ... }
 //   inbound messages     -> POST {BACKEND_URL}/webhooks/aisensy, reply on chat
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    makeCacheableSignalKeyStore,
-    fetchLatestBaileysVersion,
-    fetchLatestWaWebVersion,
-    downloadMediaMessage,
-    DisconnectReason,
-} = require('@whiskeysockets/baileys');
+// Baileys v6.7+ is published as an ES module, which a CommonJS require() cannot
+// load (ERR_REQUIRE_ESM - the crash that left WhatsApp stuck on "starting").
+// A dynamic import() loads BOTH an ESM and a CJS build from CommonJS, so this is
+// future-proof against the next packaging change. The symbols are filled in by
+// loadBaileys() before the first socket is created (top of start()).
+let makeWASocket, useMultiFileAuthState, makeCacheableSignalKeyStore,
+    fetchLatestBaileysVersion, fetchLatestWaWebVersion, downloadMediaMessage,
+    DisconnectReason;
+let _baileysReady = false;
+async function loadBaileys() {
+    if (_baileysReady) return;
+    const b = await import('@whiskeysockets/baileys');
+    // ESM build: default export is makeWASocket, named exports on the namespace.
+    // CJS-via-import(): the whole module.exports sits on b.default instead.
+    const cjs = (b.default && typeof b.default === 'object' && b.default.useMultiFileAuthState)
+        ? b.default : null;
+    const src = cjs || b;
+    makeWASocket = cjs ? (cjs.default || cjs.makeWASocket) : (b.default || b.makeWASocket);
+    useMultiFileAuthState = src.useMultiFileAuthState;
+    makeCacheableSignalKeyStore = src.makeCacheableSignalKeyStore;
+    fetchLatestBaileysVersion = src.fetchLatestBaileysVersion;
+    fetchLatestWaWebVersion = src.fetchLatestWaWebVersion;
+    downloadMediaMessage = src.downloadMediaMessage;
+    DisconnectReason = src.DisconnectReason;
+    if (typeof makeWASocket !== 'function') {
+        throw new Error('Baileys loaded but makeWASocket is not a function');
+    }
+    _baileysReady = true;
+    console.log('Baileys loaded via dynamic import.');
+}
 const qrcode = require('qrcode');
 const express = require('express');
 const cors = require('cors');
@@ -247,6 +268,7 @@ async function start() {
     starting = true;
     const myGen = ++gen;   // this socket's generation; stale events are dropped
     try {
+        await loadBaileys();   // dynamic ESM import; idempotent, safe every start()
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
         registered = !!(state.creds && state.creds.registered);
         const version = await waWebVersion();
