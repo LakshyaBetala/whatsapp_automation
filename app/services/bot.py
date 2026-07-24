@@ -23,7 +23,7 @@ from datetime import date
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan, plan_has_bot
-from app.services import checkpoint
+from app.services import checkpoint, promises, replies
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
 from app.services.templates import apply_discount, inr
@@ -274,6 +274,15 @@ async def handle(
         if remind_match:
             return await _handle_remind(business, remind_match.group(1).strip())
 
+        # ── PROMISES - who has claimed payment or promised a date ────
+        if upper in ("PROMISES", "PROMISE"):
+            return await _handle_promises(business_id)
+
+        # ── CHASE <name> - cancel a Promise-to-Pay hold, resume now ──
+        chase_match = re.match(r"CHASE\s+(.+)", upper)
+        if chase_match:
+            return await _handle_chase(business_id, chase_match.group(1).strip())
+
         # ── TEAM / SUPPORT <message> - reach the ASVA product team ───
         team_match = re.match(r"(?:TEAM|SUPPORT|PROBLEM|MADAD)\s+(.+)", text.strip(), re.IGNORECASE)
         if team_match:
@@ -294,12 +303,14 @@ async def handle(
             "*LIST*: everyone who owes you\n"
             "*CHECK Ramesh*: one party's balance\n"
             "*DIGEST*: today's summary\n"
-            "*SENT*: who was reminded today\n\n"
+            "*SENT*: who was reminded today\n"
+            "*PROMISES*: who said they will pay\n\n"
             "*GET PAID*\n"
             "*REMIND Ramesh*: remind one party now\n"
             "*REMIND TOP 10*: chase the 10 biggest\n"
             "*BILL Ramesh 12500*: add a bill, or send its photo\n"
-            "*PAID Ramesh*: mark a payment received\n\n"
+            "*PAID Ramesh*: mark a payment received\n"
+            "*CHASE Ramesh*: resume a party on hold\n\n"
             "*MANAGE A PARTY*\n"
             "*STOP Ramesh*: pause reminders (START to resume)\n"
             "*TERMS Ramesh 45*: set credit days\n\n"
@@ -336,10 +347,6 @@ async def handle(
     ):
         return await _handle_customer_optout(client, from_number)
 
-    # ── Customer says PAID ────────────────────────────────────────────
-    if upper == "PAID" or upper.startswith("PAID"):
-        return await _handle_paid_customer(client)
-
     # ── Customer self-service (keyword-only: this number is ALSO the
     #    shop's normal chat, so the bot must stay silent on normal talk) ─
     if upper in ("HISAB", "HISAAB", "BALANCE", "BAKI", "BAAKI", "1"):
@@ -375,6 +382,21 @@ async def handle(
             "Koi sawaal ho to TEAM likhkar apni baat bhejein.\n"
             "Dukaan tak pahuncha denge."
         )
+
+    # ── Reply capture: payment claims, promises, screenshots ──────────
+    # Reads the reply (keyword fast-path + Gemini), HOLDS reminders on a claim or
+    # a promised date, and nudges the owner to record it in Tally. A misread or a
+    # low-confidence reply is forwarded to the owner, never auto-held. Returns
+    # None to fall through (chatter / nothing we can act on).
+    if settings.enable_promise_capture:
+        captured = await replies.capture_reply(
+            client, text, media_b64=media_b64, media_type=media_type)
+        if captured is not None:
+            return captured
+
+    # Legacy PAID (capture disabled, or nothing captured): notify the owner.
+    if upper == "PAID" or upper.startswith("PAID"):
+        return await _handle_paid_customer(client)
 
     # Stay silent on everything else: a human will reply
     return ""
@@ -1464,6 +1486,55 @@ async def _handle_customer_optout(client: dict, from_number: str) -> str:
                 "You can always talk to the shop directly. Thank you.")
     return ("Theek hai, aapko ab payment reminder nahi bhejenge.\n"
             "Zaroorat ho to dukaan se baat kar sakte hain. Dhanyavaad.")
+
+
+async def _find_client_by_name(business_id: str, name: str) -> dict | None:
+    """Find a client in this business by case-insensitive partial name (owner
+    typed it). Returns the first match, or None."""
+    db = require_db()
+    try:
+        r = (db.table("clients").select("id, name")
+             .eq("business_id", business_id).ilike("name", f"%{name.strip()}%")
+             .limit(3).execute()).data or []
+    except Exception:
+        return None
+    return r[0] if r else None
+
+
+async def _handle_chase(business_id: str, name: str) -> str:
+    """Owner override: cancel a Promise-to-Pay hold and resume reminders now."""
+    db = require_db()
+    c = await _find_client_by_name(business_id, name)
+    if not c:
+        return f"No party named '{name}' found. Check the spelling and try CHASE again."
+    if promises.close_for_client(db, business_id, c["id"], "cancelled"):
+        return f"OK. Reminders for {c['name']} have resumed."
+    return f"{c['name']} is not on a promise hold, so there is nothing to resume."
+
+
+async def _handle_promises(business_id: str) -> str:
+    """Owner view: the open promise-to-pay ledger (who claimed paid / gave a date)."""
+    db = require_db()
+    rows = promises.open_for_business(db, business_id)
+    if not rows:
+        return ("No open promises right now. When a customer says they have paid "
+                "or gives a date, it will show here.")
+    names = {}
+    try:
+        ids = list({r["client_id"] for r in rows})
+        cr = (db.table("clients").select("id, name").in_("id", ids).execute()).data or []
+        names = {c["id"]: c.get("name") for c in cr}
+    except Exception:
+        pass
+    lines = ["*Open promises*"]
+    for r in rows[:20]:
+        nm = names.get(r["client_id"]) or "A customer"
+        when = (f"by {r['promise_date']}" if r.get("kind") == "promise" and r.get("promise_date")
+                else "says paid")
+        amt = f" {inr(r['amount'])}" if r.get("amount") else ""
+        lines.append(f"- {nm}: {when}{amt}")
+    lines.append("\nReply *CHASE <name>* to resume reminders for anyone.")
+    return "\n".join(lines)
 
 
 async def _handle_paid_customer(client: dict) -> str:

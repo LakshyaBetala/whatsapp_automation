@@ -16,7 +16,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.config import settings
 from app.db import get_client
 from app.jobs import (eod_digest, keepalive, monitor, outbox_sweep,
-                      reminder_checkpoint, reminder_sweep, subscription_check)
+                      promise_followup, reminder_checkpoint, reminder_sweep,
+                      subscription_check)
 from app.services import monitoring
 
 log = logging.getLogger(__name__)
@@ -86,6 +87,18 @@ def start() -> AsyncIOScheduler:
             _tracked("reminder_checkpoint", reminder_checkpoint.run),
             CronTrigger(minute=settings.reminder_sweep_minute),
             id="reminder_checkpoint",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+
+    # Promise-to-Pay follow-up: hourly, resume reminders for a promise whose day
+    # arrived unpaid (or mark it kept if the receipt cleared the bills). Rides on
+    # the same deployment as the reminder sweep.
+    if settings.enable_promise_capture and settings.enable_reminder_sweep:
+        sched.add_job(
+            _tracked("promise_followup", promise_followup.run),
+            CronTrigger(minute=settings.reminder_sweep_minute),
+            id="promise_followup",
             replace_existing=True,
             misfire_grace_time=3600,
         )

@@ -28,7 +28,7 @@ from decimal import Decimal
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
-from app.services import checkpoint, whatsapp
+from app.services import checkpoint, promises, whatsapp
 from app.services.templates import inr
 
 log = logging.getLogger(__name__)
@@ -296,6 +296,12 @@ async def run() -> None:
     # Parties the owner HELD in this morning's checkpoint (already paid). One
     # query, tolerant of a missing migration 027 -> {} (checkpoint off).
     held = checkpoint.held_sets(db, list(businesses.keys()))
+    # Parties on a live Promise-to-Pay hold (a customer claimed payment or
+    # promised a date). One query, tolerant of a missing migration 028 -> {}.
+    # A live promise beats the cadence; the hold auto-expires and the follow-up
+    # job resumes the single latest reminder if it goes unpaid.
+    promised = (promises.held_now(db, list(businesses.keys()))
+                if settings.enable_promise_capture else {})
 
     # ── Fetch ALL open bills with client data in one query ────────────
     bills_resp = (
@@ -346,6 +352,10 @@ async def run() -> None:
             biz, client = p["biz"], p["client"]
             # Owner held this party in this morning's checkpoint (already paid).
             if client_id in held.get(biz_id, set()):
+                skipped += 1
+                continue
+            # Party is on a live Promise-to-Pay hold (claimed paid / promised a day).
+            if client_id in promised.get(biz_id, set()):
                 skipped += 1
                 continue
             if cap > 0 and sent_per_biz.get(biz_id, 0) >= cap:

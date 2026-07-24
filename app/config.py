@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Release version of THIS build. Bump on every shipped zip. The dashboard
     # compares it against the newest row in app_releases (Supabase) and shows
     # an update banner when a newer version exists - Tally-style update notice.
-    app_version: str = "1.7.0"
+    app_version: str = "1.8.0"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
@@ -115,6 +115,18 @@ class Settings(BaseSettings):
     # before each business's reminder_hour, giving the owner a window to reply.
     enable_reminder_checkpoint: bool = True
     checkpoint_lead_hours: int = 1
+
+    # --- Promise-to-Pay + reply capture (v1: text-first) ---
+    # When a customer replies to a reminder, ASVA reads it. A payment claim or a
+    # promised date HOLDS that party's reminders (grace / until the date), then
+    # auto-resumes if unpaid, so a false claim never buys permanent silence. The
+    # owner is nudged to record real payments in Tally; ASVA never writes Tally.
+    enable_promise_capture: bool = True
+    promise_grace_days: int = 3            # hold length for a bare "paid" (no date)
+    promise_max_hold_days: int = 30        # cap: no promise silences reminders longer
+    # Below this classifier confidence (or for dispute/unclear), do NOT auto-hold;
+    # forward the reply to the owner instead. Keeps a misread from silencing a debt.
+    promise_confidence_threshold: float = 0.6
 
     # --- Monitoring + email alerts (operator health center) ---
     # The watchdog job builds a health snapshot every few minutes and emails the
