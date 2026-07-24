@@ -455,7 +455,9 @@ def _update_banner(db) -> str:
         note = f' - {latest["notes"]}' if latest.get("notes") else ""
         strong = " <b>(zaroori update)</b>" if latest.get("mandatory") else ""
         return (f'<div class="upbanner">&#11014; Naya ASVA version <b>{latest["version"]}</b> '
-                f'aa gaya hai{note}.{strong} Naya zip laga lein.</div>')
+                f'aa gaya hai{note}.{strong} '
+                f'<a href="/download" style="color:#0a7d33;font-weight:800;text-decoration:underline">'
+                f'Update download karein &rarr;</a></div>')
     except Exception:
         return ""
 
