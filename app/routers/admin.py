@@ -520,7 +520,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     start = 0
     while True:
         resp = (db.table("clients")
-                .select("id, name, whatsapp_number, reminders_enabled, tally_ledger_name, "
+                .select("id, name, whatsapp_number, reminders_enabled, excluded, tally_ledger_name, "
                         "credit_days, reminder_batch, reminder_anchor, created_at")
                 .eq("business_id", biz["id"])
                 .order("name")
@@ -598,8 +598,13 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
         phone = c.get("whatsapp_number") or '<span class="nono">number nahi</span>'
         rem_on = c.get("reminders_enabled", True)
         checked = "checked" if rem_on else ""
-        # Source: Tally-synced (has a ledger name) vs OCR/manual (non-Tally).
-        src = "tally" if (c.get("tally_ledger_name") or "").strip() else "nontally"
+        # Source tab: excluded parties live in their own Do-not-chase tab; the
+        # rest split into Tally-synced (has a ledger name) vs OCR/manual (non-Tally).
+        is_excl = bool(c.get("excluded"))
+        if is_excl:
+            src = "exclude"
+        else:
+            src = "tally" if (c.get("tally_ledger_name") or "").strip() else "nontally"
         cname = (c["name"] or "").replace("&", "&amp;").replace("<", "&lt;")
         nm_attr = cname.replace('"', "&quot;")
         # Non-Tally parties get manual controls: "₹ Pay" records a payment and
@@ -627,6 +632,16 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
             cur_batch = 0
         batch_cell = (f'<select class="bsel" data-cid="{c["id"]}">{_batch_opts(cur_batch)}</select>'
                       if multi_batch else f'<span class="rbadge none">{cur_batch + 1}</span>')
+        _xs = "border-radius:5px;padding:4px 9px;font-size:.85em;cursor:pointer"
+        if is_excl:
+            actions = (f'<button class="exclbtn" data-cid="{c["id"]}" data-party="{nm_attr}" '
+                       f'data-exclude="0" style="background:#eaf7ee;color:#0a7d33;border:1px solid #a9d8b8;{_xs}">'
+                       f'Bring back</button>')
+        else:
+            actions = (f'<button class="sendbtn" data-party="{nm_attr}">Send now</button> {pay_btn} '
+                       f'<button class="exclbtn" data-cid="{c["id"]}" data-party="{nm_attr}" '
+                       f'data-exclude="1" title="Move to the do-not-chase list" '
+                       f'style="background:#fbf3db;color:#8a6100;border:1px solid #e2c46a;{_xs}">Exclude</button>')
         rows.append(
             f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}">'
             f'<td><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
@@ -637,7 +652,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
             f'<td>{batch_cell}</td>'
             f'<td><button class="termbtn" data-cid="{c["id"]}" data-party="{nm_attr}" data-cd="{cd_val}">{cd_label}</button></td>'
             f'<td class="ph">{phone}</td>'
-            f'<td><button class="sendbtn" data-party="{nm_attr}">Send now</button> {pay_btn}</td></tr>'
+            f'<td>{actions}</td></tr>'
         )
 
     # Reminder style only drives the per-party schedule preview here; the
@@ -674,8 +689,10 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
           .eq("business_id", biz["id"]).eq("period_month", period).limit(1).execute())
     used = int(_u.data[0]["message_count"]) if _u.data else 0
 
-    tally_n = sum(1 for c in clients if (c.get("tally_ledger_name") or "").strip())
-    nontally_n = len(clients) - tally_n
+    exclude_n = sum(1 for c in clients if c.get("excluded"))
+    _active = [c for c in clients if not c.get("excluded")]
+    tally_n = sum(1 for c in _active if (c.get("tally_ledger_name") or "").strip())
+    nontally_n = len(_active) - tally_n
 
     # Plan meter + ASVA's recommendation.
     if over_cap:
@@ -772,6 +789,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
 <div class="subtabs">
  <button class="on" data-sub="tally">Tally bills ({tally_n:,})</button>
  <button data-sub="nontally">Non-Tally bills ({nontally_n:,})</button>
+ <button data-sub="exclude">Do-not-chase ({exclude_n:,})</button>
 </div>
 
 <div class="bar">
@@ -894,6 +912,24 @@ document.querySelectorAll('.subtabs button').forEach(b => b.onclick = () => {{
   applyFilter();
 }});
 applyFilter();   // apply the default Tally filter on load
+
+// Exclude / bring back: flip the party's do-not-chase flag, then reload so it
+// moves between the tabs (out of Tally/Non-Tally, into Do-not-chase, or back).
+async function toggleExclude(btn) {{
+  const cid = btn.dataset.cid, exclude = btn.dataset.exclude === '1', party = btn.dataset.party;
+  const ask = exclude
+    ? party + ' ko do-not-chase list me daalein? Reminders band ho jayenge.'
+    : party + ' ko wapas laayein? Woh phir se chase list me aa jayega.';
+  if (!confirm(ask)) return;
+  btn.disabled = true; btn.textContent = '...';
+  try {{
+    const r = await fetch('/admin/set-excluded', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: cid, excluded: exclude}})}});
+    if (r.ok) {{ location.reload(); return; }}
+  }} catch (e) {{}}
+  btn.disabled = false; btn.textContent = exclude ? 'Exclude' : 'Bring back';
+}}
+document.querySelectorAll('.exclbtn').forEach(b => b.onclick = () => toggleExclude(b));
 
 async function sendNow(btn) {{
   const party = btn.dataset.party;
@@ -2280,6 +2316,28 @@ async def admin_set_reminder(payload: SetReminderPayload):
     return {"ok": True, "enabled": bool(payload.enabled)}
 
 
+class SetExcludedPayload(BaseModel):
+    token: str
+    client_id: str
+    excluded: bool
+
+
+@router.post("/admin/set-excluded")
+async def admin_set_excluded(payload: SetExcludedPayload):
+    """Move ONE party on/off the do-not-chase (excluded) list. Excluded parties
+    get no reminders and no morning-checkpoint mention, and show only in the
+    Do-not-chase tab (out of Tally/Non-Tally). Reversible."""
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    cr = (db.table("clients").select("id, name")
+          .eq("id", payload.client_id).eq("business_id", biz["id"]).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    db.table("clients").update({"excluded": bool(payload.excluded)}).eq(
+        "id", payload.client_id).execute()
+    return {"ok": True, "excluded": bool(payload.excluded)}
+
+
 @router.get("/admin/party", response_class=HTMLResponse)
 async def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str = Query("english")):
     """Per-party page: bills, payments received, and the exact reminder schedule
@@ -2289,7 +2347,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     today = _dt.date.today()
 
     cr = (db.table("clients")
-          .select("id, name, whatsapp_number, credit_days, reminders_enabled, "
+          .select("id, name, whatsapp_number, credit_days, reminders_enabled, excluded, "
                   "tally_ledger_name, language, reminder_batch, reminder_anchor, created_at")
           .eq("id", client_id).eq("business_id", biz["id"]).limit(1).execute())
     if not cr.data:
@@ -2469,6 +2527,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
     phone = c.get("whatsapp_number")
     phone_html = esc(phone) if phone else '<span style="color:#c0392b">number nahi hai</span>'
+    is_excl = bool(c.get("excluded"))
     toggle_label = "Reminder OFF karein" if rem_on else "Reminder ON karein"
     toggle_cls = "danger" if rem_on else "primary"
     src_tag = "Tally" if is_tally else "Non-Tally"
@@ -2509,6 +2568,11 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     <button id="remtoggle" class="{toggle_cls}" onclick="toggleRem()">{toggle_label}</button>
   </div>
   <div class="hint" id="remhint">{rem_hint}</div>
+  <div class="remrow" style="margin-top:12px;padding-top:12px;border-top:1px solid #eee">
+    <div>Do-not-chase list: <b style="color:{'#8a6100' if is_excl else '#6b7770'}">{'YES - never chased' if is_excl else 'no'}</b>
+      <div class="hint">{'This party is excluded: no reminders, and not shown in your chase list.' if is_excl else 'If this party will never pay, exclude them so they stop appearing in your chase list.'}</div></div>
+    <button id="excltoggle" class="{'primary' if is_excl else 'danger'}" onclick="toggleExcl()">{'Bring back' if is_excl else 'Exclude'}</button>
+  </div>
   {batch_html}
 </div>
 
@@ -2556,6 +2620,20 @@ const LANG = {lang!r};
 const PNAME = {json.dumps(c["name"] or "")};
 const PPHONE = {json.dumps(pphone_display)};
 let REM_ON = {str(bool(rem_on)).lower()};
+let EXCL = {str(bool(is_excl)).lower()};
+async function toggleExcl() {{
+  const want = !EXCL;
+  const msg = want ? PNAME + ' ko do-not-chase list me daalein? Reminders band ho jayenge.'
+                   : PNAME + ' ko wapas chase list me laayein?';
+  if (!confirm(msg)) return;
+  const btn = document.getElementById('excltoggle'); btn.disabled = true;
+  try {{
+    const r = await fetch('/admin/set-excluded', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID, excluded: want}})}});
+    if (r.ok) {{ location.reload(); return; }}
+  }} catch (e) {{}}
+  btn.disabled = false;
+}}
 function openM(id) {{ document.getElementById(id).classList.add('show'); }}
 function closeM(id) {{ document.getElementById(id).classList.remove('show'); }}
 function ntNum(s) {{
