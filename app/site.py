@@ -40,6 +40,23 @@ APP_BASE = "https://app.tryasva.com"
 # The installer file itself. It is served with Content-Disposition: attachment,
 # so linking straight to it downloads the exe immediately, no extra page hop.
 DOWNLOAD_FILE = f"{APP_BASE}/download/ASVA-Setup.exe"
+# The version of the installer being served, and a short honest changelog (newest
+# first). Shown on the download page ("you are downloading X") and the What's new
+# section. Bump DOWNLOAD_VERSION and prepend a row here on every shipped build.
+DOWNLOAD_VERSION = "1.8.1"
+VERSIONS = [
+    ("1.8", "Promise-to-Pay",
+     "ASVA now reads your customer's WhatsApp reply. If they say they have paid, or promise a date like '5 tareek', it pauses the reminders and nudges you to record it in Tally, so you never chase someone who already paid."),
+    ("1.7", "Morning checkpoint",
+     "Before the day's reminders go out, ASVA shows you the list so you can hold anyone who already paid. Plus a welcome message for new shops and steadier one-code setup."),
+    ("1.6", "One-click installer",
+     "A single Windows installer with no keys to type. Type a short code, pick your Tally company, scan WhatsApp, and you are live in about five minutes."),
+]
+# Honestly labelled as not-yet-shipped.
+COMING = [
+    ("Reads payment screenshots", "Soon ASVA will read the amount off a UPI screenshot the customer sends, so recording it in Tally is one tap."),
+    ("A do-not-chase list", "Mark the parties you have written off, so they never show up in your chase list again."),
+]
 
 # SEO keyword bank. Intent-led terms an Indian distributor (or an AI answering
 # for one) would actually search: Tally + WhatsApp + collections/receivables.
@@ -474,10 +491,10 @@ def _requirements() -> str:
 
 def _phone_mock() -> str:
     bubbles = [
-        ("out", "Namaste \U0001f64f Bill #4021, &#8377;18,400. Due 15 Aug. PDF attached. Pay via UPI \U0001f447"),
-        ("out", "Reminder: &#8377;18,400 pending. Aaj clear kar dijiye toh badhiya rahega \U0001f64f"),
-        ("in", "paisa aaj bhej deta hoon sir \U0001f64f"),
-        ("out", "Payment received ✅ &#8377;18,400. Dhanyavaad!"),
+        ("out", "Hello \U0001f64f Bill #4021 from Sharma Traders, &#8377;18,400, due 15 Aug. Pay via UPI \U0001f447"),
+        ("out", "Reminder: &#8377;18,400 is still pending on bill #4021."),
+        ("in", "paisa 5 tareek ko bhej dunga sir \U0001f64f"),
+        ("out", "Noted, thank you. Reminders paused, we will follow up around the 5th. ✅"),
     ]
     bub = "".join(f'<div class="bub {c}">{t}</div>' for c, t in bubbles)
     return f"""<div class="mock reveal">
@@ -487,7 +504,7 @@ def _phone_mock() -> str:
       <div><div class="nm">Sharma Traders</div><div class="st">via your shop &middot; online</div></div></div>
     <div class="body">{bub}</div>
   </div></div>
-  <div class="tag2">real reminder flow</div>
+  <div class="tag2">reads replies, holds reminders</div>
 </div>"""
 
 
@@ -634,9 +651,9 @@ def _home() -> str:
  </section>
 
  <section>
-  <div class="sechead"><span class="eyebrow">Always improving</span>
-   <h2>The app updates itself, and keeps getting smarter.</h2>
-   <p>ASVA ships improvements regularly. Here is what is live today, and what we are building next.</p></div>
+  <div class="sechead"><span class="eyebrow">What's new</span>
+   <h2>Shipping improvements, version after version.</h2>
+   <p>The last few updates, and what is coming next. Your app updates itself, so you always have the latest.</p></div>
   {_whats_next()}
  </section>
 </div>
@@ -988,16 +1005,16 @@ def _download() -> str:
     sends people there. On the app domain, downloads.py owns /download instead."""
     body = f"""<div class="wrap">
  <section class="page-hero reveal">
-  <span class="badge"><span class="d"></span> Windows 10 or 11</span>
+  <span class="badge"><span class="d"></span> Windows 10 or 11 &middot; version {DOWNLOAD_VERSION}</span>
   <h1 style="margin-top:16px">Download ASVA <span class="hl">for Windows.</span></h1>
   <p class="lede">One installer for the computer where you run TallyPrime. It reads your Tally and sends
     bills and payment reminders on WhatsApp from your own number. You need Windows 10 or 11, TallyPrime,
     and the short setup code we give you. Nothing else to install.</p>
   <div class="cta-row">
-    <a class="btn btn-p" href="{DOWNLOAD_FILE}" download>Download ASVA for Windows</a>
+    <a class="btn btn-p" href="{DOWNLOAD_FILE}" download>Download ASVA {DOWNLOAD_VERSION}</a>
     <a class="btn btn-s" href="{WA_TRY}">Talk to us on WhatsApp</a>
   </div>
-  <div class="undernote">Do not have a setup code yet? Message us and we will get you started.</div>
+  <div class="undernote">You are downloading ASVA version {DOWNLOAD_VERSION}. Already have ASVA? Running this installs the update on top of it. No setup code yet? Message us.</div>
  </section>
  <section>
   <div class="sechead"><span class="eyebrow">Setup</span><h2>Three steps, about five minutes</h2></div>
@@ -1006,6 +1023,11 @@ def _download() -> str:
  <section>
   <div class="sechead"><span class="eyebrow">What you need</span><h2>That is the whole list</h2></div>
   {_requirements()}
+ </section>
+ <section>
+  <div class="sechead"><span class="eyebrow">What's new</span><h2>Recent updates</h2>
+   <p>What each recent version added, newest first.</p></div>
+  {_whats_next()}
  </section>
 </div>
 {_band("Need a hand setting up?",
@@ -1020,21 +1042,18 @@ def _download() -> str:
 
 
 def _whats_next() -> str:
-    """Honest roadmap: what is live vs in development. Signals momentum and
-    differentiates without presenting unshipped features as shipped."""
-    cards = [
-        ("live", "Live now", "Updates itself",
-         "The app quietly installs its own updates, so you always have the newest ASVA without doing anything."),
-        ("", "In development", "Understands replies",
-         "When a customer writes back on WhatsApp, ASVA will read it and act. A 'paid' pauses the chase and asks you to confirm it in Tally, so you never chase someone who already paid."),
-        ("", "In development", "Remembers promises",
-         "When a customer says 'paisa 5 tareek ko bhej dunga', ASVA will capture that date, pause the reminders, and come back on exactly that day."),
-    ]
-    out = ""
-    for cls, label, h, p in cards:
-        tag = f'<span class="soon{" live" if cls == "live" else ""}">{label}</span>'
-        out += f'<div class="card">{tag}<h3>{h}</h3><p>{p}</p></div>'
-    return f'<div class="grid g3 reveal">{out}</div>'
+    """What's new: the last few shipped versions (newest first), then a short,
+    honestly-labelled 'coming next'. Momentum without over-promising."""
+    shipped = ""
+    for i, (ver, title, desc) in enumerate(VERSIONS):
+        label = f"Latest &middot; v{ver}" if i == 0 else f"Shipped &middot; v{ver}"
+        cls = " live" if i == 0 else ""
+        shipped += f'<div class="card"><span class="soon{cls}">{label}</span><h3>{title}</h3><p>{desc}</p></div>'
+    coming = "".join(
+        f'<div class="card"><span class="soon">Coming next</span><h3>{h}</h3><p>{p}</p></div>'
+        for h, p in COMING)
+    return (f'<div class="grid g3 reveal">{shipped}</div>'
+            f'<div class="grid g2 reveal" style="margin-top:16px">{coming}</div>')
 
 
 PAGES = {
