@@ -11,7 +11,8 @@ import pytest
 
 sys.modules.setdefault("weasyprint", MagicMock())
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from app.routers import mobile
 from app.services import promises
@@ -162,3 +163,51 @@ def test_party_not_found_is_404():
     with pytest.raises(HTTPException) as e:
         mobile._build_party(db, BIZ, "nope")
     assert e.value.status_code == 404
+
+
+# ── end-to-end via a real HTTP client (the PWA shell + API served for real) ──
+def _client(monkeypatch, db):
+    monkeypatch.setattr(mobile, "require_db", lambda: db)
+    app = FastAPI()
+    app.include_router(mobile.router)
+    return TestClient(app)
+
+
+def test_pwa_shell_serves_installable_html(monkeypatch):
+    c = _client(monkeypatch, _db([], []))
+    r = c.get("/m")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "ASVA" in r.text
+    assert "/m/manifest.webmanifest" in r.text          # installable
+    assert "serviceWorker" in r.text                    # registers the SW
+    assert "View only" in r.text                         # the read-only banner
+
+
+def test_pwa_manifest_is_valid(monkeypatch):
+    c = _client(monkeypatch, _db([], []))
+    r = c.get("/m/manifest.webmanifest")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["name"] == "ASVA" and j["display"] == "standalone" and j["start_url"] == "/m"
+
+
+def test_pwa_service_worker_and_icon(monkeypatch):
+    c = _client(monkeypatch, _db([], []))
+    sw = c.get("/m/sw.js")
+    assert sw.status_code == 200 and "caches" in sw.text
+    ic = c.get("/m/icon.svg")
+    assert ic.status_code == 200 and "svg" in ic.text.lower()
+
+
+def test_api_end_to_end_auth_and_data(monkeypatch):
+    monkeypatch.setattr(promises, "held_now", lambda db, bids: {})
+    c = _client(monkeypatch, _db(_clients(), _bills()))
+    assert c.get("/m/api/summary?token=nope").status_code == 401
+    assert c.get("/m/api/summary").status_code == 401          # missing token
+    r = c.get("/m/api/summary?token=tok-good")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["business_name"] == "RISHAB TRADING"
+    assert d["parties_owing"] == 2 and d["total_outstanding"] == "8,000"
+    assert [p["name"] for p in d["chase"]] == ["Ramesh", "Suresh"]

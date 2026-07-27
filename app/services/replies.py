@@ -1,23 +1,25 @@
 """Reply capture pipeline: turn a customer's WhatsApp reply into an action.
 
 One entry point, capture_reply(), called from the customer branch of the bot.
-It reads the reply, decides what it means, and (for a payment claim or a
-promised date) HOLDS that party's reminders with a grace window that
-auto-resumes, notifies the owner to record real payments in Tally, and thanks
-the customer. It never marks a bill paid and never writes Tally.
 
-Trust posture (agreed design): auto-hold with grace, auto-resume. A misread or a
-low-confidence reply is NOT auto-held - it is forwarded to the owner instead, so
-a false "paid" never buys permanent silence and a wrong classification never
-silences a real debt for more than the capped window.
+DESIGN (owner-in-the-loop): ASVA NEVER replies to the customer on the owner's
+behalf. A shop's customer relationship is the owner's - an auto-reply in the
+owner's voice can backfire (wrong tone, wrong facts, "why is a bot answering
+me?"). So capture_reply always returns None (nothing is sent to the customer)
+and instead NUDGES THE OWNER: what the customer said, what ASVA did about it,
+and how to override. The owner decides whether and how to reply to the customer.
+
+What ASVA *does* do on its own is INTERNAL and reversible only: pause that
+party's reminders (with a grace window that auto-resumes, capped at
+promise_max_hold_days). Pausing is invisible to the customer and safe; replying
+is not, so we don't.
 
 Order of understanding:
   1. keyword fast-path  (PAID / PAID <amount>) - zero cost, high trust
-  2. a screenshot       - forwarded to the owner as proof, held on grace
+  2. a screenshot       - forwarded to the owner as proof, paused on grace
   3. Gemini classify    - for natural, multilingual free text
-  4. confidence gate    - dispute / unclear / low confidence -> forward to owner
-Returns the customer-facing reply string, or None to let the bot fall through
-(chatter, or nothing we can act on -> the bot's existing menu/silent handling).
+  4. confidence gate    - dispute / unclear / low confidence -> owner decides, no pause
+Always returns None: the bot sends the customer nothing. The owner is nudged.
 """
 from __future__ import annotations
 
@@ -77,17 +79,6 @@ def _promise_hold(promise_date: str) -> _dt.datetime:
     return _cap(max(end_ist.astimezone(_dt.timezone.utc), _grace_hold()))
 
 
-def _en(business_id: str) -> bool:
-    """Best-effort: does this business message in English? Defaults to True (the
-    pilot shops do); never fails the reply over a lookup."""
-    try:
-        r = (require_db().table("businesses").select("msg_language")
-             .eq("id", business_id).limit(1).execute()).data
-        return not r or str(r[0].get("msg_language") or "english").lower() == "english"
-    except Exception:
-        return True
-
-
 async def _notify_owner(business_id: str, text: str) -> None:
     try:
         await whatsapp.notify_owner(business_id, text)
@@ -121,26 +112,30 @@ def _amt_phrase(amount) -> str:
 
 
 async def capture_reply(client: dict, text: str, *, media_b64: str | None = None,
-                        media_type: str = "image/jpeg") -> str | None:
-    """The pipeline. Returns the reply to send the customer, or None to fall
-    through to the bot's existing handling."""
+                        media_type: str = "image/jpeg") -> bool:
+    """The pipeline. The customer is NEVER replied to. Returns True when ASVA
+    acted (paused reminders and/or nudged the owner) so the bot stays silent to
+    the customer; False to fall through to the bot's other handling."""
     business_id = client.get("business_id")
     client_id = client.get("id")
     name = client.get("name") or "Customer"
     text = (text or "").strip()
-    en = _en(business_id)
 
     # 1. A screenshot with no clear instruction: treat as payment proof.
     if media_b64 and len(text) < 4:
-        await _forward_proof(business_id, name, media_b64, media_type)
+        await _forward_proof(business_id, name, media_b64, media_type)   # sends the image to the owner
         promises.create(require_db(), business_id, client_id, kind="paid_claim",
                         hold_until=_grace_hold(), raw_text="[payment screenshot]",
                         source="screenshot")
-        return ("Thank you, we have received your payment proof and informed the shop."
-                if en else "Shukriya, aapka payment proof mil gaya aur dukaan ko bata diya.")
+        await _notify_owner(business_id,
+            f"{name} sent a payment screenshot. ASVA PAUSED their reminders for "
+            f"{settings.promise_grace_days} days (nothing was replied to {name}). "
+            f"Enter the receipt in Tally when it lands. Reply CHASE {name} to resume now, "
+            f"or message {name} yourself.")
+        return True
 
     if not text:
-        return None
+        return False
 
     # 2. Keyword fast-path: PAID / PAID <amount>. High trust, no AI.
     m = _PAID_RE.match(text)
@@ -150,17 +145,17 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
                         hold_until=_grace_hold(), amount=amount, raw_text=text,
                         source="keyword")
         await _notify_owner(business_id,
-            f"{name} says they have paid{_amt_phrase(amount)}. Reminders are paused "
-            f"for {settings.promise_grace_days} days. Please enter the receipt in Tally "
-            f"when it lands, ASVA updates on its own. To chase anyway, reply CHASE {name}.")
-        return ("Thank you, we have noted your payment. The shop has been informed."
-                if en else "Shukriya, aapka payment note kar liya. Dukaan ko bata diya hai.")
+            f'{name} replied: "{text[:200]}". ASVA read this as "already paid"'
+            f'{_amt_phrase(amount)} and PAUSED their reminders for {settings.promise_grace_days} '
+            f"days (nothing was replied to {name}). Enter the receipt in Tally when it lands. "
+            f"Reply CHASE {name} to resume reminders now.")
+        return True
 
     # 3. Understand natural free text with Gemini (multilingual).
     verdict = await intent.classify(text)
     if verdict is None:
-        # Gemini off or failed: do not guess. Let the bot fall through (silent).
-        return None
+        # Gemini off or failed: do not guess and do not reply. Fall through.
+        return False
 
     kind = verdict["intent"]
     conf = verdict["confidence"]
@@ -168,14 +163,15 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
 
     # Not about payment -> let the bot's menu/greeting handling take over.
     if kind == "chatter":
-        return None
+        return False
 
-    # 4. Confidence gate: dispute / unclear / low confidence -> owner decides.
+    # 4. Confidence gate: dispute / unclear / low confidence -> owner decides, no pause.
     if kind in ("dispute", "unclear") or conf < settings.promise_confidence_threshold:
         await _notify_owner(business_id,
-            f'{name} replied: "{text[:300]}". This needs your eye, ASVA did not act on it.')
-        return ("Thank you, we have passed this to the shop. They will get back to you."
-                if en else "Shukriya, aapki baat dukaan tak pahuncha di. Jaldi jawab milega.")
+            f'{name} replied: "{text[:300]}". ASVA did NOT act on this (it needs your '
+            f"eye). Reminders are unchanged. Message {name} yourself, or reply "
+            f"CHASE {name} / STOP {name}.")
+        return True
 
     # Confident paid_claim.
     if kind == "paid_claim":
@@ -183,11 +179,11 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
                         hold_until=_grace_hold(), amount=amount, raw_text=text,
                         source="text", confidence=conf)
         await _notify_owner(business_id,
-            f"{name} says they have paid{_amt_phrase(amount)}. Reminders are paused "
-            f"for {settings.promise_grace_days} days. Enter the receipt in Tally when it "
-            f"lands. To chase anyway, reply CHASE {name}.")
-        return ("Thank you, we have noted your payment. The shop has been informed."
-                if en else "Shukriya, aapka payment note kar liya. Dukaan ko bata diya hai.")
+            f'{name} replied: "{text[:200]}". ASVA read this as "already paid"'
+            f'{_amt_phrase(amount)} and PAUSED their reminders for {settings.promise_grace_days} '
+            f"days (nothing was replied to {name}). Enter the receipt in Tally when it lands. "
+            f"Reply CHASE {name} to resume reminders now.")
+        return True
 
     # Confident promise with a date.
     if kind == "promise":
@@ -196,9 +192,10 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
                         hold_until=_promise_hold(pdate), amount=amount,
                         promise_date=pdate, raw_text=text, source="text", confidence=conf)
         await _notify_owner(business_id,
-            f"{name} says they will pay by {pdate}{_amt_phrase(amount)}. Reminders are "
-            f"paused till then. Enter it in Tally when it lands. To chase now, reply CHASE {name}.")
-        return ("Thank you. We have noted that and will follow up then."
-                if en else f"Shukriya, humne note kar liya. {pdate} ke aas paas dobara puchhenge.")
+            f'{name} replied: "{text[:200]}". ASVA read this as a promise to pay by '
+            f"{pdate}{_amt_phrase(amount)} and PAUSED their reminders till then (nothing was "
+            f"replied to {name}). Enter it in Tally when it lands. Reply CHASE {name} to "
+            f"resume reminders now.")
+        return True
 
-    return None
+    return False

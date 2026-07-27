@@ -29,7 +29,6 @@ class Rec:
 def _setup(monkeypatch, verdict=None):
     rec = Rec()
     monkeypatch.setattr(replies, "require_db", lambda: object())
-    monkeypatch.setattr(replies, "_en", lambda bid: True)
 
     def fake_create(db, bid, cid, **kw):
         rec.created.append({"business_id": bid, "client_id": cid, **kw})
@@ -61,7 +60,8 @@ def test_keyword_paid_holds_and_notifies(monkeypatch):
     assert rec.created and rec.created[0]["kind"] == "paid_claim"
     assert rec.created[0]["source"] == "keyword"
     assert rec.owner and "CHASE Ramesh Traders" in rec.owner[0]
-    assert "noted your payment" in out
+    assert "replied to Ramesh Traders" in rec.owner[0]   # confirms we did NOT reply to the customer
+    assert out is True                                    # acted -> bot stays silent to the customer
 
 
 def test_keyword_paid_with_amount(monkeypatch):
@@ -84,7 +84,7 @@ def test_confident_promise_holds_with_date(monkeypatch):
     assert rec.created[0]["kind"] == "promise"
     assert rec.created[0]["promise_date"] == FUTURE
     assert FUTURE in rec.owner[0]
-    assert "follow up" in out.lower()
+    assert out is True
 
 
 def test_confident_paid_claim(monkeypatch):
@@ -100,27 +100,27 @@ def test_dispute_forwards_to_owner_no_hold(monkeypatch):
     out = _run("bill galat hai")
     assert rec.created == []                      # NOT auto-held
     assert rec.owner and "needs your eye" in rec.owner[0]
-    assert "passed this to the shop" in out
+    assert out is True                            # owner nudged -> bot silent to customer
 
 
 def test_low_confidence_forwards_no_hold(monkeypatch):
     rec = _setup(monkeypatch, verdict={"intent": "paid_claim", "amount": None,
                                        "promise_date": None, "confidence": 0.3})
     out = _run("hmm maybe paid")
-    assert rec.created == [] and "passed this to the shop" in out
+    assert rec.created == [] and out is True
     assert rec.owner and "needs your eye" in rec.owner[0]
 
 
 def test_chatter_falls_through(monkeypatch):
     rec = _setup(monkeypatch, verdict={"intent": "chatter", "amount": None,
                                        "promise_date": None, "confidence": 0.9})
-    assert _run("good morning ji") is None
+    assert _run("good morning ji") is False       # falls through, nothing acted on
     assert rec.created == [] and rec.owner == []
 
 
 def test_gemini_off_degrades_to_silent(monkeypatch):
     rec = _setup(monkeypatch, verdict=None)      # classify returns None
-    assert _run("some random message") is None   # not PAID -> nothing to act on
+    assert _run("some random message") is False  # not PAID -> nothing to act on
     assert rec.created == []
 
 
@@ -130,7 +130,28 @@ def test_screenshot_forwards_proof_and_holds(monkeypatch):
     out = _run("", media_b64="ZmFrZQ==", media_type="image/jpeg")
     assert rec.proof == [("b1", "Ramesh Traders")]
     assert rec.created and rec.created[0]["source"] == "screenshot"
-    assert "payment proof" in out.lower()
+    assert rec.owner and "screenshot" in rec.owner[0].lower()   # owner nudged
+    assert out is True
+
+
+def test_capture_reply_never_returns_a_customer_message(monkeypatch):
+    """The safety property: ASVA never speaks to the customer. Every branch
+    returns a bool (act / fall-through), never a string to send back."""
+    verdicts = [
+        None,
+        {"intent": "chatter", "amount": None, "promise_date": None, "confidence": 0.9},
+        {"intent": "promise", "amount": None, "promise_date": FUTURE, "confidence": 0.9},
+        {"intent": "paid_claim", "amount": None, "promise_date": None, "confidence": 0.9},
+        {"intent": "dispute", "amount": None, "promise_date": None, "confidence": 0.9},
+        {"intent": "unclear", "amount": None, "promise_date": None, "confidence": 0.2},
+    ]
+    for v in verdicts:
+        _setup(monkeypatch, verdict=v)
+        assert isinstance(_run("kuch bhi likha hai"), bool)
+    _setup(monkeypatch)
+    assert isinstance(_run("PAID 5000"), bool)
+    _setup(monkeypatch)
+    assert isinstance(_run("", media_b64="ZmFrZQ=="), bool)
 
 
 def test_hold_is_capped(monkeypatch):

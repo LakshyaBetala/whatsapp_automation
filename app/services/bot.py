@@ -395,14 +395,17 @@ async def handle(
 
     # ── Reply capture: payment claims, promises, screenshots ──────────
     # Reads the reply (keyword fast-path + Gemini), HOLDS reminders on a claim or
-    # a promised date, and nudges the owner to record it in Tally. A misread or a
-    # low-confidence reply is forwarded to the owner, never auto-held. Returns
-    # None to fall through (chatter / nothing we can act on).
+    # a promised date, and NUDGES THE OWNER (never replies to the customer). A
+    # misread or low-confidence reply is forwarded to the owner, never auto-held.
+    # Returns True when it acted (stay silent to the customer).
     if settings.enable_promise_capture:
-        captured = await replies.capture_reply(
+        # ASVA never replies to the customer in the owner's voice. capture_reply
+        # pauses reminders (if warranted) and NUDGES THE OWNER; when it has acted
+        # we stay silent to the customer (return "") and do not fall through.
+        acted = await replies.capture_reply(
             client, text, media_b64=media_b64, media_type=media_type)
-        if captured is not None:
-            return captured
+        if acted:
+            return ""
 
     # Legacy PAID (capture disabled, or nothing captured): notify the owner.
     if upper == "PAID" or upper.startswith("PAID"):
