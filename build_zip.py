@@ -339,6 +339,54 @@ def build_website() -> None:
             ("index.html", "pricing.html", "sitemap.xml", "robots.txt", "llms.txt"))
 
 
+WEBSITE_REPO = os.path.join(os.path.expanduser("~"), "asva-website")
+
+
+def build_website_repo() -> None:
+    """Generate the static marketing site straight into ~/asva-website - a git
+    repo that Cloudflare Pages watches. The workflow is:
+
+        python build_zip.py website-repo        # regenerate the files here
+        cd ~/asva-website
+        git add -A && git commit -m "site: v1.8.3" && git push
+
+    Cloudflare Pages auto-deploys every push (build command: none, output dir:
+    root). First time only: create an empty GitHub repo, `git remote add origin
+    <url>` in ~/asva-website, push, then in Cloudflare -> Workers & Pages ->
+    Create -> Pages -> Connect to Git -> pick the repo -> add the custom domain
+    tryasva.com. After that, one push = a live site update.
+    """
+    import sys as _sys
+    _sys.path.insert(0, ROOT)
+    from app.site import export_static
+    os.makedirs(WEBSITE_REPO, exist_ok=True)
+    # Wipe old generated files (so a removed page never lingers), but keep .git
+    # and the README that explains the repo.
+    for fn in os.listdir(WEBSITE_REPO):
+        if fn in (".git", "README.md"):
+            continue
+        p = os.path.join(WEBSITE_REPO, fn)
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except OSError:
+            pass
+    files = export_static(WEBSITE_REPO, base="https://tryasva.com",
+                          app_base="https://app.tryasva.com")
+    with open(os.path.join(WEBSITE_REPO, "README.md"), "w", encoding="utf-8") as f:
+        f.write(
+            "# ASVA marketing website (tryasva.com)\n\n"
+            "Static site auto-deployed by Cloudflare Pages. Do NOT edit these\n"
+            "files by hand - they are generated from `app/site.py` in the ASVA\n"
+            "backend repo.\n\n"
+            "## Update on a new version\n"
+            "1. In the backend repo: `python build_zip.py website-repo`\n"
+            "2. Here: `git add -A && git commit -m \"site update\" && git push`\n"
+            "3. Cloudflare Pages auto-deploys the push. Done.\n")
+    print(f"\nWebsite repo ready: {WEBSITE_REPO}  ({len(files)} files)")
+    print("Next:  cd ~/asva-website  &&  git add -A  &&  git commit -m \"site update\"  &&  git push")
+
+
 def build_bot() -> None:
     out = os.path.join(DESKTOP, "ASVA_bot.zip")
     n = 0
@@ -368,6 +416,8 @@ if __name__ == "__main__":
         which |= {"shop", "bot", "server", "client", "landing", "website"}
     if "website" in which:
         build_website()
+    if "website-repo" in which:
+        build_website_repo()
     if "landing" in which:
         build_landing()
     if "standalone" in which or "solo" in which:

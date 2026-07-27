@@ -43,8 +43,12 @@ DOWNLOAD_FILE = f"{APP_BASE}/download/ASVA-Setup.exe"
 # The version of the installer being served, and a short honest changelog (newest
 # first). Shown on the download page ("you are downloading X") and the What's new
 # section. Bump DOWNLOAD_VERSION and prepend a row here on every shipped build.
-DOWNLOAD_VERSION = "1.8.1"
+DOWNLOAD_VERSION = "1.8.4"
 VERSIONS = [
+    ("1.8.4", "Knows when a customer promises to pay",
+     "When a customer replies that they have paid, or promises a date, ASVA pauses that party's reminders and shows you exactly why on the party page, with the customer's own message. So you never chase someone who just told you they will pay."),
+    ("1.8.3", "Steadier, and updates itself",
+     "ASVA now updates on its own. When a new version is ready it downloads quietly and you just press Restart, with your data and WhatsApp still connected. This build also adds a dark mode, a clearer dashboard showing your party and outstanding count, a do-not-chase list, and a one tap connection check that tells you in plain words if anything needs fixing."),
     ("1.8", "Promise-to-Pay",
      "ASVA now reads your customer's WhatsApp reply. If they say they have paid, or promise a date like '5 tareek', it pauses the reminders and nudges you to record it in Tally, so you never chase someone who already paid."),
     ("1.7", "Morning checkpoint",
@@ -55,7 +59,6 @@ VERSIONS = [
 # Honestly labelled as not-yet-shipped.
 COMING = [
     ("Reads payment screenshots", "Soon ASVA will read the amount off a UPI screenshot the customer sends, so recording it in Tally is one tap."),
-    ("A do-not-chase list", "Mark the parties you have written off, so they never show up in your chase list again."),
 ]
 
 # SEO keyword bank. Intent-led terms an Indian distributor (or an AI answering

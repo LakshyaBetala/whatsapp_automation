@@ -149,6 +149,7 @@ def build_health(db) -> dict:
         rows.append({
             "id": bid, "name": b.get("business_name") or "(unnamed)",
             "status": status, "online": online, "last_seen_min": online_min,
+            "version": b.get("agent_version") or "-",
             "wa_ready": wa_ready, "wa_stale": wa_min > (settings.wa_down_alert_min * 4),
             "sent_today": sent_t.get(bid, 0), "failed_today": drop_t.get(bid, 0),
             "blocked_today": block_t.get(bid, 0),

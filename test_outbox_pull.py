@@ -22,10 +22,18 @@ class _Q:
     def select(self, *a, **k): self._op = "select"; return self
     def update(self, patch): self._op, self._payload = "update", dict(patch); return self
     def eq(self, f, v): self._filters.append((f, v)); return self
+    def in_(self, f, values): self._filters.append((f, ("__in__", list(values)))); return self
     def order(self, *a, **k): return self
     def limit(self, n): self._limit = n; return self
 
-    def _match(self, r): return all(r.get(f) == v for f, v in self._filters)
+    def _match(self, r):
+        for f, v in self._filters:
+            if isinstance(v, tuple) and v and v[0] == "__in__":
+                if r.get(f) not in v[1]:
+                    return False
+            elif r.get(f) != v:
+                return False
+        return True
 
     def execute(self):
         R = lambda d: type("R", (), {"data": d})()
@@ -82,6 +90,25 @@ def test_pull_expires_stale_rows_instead_of_delivering_them():
     assert items == []
     assert db.store["wa_outbox"][0]["status"] == "failed"
     assert db.store["wa_outbox"][0]["last_error"] == "expired"
+
+
+# ── send-time promise hold re-check ─────────────────────────────────────────
+def test_pull_holds_a_reminder_when_the_party_now_has_a_promise(monkeypatch):
+    monkeypatch.setattr(outbox.promises, "held_now", lambda db, bids: {"biz1": {"c1"}})
+    db = FakeDB([_row("a", msg="m-rem")])
+    db.store["messages"].append({"id": "m-rem", "client_id": "c1", "type": "reminder"})
+    items = outbox.pull(db, "biz1")
+    assert items == []                                       # not delivered
+    assert db.store["wa_outbox"][0]["status"] == "held"      # retired, won't re-pull
+    assert db.store["messages"][0]["delivery_status"] == "held"
+
+
+def test_pull_still_delivers_a_bill_even_if_the_party_is_held(monkeypatch):
+    monkeypatch.setattr(outbox.promises, "held_now", lambda db, bids: {"biz1": {"c1"}})
+    db = FakeDB([_row("a", msg="m-bill")])
+    db.store["messages"].append({"id": "m-bill", "client_id": "c1", "type": "invoice"})
+    items = outbox.pull(db, "biz1")
+    assert [i["id"] for i in items] == ["a"]                 # a bill is never paused
 
 
 # ── ack ───────────────────────────────────────────────────────────────────

@@ -696,6 +696,12 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     tally_n = sum(1 for c in _active if (c.get("tally_ledger_name") or "").strip())
     nontally_n = len(_active) - tally_n
 
+    # A plain, at-a-glance count line (no plan upsell): how many parties ASVA is
+    # tracking, how many owe money right now, and the total outstanding.
+    parties_n = len(_active)
+    owing_n = sum(1 for c in _active if totals.get(c["id"], Decimal(0)) > 0)
+    total_out = sum((totals.get(c["id"], Decimal(0)) for c in _active), Decimal(0))
+
     # Plan meter + ASVA's recommendation.
     if over_cap:
         rec_line = (f'<div class="urec warn">Aapke {active_debtors:,} active customers hain - '
@@ -745,6 +751,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
  .urec.warn{{color:#9f2f2d;font-weight:600}}
  .urec.ok{{color:#346538}}
  .umsg{{margin-top:4px;font-size:.8em;color:#b5b5b0}}
+ .count{{margin:10px 0 2px;font-size:1.02em;color:#2F3437}} .count b{{color:#0a7d33;font-variant-numeric:tabular-nums}}
  .subtabs{{display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;background:#fff;margin:14px 0 6px}}
  .subtabs button{{border:0;border-radius:0;background:#fff;padding:9px 18px;font-weight:600;color:#787774}}
  .subtabs button+button{{border-left:1px solid #EAEAEA}}
@@ -780,13 +787,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
 <div class="sub">Tick = us party ko reminder ON. Batch, timing aur holidays: <b>Reminders</b> tab.</div>
 {_subscription_line(biz)}
 
-<div class="usage">
-  <div><b>{plan_label} plan</b> (₹{plan_price:,}/month) -
-  <b>{active_debtors:,}</b> / {debtor_cap:,} active customers is month</div>
-  <div class="ubar"><div class="ufill" style="width:{pct_used}%;background:{bar_color}"></div></div>
-  {rec_line}
-  <div class="umsg">{used:,} messages is month</div>
-</div>
+<div class="count"><b>{parties_n:,}</b> parties &middot; <b>{owing_n:,}</b> owe money now &middot; <b>&#8377;{total_out:,.0f}</b> outstanding</div>
 
 <div class="subtabs">
  <button class="on" data-sub="tally">Tally bills ({tally_n:,})</button>
@@ -2490,6 +2491,43 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     else:
         next_label, next_color = "Sab ho gaye", "#999"
 
+    # ── Promise-to-Pay: why the next reminder may be later than usual ──
+    # If the customer replied with a promise (or a paid claim), reminders are
+    # paused. Show that plainly here AND override the "next reminder" card, so
+    # the owner sees exactly why nothing is going out and can read what the
+    # customer actually said.
+    promise_html = ""
+    try:
+        from app.services import promises as _promises
+        _pr = _promises.find_open(db, biz["id"], client_id)
+    except Exception:
+        _pr = None
+    if _pr:
+        _said = esc(_pr.get("raw_text") or "")
+        _when = str(_pr.get("created_at") or "")[:10]
+        _pdate = _pr.get("promise_date")
+        _hold = str(_pr.get("hold_until") or "")[:10]
+        _resume = str(_pdate) if _pdate else _hold
+        if _pr.get("kind") == "paid_claim":
+            _head = "Customer says they have already paid"
+            _sub = f"Reminders are paused until {_hold}. Please confirm the payment in Tally."
+        elif _pr.get("kind") == "promise" and _pdate:
+            _head = f"Reminders paused until {_pdate}"
+            _sub = "The customer promised to pay by then. ASVA resumes on its own if it stays unpaid."
+        else:
+            _head = f"Reminders paused until {_hold}"
+            _sub = "ASVA resumes on its own if the bill stays unpaid."
+        # The pause is the real answer to "when is the next reminder".
+        if rem_on:
+            next_label, next_color = (f"Paused &middot; {_resume}", "#7d5a0a")
+        _saidline = (f'<div style="margin-top:8px">Customer said: '
+                     f'<b>&ldquo;{_said}&rdquo;</b>{(" &middot; " + _when) if _when else ""}</div>') if _said else ""
+        promise_html = (
+            f'<div class="card" style="margin-bottom:18px;border-left:4px solid #7d5a0a;background:#fbf3db">'
+            f'<div style="font-weight:700;color:#7d5a0a">&#9208;&nbsp; {_head}</div>'
+            f'<div class="hint" style="color:#8a6a2a;margin-top:2px">{_sub}</div>'
+            f'{_saidline}</div>')
+
     # Compact forward schedule (only when ON). Shows the TIME too - the owner
     # must always know exactly when the next message goes.
     sched_section = ""
@@ -2562,6 +2600,8 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
   <div class="card kpi"><div class="n">{cd_val or '-'}</div><div class="l">Credit days</div></div>
   <div class="card kpi"><div class="n" style="font-size:1rem;color:{next_color}">{next_label}</div><div class="l">Agla reminder</div></div>
 </div>
+
+{promise_html}
 
 <div class="card" style="margin-bottom:18px">
   <div class="remrow">

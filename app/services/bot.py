@@ -80,9 +80,10 @@ def _checkpoint_hold(db, business_id: str, cp: dict, arg: str) -> str | None:
 
 def _last10(n: str) -> str:
     """Last 10 digits of a phone number - used as a format-agnostic match key
-    so a number stored as 91XXXXXXXXXX still matches +91, 0-prefixed, etc."""
-    d = "".join(c for c in str(n or "") if c.isdigit())
-    return d[-10:] if len(d) >= 10 else ""
+    so a number stored as 91XXXXXXXXXX still matches +91, 0-prefixed, etc.
+    Delegates to the shared, exhaustively-tested phones module."""
+    from app.services import phones
+    return phones.last10(n)
 
 
 def _send_fail_note(result: dict) -> str:

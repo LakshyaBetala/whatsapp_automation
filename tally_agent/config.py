@@ -4,8 +4,16 @@ import sys
 
 
 def _config_path() -> str:
-    """config.json lives next to the .exe (PyInstaller) or this script,
-    regardless of the directory the agent is launched from."""
+    """Where config.json lives.
+
+    ASVA_CONFIG_PATH wins when set: the desktop app points it at Electron's
+    userData folder so the shop's pairing survives a reinstall/auto-update
+    (the install folder is wiped on every update, userData is not). With no
+    override we fall back to next-to-the-.exe (PyInstaller) or next-to-this
+    script, so a bare CLI run and the i3 keep working unchanged."""
+    override = os.environ.get('ASVA_CONFIG_PATH')
+    if override:
+        return override
     if getattr(sys, 'frozen', False):
         base = os.path.dirname(sys.executable)
     else:

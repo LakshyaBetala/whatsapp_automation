@@ -393,11 +393,21 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
     <div class="kpis" id="hkpis"></div>
     <div class="sect">Needs attention</div>
     <div class="alertbox" id="alerts"></div>
+    <details class="help" style="margin:8px 0 4px;font-size:.86rem">
+      <summary style="cursor:pointer;color:#8fb7a0;user-select:none">What do these mean, and how do I fix them?</summary>
+      <ul style="margin:8px 0 0;padding-left:18px;line-height:1.7;color:#a8b3ad">
+        <li><b>Agent offline</b> &mdash; that shop's laptop is off or has no internet. Nothing sends until it is back on. Ask them to open ASVA and check WiFi.</li>
+        <li><b>WhatsApp disconnected</b> &mdash; the shop's WhatsApp lost its link. They re-scan the QR in ASVA (WhatsApp Setup) on the shop laptop.</li>
+        <li><b>Messages stuck in queue</b> &mdash; sends are waiting because that shop's WhatsApp or laptop is down; they go out on their own once it is back.</li>
+        <li><b>Scheduler job stopped</b> &mdash; a background job on THIS host has not run in a while (usually right after a restart). If it stays red for long, restart the backend on the host (<code>sudo systemctl restart asva-backend</code>).</li>
+        <li><b>Version older than server</b> &mdash; that shop is on an older app build; it updates itself the next time they open ASVA. Nothing to do.</li>
+      </ul>
+    </details>
     <div class="sect">Traffic - 14 days (green sent / red failed)</div>
     <div class="traf" id="traf"></div>
     <div class="sect" style="margin-top:16px">Per shop, today</div>
     <div class="tablewrap"><table>
-      <thead><tr><th>Shop</th><th>Status</th><th>Agent</th><th>WhatsApp</th>
+      <thead><tr><th>Shop</th><th>Status</th><th>Agent</th><th>Version</th><th>WhatsApp</th>
         <th class="num">Sent</th><th class="num">Failed</th><th class="num">Blocked</th>
         <th class="num">Queued</th><th>Last seen</th></tr></thead>
       <tbody id="hrows"></tbody>
@@ -608,16 +618,20 @@ async function loadHealth(){
       const wa=(b.wa_ready===true)?'<span class="dot on"></span>on'
         :(b.wa_ready===false)?'<span class="dot" style="background:#e2574c;display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px"></span>down'
         :'<span class="dot off"></span>?';
+      const vcur=(b.version&&b.version!=='-'&&b.version===d.server_version);
+      const vcell=(!b.version||b.version==='-')?'<span class="muted">not reported</span>'
+        :('<span'+(vcur?'':' class="warnv" title="Older than the server build - the shop will update when it next opens ASVA"')+'>'+esc(b.version)+'</span>');
       return '<tr><td>'+esc(b.name)+'</td>'+
         '<td><span class="pill '+b.status+'">'+b.status+'</span></td>'+
         '<td><span class="dot '+(b.online?'on':'off')+'"></span>'+(b.online?'online':'offline')+'</td>'+
+        '<td>'+vcell+'</td>'+
         '<td>'+wa+'</td>'+
         '<td class="num">'+inr(b.sent_today)+'</td>'+
         '<td class="num '+(b.failed_today?'warnv':'')+'">'+inr(b.failed_today)+'</td>'+
         '<td class="num">'+inr(b.blocked_today)+'</td>'+
         '<td class="num '+(b.queued?'warnv':'')+'">'+inr(b.queued)+'</td>'+
         '<td>'+ago(b.last_seen_min)+'</td></tr>';
-    }).join('') || '<tr><td colspan="9" class="muted" style="padding:22px">No shops yet.</td></tr>';
+    }).join('') || '<tr><td colspan="10" class="muted" style="padding:22px">No shops yet.</td></tr>';
   }catch(e){document.getElementById('msg').textContent='Could not load health. Retrying...';}
 }
 

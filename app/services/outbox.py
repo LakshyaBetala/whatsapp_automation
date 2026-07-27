@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app.jobs.outbox_sweep import EXPIRE_HOURS, _cleanup_pdf, within_send_window
+from app.services import promises
 
 log = logging.getLogger(__name__)
 
@@ -28,13 +29,36 @@ def pull(db, business_id: str, limit: int = PULL_LIMIT) -> list[dict]:
 
     Returns [] outside shop hours, so a laptop that comes online at midnight
     delivers nothing until morning. Stale rows (older than EXPIRE_HOURS) are
-    expired here rather than surprising a customer with a days-old reminder."""
+    expired here rather than surprising a customer with a days-old reminder.
+
+    Send-time promise re-check: a reminder can be queued by the sweep and then
+    the customer promises to pay before the shop laptop delivers it (e.g. the
+    laptop was off, so both the reply and the queued send land together on
+    reconnect). We check the hold ONE more time here, at the moment of handing
+    the message over, and quietly hold any reminder whose party is now on a
+    promise pause - so we never chase someone who just promised."""
     if not within_send_window():
         return []
     rows = (db.table("wa_outbox")
-            .select("id, payload, attempts, created_at")
+            .select("id, payload, attempts, created_at, message_db_id")
             .eq("business_id", business_id).eq("status", "queued")
             .order("created_at").limit(max(1, min(50, limit))).execute()).data or []
+    # Resolve each row's party + type so we only pause REMINDERS (never a bill).
+    # Best-effort: if any of this fails, we deliver normally rather than block a
+    # send - a re-check error must never stop a legitimate reminder.
+    msg_by_id: dict = {}
+    held: set = set()
+    try:
+        msg_ids = [r["message_db_id"] for r in rows if r.get("message_db_id")]
+        if msg_ids:
+            for m in (db.table("messages").select("id, client_id, type")
+                      .in_("id", msg_ids).execute().data or []):
+                msg_by_id[m["id"]] = m
+        held = promises.held_now(db, [business_id]).get(business_id, set())
+    except Exception:
+        log.warning("outbox promise re-check skipped (delivering normally)", exc_info=True)
+        msg_by_id, held = {}, set()
+
     now = datetime.now(timezone.utc)
     out = []
     for r in rows:
@@ -45,9 +69,28 @@ def pull(db, business_id: str, limit: int = PULL_LIMIT) -> list[dict]:
                 continue
         except (TypeError, ValueError):
             pass
+        m = msg_by_id.get(r.get("message_db_id"))
+        if m and m.get("type") == "reminder" and m.get("client_id") in held:
+            _hold(db, business_id, r["id"], r.get("message_db_id"))
+            continue
         out.append({"id": r["id"], "payload": r["payload"],
                     "attempts": int(r.get("attempts") or 0)})
     return out
+
+
+def _hold(db, business_id: str, row_id: str, message_db_id: str | None) -> None:
+    """A queued reminder whose party promised to pay after it was queued: retire
+    the row (status 'held' so it is not re-pulled) and mark the audit row. 'held'
+    is not a failure, so it never inflates the failure-rate view."""
+    try:
+        db.table("wa_outbox").update(
+            {"status": "held", "last_error": "paused: customer promised to pay"}
+        ).eq("id", row_id).eq("business_id", business_id).execute()
+        if message_db_id:
+            db.table("messages").update({"delivery_status": "held"}).eq(
+                "id", message_db_id).execute()
+    except Exception:
+        log.warning("Could not hold outbox row %s", row_id, exc_info=True)
 
 
 def ack(db, business_id: str, row_id: str, status: str,

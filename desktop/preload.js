@@ -21,4 +21,16 @@ contextBridge.exposeInMainWorld('asva', {
   // Connection doctor: {ok, checks:[{name, ok, detail}]}. One button that tells
   // the owner (or the operator, remotely) exactly which link is broken.
   diagnose: () => ipcRenderer.invoke('run-diagnose'),
+
+  // Auto-update notice. main sends {state:'downloading'|'ready'|'current'|'error',
+  // version, percent}. installUpdate() applies a downloaded update and restarts.
+  onUpdate: (cb) => ipcRenderer.on('update', (e, d) => cb(d)),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+
+  // Recent technical logs (backlog) for the "Show technical logs" panel.
+  getLogs: () => ipcRenderer.invoke('get-logs'),
+  // Change the Tally company ASVA reads, mid-run. {ok} or {ok:false,error}.
+  changeCompany: (name) => ipcRenderer.invoke('change-company', name),
+  // Real sync progress: {done, total, label} while Tally is being read.
+  onSyncProgress: (cb) => ipcRenderer.on('sync-progress', (e, d) => cb(d)),
 });

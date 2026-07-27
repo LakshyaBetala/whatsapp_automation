@@ -15,7 +15,7 @@ from app import scheduler
 from app.config import settings
 from app import site
 from app.routers import (admin, bills, businesses, clients, downloads, eod,
-                         health, license, ops, tally, webhooks)
+                         health, license, mobile, ops, tally, webhooks)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +57,7 @@ app.include_router(eod.router, prefix="/eod")
 app.include_router(admin.router)              # /admin tick-box page (LAN)
 app.include_router(license.router)            # /license/heartbeat - server-authoritative subscription
 app.include_router(ops.router)                # /ops - operator command center (health + subscriptions)
+app.include_router(mobile.router)             # /m - read-only mobile companion (PWA)
 app.include_router(downloads.router)          # /download - public software download page
 app.include_router(site.router)               # public marketing site: / , /how-it-works, /features, /pricing, /use-cases, sitemap, robots
 

@@ -92,6 +92,40 @@ def download_file(name: str, token: str = Query("")):
     return FileResponse(p, filename=real, media_type=media)
 
 
+# ── Auto-update feed (electron-updater, generic provider) ───────────────────
+# The desktop app polls this feed and updates itself in the background. Publish
+# a new build by copying THREE files from dist_installer into
+# <downloads_dir>/updates on the host:
+#   latest.yml, ASVA-Setup-<version>.exe, ASVA-Setup-<version>.exe.blockmap
+# latest.yml names the version + sha512; the .blockmap lets the app download
+# only the changed bytes (small delta), so "one push to the i3" quietly updates
+# every shop. These files carry NO secret (same as the public installer), so the
+# feed is open - a token gate would only break the auto-updater for no gain.
+_UPDATE_EXT = (".yml", ".exe", ".blockmap")
+
+
+def _updates_path(name: str) -> str:
+    base = os.path.join(settings.downloads_dir or "downloads", "updates")
+    return os.path.join(base, name)
+
+
+@router.get("/updates/{name}")
+def update_feed_file(name: str):
+    # Hard-lock the name: no path traversal, only the feed's own file types.
+    if "/" in name or "\\" in name or ".." in name or not name.lower().endswith(_UPDATE_EXT):
+        raise HTTPException(status_code=404, detail="Unknown file")
+    p = _updates_path(name)
+    if not os.path.exists(p):
+        raise HTTPException(status_code=404, detail="Not published yet")
+    if name.lower().endswith(".exe"):
+        media = "application/vnd.microsoft.portable-executable"
+    elif name.lower().endswith(".yml"):
+        media = "text/yaml"
+    else:
+        media = "application/octet-stream"
+    return FileResponse(p, filename=name, media_type=media)
+
+
 @router.get("/download", response_class=HTMLResponse)
 def download_page(token: str = Query("")):
     from app.site import WA_TRY, page_shell

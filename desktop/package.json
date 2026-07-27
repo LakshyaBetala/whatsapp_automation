@@ -1,11 +1,14 @@
 {
   "name": "asva-desktop",
-  "version": "1.8.1",
+  "version": "1.8.4",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^32.0.0",
@@ -19,6 +22,12 @@
       "output": "../dist_installer",
       "buildResources": "."
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://app.tryasva.com/updates"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",

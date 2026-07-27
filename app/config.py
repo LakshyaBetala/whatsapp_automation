@@ -32,10 +32,12 @@ class Settings(BaseSettings):
 
     # --- App ---
     app_env: str = "development"
-    # Release version of THIS build. Bump on every shipped zip. The dashboard
-    # compares it against the newest row in app_releases (Supabase) and shows
-    # an update banner when a newer version exists - Tally-style update notice.
-    app_version: str = "1.8.0"
+    # Release version of THIS build. The desktop app now updates itself through
+    # the /updates feed (electron-updater), so the shop app's ONLY update notice
+    # is the in-app "Restart to update" bar. Keep this in step with the shipped
+    # app version so the older app_releases dashboard banner stays quiet (it
+    # fires only when app_releases > this) and shops never see two notices.
+    app_version: str = "1.8.4"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake

@@ -60,17 +60,36 @@ logging.basicConfig(
 )
 
 def log_and_print(msg: str, is_error=False):
+    # flush=True is essential: the packaged .exe's stdout is a pipe (not a tty),
+    # so Python fully-buffers it and the desktop app's log panel would stay empty
+    # until the buffer filled (often never). Flushing streams every line live.
     if is_error:
         logging.error(msg)
-        print(f"ERROR: {msg}")
+        print(f"ERROR: {msg}", flush=True)
     else:
         logging.info(msg)
-        print(msg)
+        print(msg, flush=True)
+
+
+def emit_progress(done: int, total: int, label: str = "") -> None:
+    """Machine-readable sync progress for the desktop app. The desktop parses
+    'ASVA_PROGRESS done/total label' out of the agent's stdout and shows a real
+    percentage bar. Harmless as a plain line when run from a CLI (no parser)."""
+    try:
+        print(f"ASVA_PROGRESS {int(done)}/{int(total)} {label}".rstrip(), flush=True)
+    except Exception:
+        pass
 
 # Identifiable User-Agent on every call to the ASVA server. Without it,
 # Cloudflare's bot check bans the request (HTTP 403, "error code: 1010") and the
 # whole thin client silently stops working. See tally_agent/pair.py.
 USER_AGENT = "Mozilla/5.0 (compatible; ASVA-Agent/1.6.0; +https://tryasva.com)"
+
+# Folder ASVA watches for Tally-exported bill PDFs. The owner points Tally's
+# invoice export/print-to-PDF at this same folder; the moment a PDF lands here,
+# the watcher reads that bill and sends it on WhatsApp. Defaulted here so a fresh
+# install watches a known folder even if config.json never set it.
+DEFAULT_BILL_PDF_DIR = r"C:\ASVA\bills"
 
 
 async def post_to_tally(host: str, port: int, payload: str, timeout: float = 180.0) -> bytes:
@@ -347,8 +366,8 @@ async def run_watch(config: dict):
     sync_every = max(60, int(config.get('watch_interval_seconds', 300) or 300))
     outstanding_every = int(config.get('outstanding_every_seconds', 300) or 300)
     company = config['company_name']
-    # Make sure the Tally PDF pickup folder exists (the TDL exports bills here).
-    pdf_dir = config.get('bill_pdf_dir', '')
+    # Make sure the Tally PDF pickup folder exists (Tally exports/prints bills here).
+    pdf_dir = config.get('bill_pdf_dir') or DEFAULT_BILL_PDF_DIR
     if pdf_dir:
         try:
             os.makedirs(pdf_dir, exist_ok=True)
@@ -524,8 +543,10 @@ async def run_apply_outstanding(config: dict):
     truth for amounts + dates (fixes receipt-capture drift). Runs at the end
     of --sync and via --refresh-outstanding."""
     company = config['company_name']
+    emit_progress(1, 4, "Reading customer list from Tally")
     groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
     debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
+    emit_progress(2, 4, "Reading customers from Tally")
     masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
     debtor_names = sorted({d['name'] for d in debtors})
@@ -539,9 +560,11 @@ async def run_apply_outstanding(config: dict):
         for d in debtors if (d.get('current_outstanding') or 0) > 0
     }
 
+    emit_progress(3, 4, "Reading outstanding bills from Tally")
     bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
     bills = tally_xml.parse_bills(bills_xml, set(debtor_names))
     if not bills and not ledger_balances:
+        emit_progress(4, 4, "Done")
         log_and_print("No outstanding data from Tally - nothing refreshed.", is_error=True)
         return
 
@@ -562,6 +585,7 @@ async def run_apply_outstanding(config: dict):
             for d in debtors if d.get("whatsapp_number")
         ],
     }
+    emit_progress(4, 4, "Saving to ASVA")
     log_and_print(f"Refreshing outstanding from Tally: {len(bills)} bills, "
                   f"{len(ledger_balances)} parties owing (ledger totals authoritative)...")
     try:
@@ -613,7 +637,7 @@ async def run_watch_all(companies: list):
     interval = int(companies[0].get('watch_interval_seconds', 60) or 60)
     outstanding_every = int(companies[0].get('outstanding_every_seconds', 300) or 300)
     last_out = {c['company_name']: 0.0 for c in companies}
-    pdf_dir = companies[0].get('bill_pdf_dir', '')
+    pdf_dir = companies[0].get('bill_pdf_dir') or DEFAULT_BILL_PDF_DIR
     if pdf_dir:
         try:
             os.makedirs(pdf_dir, exist_ok=True)

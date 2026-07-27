@@ -61,7 +61,12 @@ const PORT = process.env.PORT || 3001;
 const SESSION_ID = process.env.SESSION_ID || 'default';
 // "shop" = customer-facing number; "bot" = owner-only ASVA assistant number.
 const WA_CHANNEL = process.env.WA_CHANNEL || 'shop';
-const AUTH_DIR = path.join(__dirname, '.baileys_auth', `session-${SESSION_ID}`);
+// WA_AUTH_DIR wins when set: the desktop app points it at Electron's userData
+// folder so the shop's WhatsApp login survives a reinstall/auto-update (the
+// install folder is replaced on every update). With no override we keep the
+// login next to this file, so the i3 bot service is unchanged.
+const AUTH_ROOT = process.env.WA_AUTH_DIR || __dirname;
+const AUTH_DIR = path.join(AUTH_ROOT, '.baileys_auth', `session-${SESSION_ID}`);
 
 // Silent pino-compatible logger (Baileys requires one; we don't want its noise).
 function mkLogger() {

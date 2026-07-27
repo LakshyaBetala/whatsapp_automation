@@ -41,8 +41,14 @@ class PairError(Exception):
 
 
 def default_config_path() -> str:
-    """config.json sits next to the .exe (PyInstaller) or this file, so it is
-    found no matter which directory the app was launched from."""
+    """Where config.json is written/read. ASVA_CONFIG_PATH wins when set (the
+    desktop app points it at userData so the pairing survives a reinstall or
+    auto-update); otherwise next to the .exe (PyInstaller) or this file. Kept in
+    lock-step with tally_agent/config.py so pairing and the running agent always
+    agree on one location."""
+    override = os.environ.get("ASVA_CONFIG_PATH")
+    if override:
+        return override
     base = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
             else os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "config.json")
@@ -164,6 +170,9 @@ def write_config(paired: dict, *, backend_url: str = DEFAULT_BACKEND,
     cfg.setdefault("tally_port", DEFAULT_TALLY_PORT)
     cfg.setdefault("watch_interval_seconds", 300)
     cfg.setdefault("folder_poll_seconds", 8)
+    # Folder ASVA watches for Tally-exported bill PDFs (point Tally's invoice
+    # export/print here). Defaulted so a fresh install works without hand-editing.
+    cfg.setdefault("bill_pdf_dir", r"C:\ASVA\bills")
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"

@@ -5,6 +5,16 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } = require('electron');
 const { spawn, spawnSync } = require('child_process');
 const http = require('http');
+const https = require('https');
+// Pick the right client for the URL. The thin client's backend is
+// https://app.tryasva.com, and Node's `http` module CANNOT talk HTTPS (it throws
+// "Protocol https: not supported"). Using the wrong one is why the backend
+// showed red and the dashboard/reminders/analytics stayed blank on real installs
+// while a localhost (http) standalone worked. Always choose by protocol.
+function httpMod(url) {
+  try { return new URL(url).protocol === 'https:' ? https : http; }
+  catch (e) { return http; }
+}
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
@@ -12,7 +22,7 @@ const fs = require('fs');
 const REPO = path.join(__dirname, '..'); // desktop/ lives inside the repo root
 // Identifiable User-Agent so Cloudflare's bot check never blocks the app's own
 // calls to the server (heartbeat, health, reload). Matches tally_agent.
-const USER_AGENT = 'Mozilla/5.0 (compatible; ASVA-Desktop/1.6.0; +https://tryasva.com)';
+const USER_AGENT = `Mozilla/5.0 (compatible; ASVA-Desktop/${app.getVersion()}; +https://tryasva.com)`;
 let mainWindow = null;
 let tray = null;
 app.isQuitting = false;
@@ -51,18 +61,60 @@ function pageUrls(backend, token) {
     accountsUrl: `${backend}/admin/accounts${q}`,
   };
 }
-// Where this shop's identity lives. Packaged: beside the bundled Tally reader
-// (which resolves config.json next to its own exe). Dev: the repo's tally_agent.
-// Older installs kept it in Asva/, so that path is still honoured.
+// ── Where this shop's identity + WhatsApp login live ──────────────────────
+// The bundled Tally reader (asva-agent.exe) sits in resources/agent, but the
+// MUTABLE data - the pairing (config.json) and the WhatsApp session - must NOT
+// live inside the install folder: an installer or auto-update REPLACES that
+// folder, which would silently un-pair the shop and log WhatsApp out on every
+// update. So both live in Electron's userData (%APPDATA%\ASVA\...), which
+// survives reinstalls, and the agent + wa_service are pointed at it via env
+// vars (ASVA_CONFIG_PATH / WA_AUTH_DIR). This is what makes updates seamless.
 const AGENT_DIR = app.isPackaged ? path.join(process.resourcesPath, 'agent')
                                  : path.join(REPO, 'tally_agent');
-const CONFIG_PATH = path.join(AGENT_DIR, 'config.json');
+const USER_DATA = app.getPath('userData');
+const DATA_CONFIG = path.join(USER_DATA, 'config.json');   // the live pairing
+const WA_AUTH_ROOT = path.join(USER_DATA, 'wa');           // WhatsApp login root
+// Every bundled agent child (watch, drain, --pair, --set-company, --diagnose)
+// inherits this via process.env, so they all read/write the same config.json.
+process.env.ASVA_CONFIG_PATH = DATA_CONFIG;
+
+// Older locations config used to live in, kept only so the one-time migration
+// below can carry an existing shop's pairing forward on the first upgrade.
+const RES_CONFIG = path.join(AGENT_DIR, 'config.json');
 const LEGACY_CONFIG_PATH = path.join(REPO, 'Asva', 'config.json');
 
+// One-time migration. An install made before data moved to userData kept its
+// config (and WhatsApp login) inside the install folder. If userData has none
+// yet but an old copy still exists, carry it over so the upgrade keeps the
+// pairing and stays linked. Best-effort: any failure just means one re-pair.
+function migrateData() {
+  try {
+    if (!fs.existsSync(DATA_CONFIG)) {
+      for (const old of [RES_CONFIG, LEGACY_CONFIG_PATH]) {
+        if (old && fs.existsSync(old)) {
+          fs.mkdirSync(USER_DATA, { recursive: true });
+          fs.copyFileSync(old, DATA_CONFIG);
+          break;
+        }
+      }
+    }
+    const oldWaDir = app.isPackaged ? path.join(process.resourcesPath, 'wa_service')
+                                    : path.join(REPO, 'wa_service');
+    const oldAuth = path.join(oldWaDir, '.baileys_auth');
+    const newAuth = path.join(WA_AUTH_ROOT, '.baileys_auth');
+    if (fs.existsSync(oldAuth) && !fs.existsSync(newAuth)) {
+      fs.mkdirSync(WA_AUTH_ROOT, { recursive: true });
+      fs.cpSync(oldAuth, newAuth, { recursive: true });
+    }
+  } catch (e) { console.error('[main] data migration skipped:', (e && e.message) || e); }
+}
+migrateData();   // must run before loadConfig() reads the pairing below
+
 function configPath() {
-  if (fs.existsSync(CONFIG_PATH)) return CONFIG_PATH;
+  if (fs.existsSync(DATA_CONFIG)) return DATA_CONFIG;
+  if (fs.existsSync(RES_CONFIG)) return RES_CONFIG;
   if (fs.existsSync(LEGACY_CONFIG_PATH)) return LEGACY_CONFIG_PATH;
-  return CONFIG_PATH;                       // where a fresh pairing will write
+  return DATA_CONFIG;                       // where a fresh pairing will write
 }
 function readConfigFile() {
   try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch (e) { return null; }
@@ -127,9 +179,11 @@ const NODE_ENV = app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {};
 
 // The Tally reader / drainer: bundled exe when packaged, source in dev.
 function agentService(extraArgs) {
+  // PYTHONUNBUFFERED so the reader's log lines stream to the app's log panel
+  // live (the packaged exe otherwise buffers stdout and the panel looks empty).
   return USE_AGENT_EXE
-    ? { cmd: AGENT_EXE, args: extraArgs, cwd: AGENT_DIR, env: {} }
-    : { cmd: PY, args: ['-u', 'tally_agent/agent.py', ...extraArgs], cwd: REPO, env: {} };
+    ? { cmd: AGENT_EXE, args: extraArgs, cwd: AGENT_DIR, env: { PYTHONUNBUFFERED: '1' } }
+    : { cmd: PY, args: ['-u', 'tally_agent/agent.py', ...extraArgs], cwd: REPO, env: { PYTHONUNBUFFERED: '1' } };
 }
 
 // ONE number, one wa_service instance:
@@ -138,7 +192,8 @@ function agentService(extraArgs) {
 //   drainer         = delivers the server's queued sends from this shop's number
 const SPECS = {
   whatsapp: { cmd: NODE_CMD, args: [path.join(WA_DIR, 'index.js')], cwd: WA_DIR,
-              env: { ...NODE_ENV, PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop' } },
+              env: { ...NODE_ENV, PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop',
+                     WA_AUTH_DIR: WA_AUTH_ROOT } },
   watcher: agentService(['--watch']),
   drainer: agentService(['--drain-outbox']),
 };
@@ -172,7 +227,16 @@ function startService(name) {
   logs[name] = logs[name] || [];
 
   const push = (buf) => {
-    const s = buf.toString();
+    const raw = buf.toString();
+    // Pull out real sync-progress markers ("ASVA_PROGRESS done/total label")
+    // and drive the % bar with them; keep them OUT of the technical log so it
+    // stays readable. Anything not a marker is logged as normal.
+    let mm; const rx = /ASVA_PROGRESS\s+(\d+)\/(\d+)\s*([^\r\n]*)/g;
+    while ((mm = rx.exec(raw)) !== null) {
+      sendToWindow('sync-progress', { done: +mm[1], total: +mm[2], label: (mm[3] || '').trim() });
+    }
+    const s = raw.replace(/ASVA_PROGRESS[^\r\n]*\r?\n?/g, '');
+    if (!s.trim()) return;                 // the chunk was only marker(s)
     logs[name].push(s);
     if (logs[name].length > 250) logs[name].shift();
     sendToWindow('log', { name, line: s });
@@ -289,11 +353,27 @@ function runAgent(args, timeoutMs = 90000) {
   });
 }
 
+// Kill a child AND its whole tree. On Windows a plain proc.kill() often leaves
+// grandchildren alive (the bundled exe, Electron's node child), which keeps
+// port 3001 held and makes "ASVA still runs after I closed it" happen. taskkill
+// /T /F takes down the entire tree so nothing lingers.
+function killTree(proc) {
+  if (!proc) return;
+  try {
+    if (process.platform === 'win32' && proc.pid) {
+      spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
+    } else {
+      proc.kill();
+    }
+  } catch (e) { try { proc.kill(); } catch (_) { /* ignore */ } }
+}
+
 function stopAll() {
-  app.isQuitting = true;
+  app.isQuitting = true;   // stops the exit-handler from respawning anything
   for (const name of Object.keys(services)) {
     const p = services[name] && services[name].proc;
-    if (p) { try { p.kill(); } catch (e) { /* ignore */ } }
+    if (p) killTree(p);
+    if (services[name]) services[name].proc = null;
   }
 }
 
@@ -301,7 +381,7 @@ function stopAll() {
 function ping(url, cb) {
   let req;
   try {
-    req = http.get(url, { timeout: 2500, headers: { 'User-Agent': USER_AGENT } }, (res) => {
+    req = httpMod(url).get(url, { timeout: 2500, headers: { 'User-Agent': USER_AGENT } }, (res) => {
       let body = '';
       res.on('data', (d) => (body += d));
       res.on('end', () => cb(res.statusCode === 200, body));
@@ -318,8 +398,10 @@ function httpPostJson(url, bodyObj, cb) {
   let req;
   try {
     const u = new URL(url);
-    req = http.request({
-      hostname: u.hostname, port: u.port || 80, path: u.pathname + u.search,
+    req = httpMod(url).request({
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname + u.search,
       method: 'POST', timeout: 8000,
       headers: { 'Content-Type': 'application/json', 'Content-Length': data.length, 'User-Agent': USER_AGENT },
     }, (res) => {
@@ -356,7 +438,7 @@ function sendHeartbeat() {
     httpPostJson(`${CONFIG.backendUrl}/license/heartbeat`, {
       agent_token: CONFIG.token,
       machine_id: os.hostname(),
-      agent_version: SERVER_VERSION || undefined,
+      agent_version: app.getVersion(),   // THIS shop's app build (e.g. 1.8.3), not the server's
       wa_ready: (typeof WA_READY === 'boolean') ? WA_READY : undefined,
     }, () => { /* fire and forget */ });
   } catch (e) { /* never let a heartbeat crash the app */ }
@@ -433,8 +515,27 @@ function createWindow() {
     if (code === -3) return; // aborted (normal on fast reloads)
     setTimeout(() => { try { if (!mainWindow.isDestroyed()) loadUI(); } catch (_) {} }, 1500);
   });
+  // Closing the window CLOSES ASVA (after a confirm) and stops every background
+  // process - it does NOT hide to the tray and keep running. The confirm makes
+  // clear what stops, so nobody closes it by accident and wonders why bills
+  // stopped going.
   mainWindow.on('close', (e) => {
-    if (!app.isQuitting) { e.preventDefault(); mainWindow.hide(); } // hide to tray
+    if (app.isQuitting) return;                 // a real quit is already underway
+    e.preventDefault();
+    const { dialog } = require('electron');
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['Keep ASVA running', 'Close ASVA'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: 'Close ASVA?',
+      message: 'Close ASVA completely?',
+      detail: 'While ASVA is closed it will not send bills or reminders and will '
+            + 'not read new entries from Tally. Everything starts again the next '
+            + 'time you open ASVA.',
+    });
+    if (choice === 1) { app.isQuitting = true; stopAll(); app.quit(); }
   });
 }
 
@@ -475,6 +576,31 @@ ipcMain.handle('restart-service', (e, name) => {
   else startService(name);
   return true;
 });
+// Recent service output for the "Show technical logs" panel. main keeps a ring
+// buffer per service; the renderer pulls it on open so the box is never empty
+// just because the interesting lines arrived before the window existed.
+ipcMain.handle('get-logs', () => {
+  const out = [];
+  for (const name of Object.keys(logs)) {
+    for (const line of logs[name]) out.push('[' + name + '] ' + line);
+  }
+  return out.join('');
+});
+// Change which Tally company ASVA reads, mid-run. Writes the new company, then
+// restarts ONLY the Tally reader (never startAll - that would double-spawn
+// WhatsApp + the drainer). The reader reads company_name fresh on start, so it
+// begins reading the new company; the caller then forces a resync.
+ipcMain.handle('change-company', async (e, name) => {
+  const clean = String(name || '').trim();
+  if (!clean) return { ok: false, error: 'No company chosen.' };
+  const r = await runAgent(['--set-company', clean]);
+  if (!r || !r.ok) return r || { ok: false, error: 'Could not save the company.' };
+  Object.assign(CONFIG, loadConfig());        // pick up the new company_name
+  const w = services.watcher && services.watcher.proc;
+  if (w) killTree(w);                          // exit handler respawns it fresh
+  else startService('watcher');
+  return { ok: true, company: clean };
+});
 // Top-bar "Reload data" -> force an immediate Tally refresh (rate-limited to
 // once/10min server-side). Returns {ok, cooldown, wait_min, detail}.
 ipcMain.handle('tally-reload', () => new Promise((resolve) => {
@@ -507,6 +633,43 @@ ipcMain.handle('wa-status', () => new Promise((resolve) => {
   ping('http://localhost:3001/api/wa/status', (ok, b) => resolve(parseWa(ok, b)));
 }));
 
+// ── Auto-update (notice style) ─────────────────────────────────────────────
+// The app quietly checks the ASVA server's /updates feed, downloads a newer
+// build IN THE BACKGROUND (differential, so it's small), then just SHOWS the
+// owner a "new version ready" bar. Nothing is forced: they press Restart when
+// convenient, or it applies on the next quit. Because config + WhatsApp login
+// live in userData now, the update never loses data. This is what turns "visit
+// every shop to update" into "one push to the i3 updates everyone".
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;               // dev has no installer to replace
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); }
+  catch (e) { console.error('[update] electron-updater not available:', (e && e.message) || e); return; }
+
+  autoUpdater.autoDownload = true;           // fetch quietly in the background
+  autoUpdater.autoInstallOnAppQuit = true;   // also apply on the next normal quit
+  autoUpdater.on('update-available', (info) =>
+    sendToWindow('update', { state: 'downloading', version: info && info.version }));
+  autoUpdater.on('download-progress', (p) =>
+    sendToWindow('update', { state: 'downloading', percent: Math.round((p && p.percent) || 0) }));
+  autoUpdater.on('update-downloaded', (info) =>
+    sendToWindow('update', { state: 'ready', version: info && info.version }));
+  autoUpdater.on('update-not-available', () => sendToWindow('update', { state: 'current' }));
+  autoUpdater.on('error', (err) => {
+    console.error('[update] error:', (err && err.message) || err);
+    sendToWindow('update', { state: 'error' });
+  });
+  // The owner presses "Restart to update" -> apply now.
+  ipcMain.handle('install-update', () => {
+    try { app.isQuitting = true; stopAll(); autoUpdater.quitAndInstall(); } catch (e) {}
+    return true;
+  });
+
+  const check = () => { try { autoUpdater.checkForUpdates(); } catch (e) {} };
+  setTimeout(check, 60 * 1000);              // ~1 min after launch (let it settle)
+  setInterval(check, 6 * 60 * 60 * 1000);    // and every 6 hours after that
+}
+
 // Single instance - double-clicking the launcher again just focuses the app
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -521,7 +684,9 @@ if (!app.requestSingleInstanceLock()) {
     // Heartbeat once the backend is up, then every 30 min.
     setTimeout(sendHeartbeat, 25000);
     setInterval(sendHeartbeat, 30 * 60 * 1000);
+    setupAutoUpdate();
   });
-  app.on('window-all-closed', () => { /* keep running in tray */ });
+  // Window closed = ASVA closed. Stop everything and exit (no tray-only ghost).
+  app.on('window-all-closed', () => { stopAll(); app.quit(); });
   app.on('before-quit', () => stopAll());
 }

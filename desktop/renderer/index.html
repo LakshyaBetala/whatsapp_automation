@@ -41,6 +41,11 @@
   .col { position: absolute; inset: 0; display: flex; flex-direction: column; }
   .grow { flex: 1; position: relative; }
   webview { width: 100%; height: 100%; border: 0; }
+  #updatebar { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; background: #294d38; color: #eef6ef; font-size: .9rem; flex-shrink: 0; }
+  #updatebar b { color: #fff; }
+  #updatebtn { border: 0; background: #46d67e; color: #10321f; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: .84rem; flex-shrink: 0; }
+  #updatebtn:hover { background: #5fe38f; }
+  #updatebtn:active { transform: scale(.97); }
   .banner { padding: 10px 16px; font-size: .92rem; display: none; }
   .banner.warn { display: block; background: #FBF3DB; color: #956400; border-bottom: 1px solid #efdfa8; }
   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #F7F6F3; color: #787774; font-size: 1.05rem; text-align: center; padding: 24px; }
@@ -70,6 +75,66 @@
   label.auto { display: inline-flex; align-items: center; gap: 8px; margin: 14px 0; font-size: .92rem; }
   #log { background: #14231b; color: #b6f5c8; font-family: 'SF Mono',Consolas,monospace; font-size: 11.5px; padding: 12px; height: 200px; overflow: auto; white-space: pre-wrap; border-radius: 8px; }
   .toprow { display: flex; justify-content: space-between; align-items: center; }
+
+  /* Sync progress bar (thin, under the top bar) */
+  #syncbar { height: 3px; background: transparent; overflow: hidden; flex-shrink: 0; }
+  #syncbar.on { background: #e2eae5; }
+  #syncbar .fill { height: 100%; width: 30%; background: #46d67e; display: none; }
+  #syncbar.on .fill { display: block; animation: syncmove 1.15s ease-in-out infinite; }
+  /* Determinate mode: real % from the Tally reader drives the width, no animation. */
+  #syncbar.det .fill { animation: none; margin-left: 0; width: 0; transition: width .4s ease; }
+  @keyframes syncmove { 0% { margin-left: -32%; } 100% { margin-left: 102%; } }
+  #synclabel { display: none; padding: 4px 16px; font-size: .8rem; color: #2f7d4a; background: #eef6ef; flex-shrink: 0; }
+  #synclabel.on { display: block; }
+  body.dark #synclabel { background: #16221b; color: #8fdca9; }
+
+  /* Change-company picker (in the Status panel) */
+  #cocbtn { background: #1f6c9f; }
+  #cocbtn:hover { background: #2b80b8; }
+  .cocitem { display: block; width: 100%; text-align: left; margin-top: 6px; padding: 9px 12px; border: 1px solid #EAEAEA; border-radius: 8px; background: #fff; cursor: pointer; font: inherit; font-size: .9rem; }
+  .cocitem:hover:not(:disabled) { background: #eef3ef; }
+  .cocitem:disabled { opacity: .55; cursor: default; }
+  body.dark .cocitem { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+
+  /* Theme toggle */
+  #themebtn { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; border-radius: 6px; cursor: pointer; font-size: .82rem; font-weight: 600; flex-shrink: 0; }
+  #themebtn:hover { background: #eef3ef; }
+
+  /* Diagnostics (inside the Status panel) */
+  .diagbtn { font: inherit; background: #294d38; color: #fff; border: 0; border-radius: 6px; padding: 9px 16px; cursor: pointer; font-weight: 700; }
+  .diagbtn:hover { background: #346b49; } .diagbtn:active { transform: scale(.98); }
+  .diagbtn:disabled { opacity: .6; cursor: default; }
+  #diagresults { margin: 12px 0 2px; }
+  .diagrow { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid #EAEAEA; font-size: .9rem; }
+  .diagrow .ic { font-weight: 800; flex-shrink: 0; width: 16px; text-align: center; }
+  .diagrow.ok .ic { color: #2f9e54; } .diagrow.bad .ic { color: #d9463b; } .diagrow.info .ic { color: #8a8a86; }
+  .diagrow .dt b { display: block; color: #2F3437; }
+  .diagrow .dt span { color: #787774; }
+  .logtoggle { font: inherit; background: none; border: 0; color: #787774; cursor: pointer; text-decoration: underline; padding: 8px 0 0; font-size: .85rem; }
+
+  /* Dark mode (app frame; the dashboard pages inside stay light for now).
+     Base flip first so NOTHING inherits dark text on a dark surface, then every
+     light surface gets an explicit dark background. This is what prevents the
+     "black text I can't read" problem. */
+  body.dark { color: #dfe8e2; }
+  body.dark #main { background: #0f1512; }
+  body.dark #topbar { background: #14201a; color: #9fb7a6; border-bottom-color: #24332b; }
+  body.dark #topbar .tstat b { color: #eef3ef; }
+  body.dark #pagereload, body.dark .langtoggle button, body.dark #themebtn { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+  body.dark .langtoggle button.on { background: #294d38; color: #fff; border-color: #294d38; }
+  body.dark .overlay { background: #0f1512; color: #9fb7a6; }
+  body.dark #syncbar.on { background: #24332b; }
+  body.dark .statuscard { background: #16221b; color: #dfe8e2; }
+  body.dark .statuscard h2 { color: #fff; }
+  body.dark .srow, body.dark .diagrow { border-bottom-color: #24332b; }
+  body.dark .srow .sname, body.dark .diagrow .dt b { color: #eef3ef; }
+  body.dark .srow .stext, body.dark .diagrow .dt span, body.dark .logtoggle { color: #9fb7a6; }
+  body.dark .srow button, body.dark .closebtn { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+  /* WhatsApp Setup tab (a white surface) - must go dark too or its text vanishes. */
+  body.dark .setupcol { background: #16221b; border-right-color: #24332b; }
+  body.dark .qrwait { color: #9fb7a6; }
+  body.dark .qrimg { border-color: #2c4536; background: #fff; }  /* QR needs white quiet-zone to scan */
+  body.dark .banner.warn { background: #3a3320; color: #f0d68a; border-bottom-color: #4a411f; }
 </style>
 </head>
 <body>
@@ -102,7 +167,14 @@
           <button id="lang-en" onclick="setLang('english')">EN</button>
           <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
         </div>
+        <button id="themebtn" onclick="toggleTheme()" title="Switch dark / light">Dark</button>
       </div>
+    </div>
+    <div id="syncbar"><div class="fill"></div></div>
+    <div id="synclabel"></div>
+    <div id="updatebar">
+      <span id="updatemsg">A new version of ASVA is ready.</span>
+      <button id="updatebtn" onclick="applyUpdate()">Restart to update</button>
     </div>
     <div id="maincontent">
     <div class="view on" id="v-dash">
@@ -146,11 +218,16 @@
     <div id="statuspanel" onclick="if(event.target.id==='statuspanel')toggleStatus()">
       <div class="statuscard">
         <div class="toprow"><h2>Services</h2><button class="closebtn" onclick="toggleStatus()">Close</button></div>
-        <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">Backend (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="restart('backend')">Restart</button></div>
+        <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">ASVA server (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="runDiag()">Check</button></div>
         <div class="srow"><span class="dot" id="s-whatsapp"></span><div class="mid"><div class="sname">Shop WhatsApp</div><div class="stext" id="st-whatsapp">checking...</div></div><button onclick="restart('whatsapp')">Restart</button></div>
         <div class="srow"><span class="dot ok"></span><div class="mid"><div class="sname">Tally watcher</div><div class="stext">Running - new Tally bills reach WhatsApp in ~2 min.</div></div><button onclick="restart('watcher')">Restart</button></div>
         <label class="auto"><input type="checkbox" id="autostart"> Windows chalu hote hi ASVA apne aap khul jaye</label>
-        <div id="log"></div>
+        <div style="margin-top:6px"><button class="diagbtn" id="diagbtn" onclick="runDiag()">Check connection and find the problem</button></div>
+        <div id="diagresults"></div>
+        <div style="margin-top:14px"><button class="diagbtn" id="cocbtn" onclick="openCompanyPicker()">Change Tally company</button></div>
+        <div id="cocpicker"></div>
+        <button class="logtoggle" id="logtoggle" onclick="toggleLog()">Show technical logs</button>
+        <div id="log" style="display:none"></div>
       </div>
     </div>
     </div><!-- /#maincontent -->
@@ -158,7 +235,109 @@
 </div>
 
 <script>
-let CONFIG = null, loaded = {};
+let CONFIG = null, loaded = {}, lastRenderedSync = null;
+function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+
+// ── Dark / light theme (persisted on this laptop) ─────────────────────────
+function applyTheme() {
+  const dark = localStorage.getItem('asva_theme') === 'dark';
+  document.body.classList.toggle('dark', dark);
+  const b = document.getElementById('themebtn');
+  if (b) b.textContent = dark ? 'Light' : 'Dark';
+}
+function toggleTheme() {
+  localStorage.setItem('asva_theme', localStorage.getItem('asva_theme') === 'dark' ? 'light' : 'dark');
+  applyTheme();
+}
+
+// ── Show technical logs (hidden by default) ───────────────────────────────
+// The box only receives lines that arrive AFTER the window opened, so on first
+// open we pull the full recent history from main - otherwise it looks empty.
+async function toggleLog() {
+  const l = document.getElementById('log'), b = document.getElementById('logtoggle');
+  const showing = l.style.display !== 'none';
+  if (showing) {
+    l.style.display = 'none';
+    if (b) b.textContent = 'Show technical logs';
+    return;
+  }
+  try {
+    if (window.asva.getLogs) {
+      const backlog = await window.asva.getLogs();
+      if (backlog && backlog.trim()) l.textContent = backlog;
+    }
+  } catch (e) {}
+  if (!l.textContent || !l.textContent.trim()) {
+    l.textContent = 'No recent activity yet. If something looks wrong, press "Check connection and find the problem" above.';
+  }
+  l.style.display = 'block';
+  l.scrollTop = l.scrollHeight;
+  if (b) b.textContent = 'Hide technical logs';
+}
+
+// ── Change the Tally company mid-run (Status panel) ───────────────────────
+async function openCompanyPicker() {
+  const box = document.getElementById('cocpicker');
+  box.innerHTML = '<div class="diagrow info"><span class="ic">&#8230;</span><div class="dt"><b>Reading companies open in Tally...</b><span>A few seconds.</span></div></div>';
+  let r = {};
+  try { r = await window.asva.pairCompanies(); } catch (e) { r = { ok: false }; }
+  if (!r || !r.ok || !(r.companies || []).length) {
+    box.innerHTML = '<div class="diagrow bad"><span class="ic">&#10007;</span><div class="dt"><b>Could not read companies from Tally.</b><span>' +
+      esc((r && r.error) || 'Open TallyPrime, then press Change Tally company again.') + '</span></div></div>';
+    return;
+  }
+  const cur = (CONFIG && CONFIG.companies && CONFIG.companies[0] && CONFIG.companies[0].name) || '';
+  box.innerHTML = '<div style="margin:10px 0 2px;font-size:.88rem;color:#787774">Pick the Tally company ASVA should read and sync. This changes which company\'s data ASVA works on.</div>';
+  (r.companies || []).forEach((name) => {
+    const btn = document.createElement('button');
+    btn.className = 'cocitem';
+    btn.textContent = name + (name === cur ? '   (current)' : '');
+    btn.disabled = (name === cur);
+    btn.onclick = () => pickCompany(name);
+    box.appendChild(btn);
+  });
+}
+async function pickCompany(name) {
+  const box = document.getElementById('cocpicker');
+  box.innerHTML = '<div class="diagrow info"><span class="ic">&#8230;</span><div class="dt"><b>Switching to ' + esc(name) + '...</b><span>Restarting the Tally reader and starting a fresh sync.</span></div></div>';
+  let r = {};
+  try { r = await window.asva.changeCompany(name); } catch (e) { r = { ok: false }; }
+  if (!r || !r.ok) {
+    box.innerHTML = '<div class="diagrow bad"><span class="ic">&#10007;</span><div class="dt"><b>Could not switch company.</b><span>' +
+      esc((r && r.error) || 'Please try again.') + '</span></div></div>';
+    return;
+  }
+  box.innerHTML = '<div class="diagrow ok"><span class="ic">&#10003;</span><div class="dt"><b>Now reading ' + esc(name) + '.</b><span>Syncing fresh data - the dashboard updates on its own. Watch the progress bar at the top.</span></div></div>';
+  // Force an immediate sync and show the progress bar.
+  try { await window.asva.tallyReload(); } catch (e) {}
+  awaitingSync = true; syncBaseline = lastSyncedAtSeen;
+  const sb = document.getElementById('syncbar'); if (sb) sb.classList.add('on');
+}
+
+// ── Connection doctor: turns "it doesn't work" into a plain reason ─────────
+async function runDiag() {
+  const box = document.getElementById('diagresults');
+  const btn = document.getElementById('diagbtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+  box.innerHTML = '<div class="diagrow info"><span class="ic">&#8230;</span><div class="dt"><b>Checking your connection...</b><span>This takes a few seconds.</span></div></div>';
+  let r = {};
+  try { r = await window.asva.diagnose(); } catch (e) { r = { ok: false, checks: [] }; }
+  let html = '';
+  (r.checks || []).forEach((c) => {
+    html += '<div class="diagrow ' + (c.ok ? 'ok' : 'bad') + '"><span class="ic">' +
+      (c.ok ? '&#10003;' : '&#10007;') + '</span><div class="dt"><b>' + esc(c.name) + '</b>' +
+      (c.detail ? '<span>' + esc(c.detail) + '</span>' : '') + '</div></div>';
+  });
+  if (!html) {
+    html = '<div class="diagrow bad"><span class="ic">&#10007;</span><div class="dt"><b>Could not run the check.</b>' +
+      '<span>Open Status, press Restart on each service, then try again.</span></div></div>';
+  }
+  const backend = (CONFIG && CONFIG.backendUrl) || '(not set)';
+  html += '<div class="diagrow info"><span class="ic">i</span><div class="dt"><span>ASVA server: ' + esc(backend) + '</span></div></div>';
+  box.innerHTML = html;
+  if (btn) { btn.disabled = false; btn.textContent = 'Check connection and find the problem'; }
+}
+
 function show(v) {
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   document.querySelectorAll('.view').forEach(el => el.classList.remove('on'));
@@ -284,6 +463,7 @@ function waText(ready, reachable) {
 }
 
 applyLangButtons();
+applyTheme();
 // ── Multi-company: each Tally company has its own token/data; switching
 // simply points every page at that company's URLs. ──
 function applyCompany(i) {
@@ -332,15 +512,30 @@ window.asva.onStatus((s) => {
     }
     tsync.textContent = stat + (lbl ? ' · ' + lbl : '');
   }
+  // Sync progress bar: on while the backend reports a sync in progress, or in
+  // the window just after the owner pressed Tally refresh.
+  const syncing = /sync ho raha|syncing/i.test(s.tallyLabel || '');
+  const sb = document.getElementById('syncbar');
+  // Don't fight the determinate (real %) bar while it's driving itself.
+  if (sb && !sb.classList.contains('det')) sb.classList.toggle('on', syncing || awaitingSync);
+
+  // Manual "Tally refresh" completion: stop the wait + re-render when it lands.
   if (awaitingSync && s.lastSyncedAt && s.lastSyncedAt !== syncBaseline) {
     awaitingSync = false;
     setReloadLabel(RELOAD_LABEL);
     reloadAll();
   }
+  // Dynamic data loading: whenever a NEWER sync lands (from any source), re-
+  // render the pages on their own so fresh dues/bills appear without pressing
+  // anything. Skip the very first value so the initial load isn't double-fetched.
+  if (s.lastSyncedAt && s.lastSyncedAt !== lastRenderedSync) {
+    if (lastRenderedSync !== null && loaded['wv-dash']) reloadAll();
+    lastRenderedSync = s.lastSyncedAt;
+  }
 
   setDot('d-backend', !!s.backend); setDot('s-backend', !!s.backend);
   setDot('d-whatsapp', !!s.whatsapp); setDot('s-whatsapp', !!s.whatsapp);
-  document.getElementById('st-backend').textContent = s.backend ? 'Running.' : 'Starting. Still red after 1 min? Press Restart.';
+  document.getElementById('st-backend').textContent = s.backend ? 'Connected.' : 'Cannot reach the server. Press Check to see why (usually the internet).';
   document.getElementById('st-whatsapp').textContent = waText(s.whatsapp, s.whatsappReachable);
   renderQr('qr-shop', s.whatsapp, s.whatsappReachable, s.whatsappQr, 'shop');
 
@@ -350,12 +545,84 @@ window.asva.onStatus((s) => {
     banner.innerHTML = 'Shop WhatsApp is not connected - reminders cannot go. Scan the QR in "WhatsApp Setup".';
   } else { banner.className = 'banner'; }
 
+  const ov = document.getElementById('dashov');
   if (s.backend) {
+    window._backendDownSince = 0;
     loadPage('wv-dash', CONFIG.dashboardUrl);
     loadPage('wv-reminders', CONFIG.remindersUrl);
     loadPage('wv-analytics', CONFIG.analyticsUrl);
     loadPage('wv-accounts', CONFIG.accountsUrl);
-    if (loaded['wv-dash']) document.getElementById('dashov').classList.add('hide');
+    if (loaded['wv-dash']) ov.classList.add('hide');
+    else if (ov) ov.textContent = 'Starting ASVA... one moment.';   // clear any old error text
+  } else if (ov && !ov.classList.contains('hide')) {
+    // Backend not reachable. Don't leave the hopeful "15 seconds" message up
+    // forever - after a short wait, tell the owner exactly how to find out why.
+    if (!window._backendDownSince) window._backendDownSince = Date.now();
+    if (Date.now() - window._backendDownSince > 25000) {
+      // NOTE: .overlay is a flex container, so the message MUST be a single
+      // child element - otherwise each <b>/<br>/text node becomes its own flex
+      // item and the words scatter across the row. Wrap it all in one <div>.
+      ov.innerHTML = (currentLang() === 'english'
+        ? '<div style="max-width:460px;line-height:1.6">ASVA cannot reach the server yet.<br><br>Open <b>Status</b> at the bottom-left and press <b>Check connection and find the problem</b> to see why. It is usually the internet on this computer.</div>'
+        : '<div style="max-width:460px;line-height:1.6">ASVA server tak nahi pahunch pa raha.<br><br>Neeche baayein <b>Status</b> kholein aur <b>Check connection</b> dabaayein - wajah dikh jayegi. Aksar is computer ka internet hota hai.</div>');
+    }
+  }
+});
+
+// ── Update notice (auto-update runs in the background; this is just the bar) ──
+function applyUpdate() {
+  const btn = document.getElementById('updatebtn');
+  if (btn) { btn.textContent = 'Restarting...'; btn.disabled = true; }
+  try { window.asva.installUpdate(); } catch (e) {}
+}
+if (window.asva.onUpdate) window.asva.onUpdate((u) => {
+  const bar = document.getElementById('updatebar');
+  const msg = document.getElementById('updatemsg');
+  const btn = document.getElementById('updatebtn');
+  if (!bar || !msg || !btn) return;
+  const en = currentLang() === 'english';
+  if (u.state === 'ready') {
+    const v = u.version ? ' (' + u.version + ')' : '';
+    msg.innerHTML = en
+      ? '<b>A new version of ASVA' + v + ' is ready.</b> Your data and WhatsApp stay connected.'
+      : '<b>ASVA ka naya version' + v + ' taiyaar hai.</b> Aapka data aur WhatsApp juda rehta hai.';
+    btn.style.display = 'inline-block';
+    btn.textContent = en ? 'Restart to update' : 'Update ke liye restart karein';
+    bar.style.display = 'flex';
+  } else if (u.state === 'downloading') {
+    const pct = u.percent ? ' (' + u.percent + '%)' : '';
+    msg.textContent = (en ? 'Downloading the latest ASVA update' : 'ASVA ka naya update aa raha hai') + pct + '...';
+    btn.style.display = 'none';
+    bar.style.display = 'flex';
+  } else {
+    bar.style.display = 'none';
+  }
+});
+
+// ── Real sync progress (from the Tally reader's stage markers) ─────────────
+let _syncDoneTimer = null;
+if (window.asva.onSyncProgress) window.asva.onSyncProgress((p) => {
+  const total = p.total || 1;
+  const pct = Math.max(0, Math.min(100, Math.round((p.done || 0) * 100 / total)));
+  const bar = document.getElementById('syncbar');
+  const fill = bar && bar.querySelector('.fill');
+  const lab = document.getElementById('synclabel');
+  if (bar) { bar.classList.add('det'); bar.classList.add('on'); }
+  if (fill) fill.style.width = pct + '%';
+  if (lab) {
+    lab.classList.add('on');
+    const head = currentLang() === 'english' ? 'Syncing Tally' : 'Tally sync ho raha hai';
+    lab.textContent = head + ': ' + esc(p.label || '') + ' (' + pct + '%)';
+  }
+  clearTimeout(_syncDoneTimer);
+  if (pct >= 100) {
+    // Finished a pass: fill to 100, then clear the bar shortly after and let the
+    // dashboard auto-refresh show the fresh data.
+    _syncDoneTimer = setTimeout(() => {
+      if (bar) { bar.classList.remove('on'); bar.classList.remove('det'); }
+      if (fill) fill.style.width = '';
+      if (lab) lab.classList.remove('on');
+    }, 2500);
   }
 });
 
