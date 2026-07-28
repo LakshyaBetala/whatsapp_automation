@@ -23,13 +23,21 @@ def test_clean_display_strips_company_prefix():
     assert names.clean_display("MR. RAKESH KUMAR") == "Rakesh Kumar"
 
 
-def test_clean_display_strips_route_and_codes():
+def test_clean_display_strips_only_delivery_rounds():
+    # The ONLY trailing tag treated as noise is the delivery-round (RTE/ROUTE n).
     assert names.clean_display("RAMESH TRADERS-RTE4") == "Ramesh Traders"
     assert names.clean_display("RAMESH TRADERS - ROUTE 12") == "Ramesh Traders"
-    assert names.clean_display("Ramesh Traders - A12") == "Ramesh Traders"
-    assert names.clean_display("SUNIL AGENCIES (KOVUR)") == "Sunil Agencies"
     # combined: prefix + route
     assert names.clean_display("M/S RAMESH TRADERS-RTE4") == "Ramesh Traders"
+
+
+def test_clean_display_keeps_distinguishing_identity():
+    # Area / branch / suffix is IDENTITY, never stripped - two same-named parties
+    # must stay tellable apart.
+    assert names.clean_display("MEENAKSHI ELECTRICALS KLP") == "Meenakshi Electricals KLP"
+    assert names.clean_display("Meenakshi Electrical Aratur") == "Meenakshi Electrical Aratur"
+    assert names.clean_display("SUNIL AGENCIES (KOVUR)") == "Sunil Agencies (Kovur)"
+    assert names.clean_display("Ramesh Traders - A12") == "Ramesh Traders - A12"
 
 
 def test_clean_display_keeps_acronyms_and_ampersand():
@@ -157,7 +165,54 @@ REAL = ["M/S GANESH ENTERPRISES-RTE 1", "SHRI BALAJI TRADING CO",
 def test_real_shop_display_names():
     disp = [names.clean_display(n) for n in REAL]
     assert disp == ["Ganesh Enterprises", "Balaji Trading Co",
-                    "Kumar Provision Stores", "A K Agencies", "New Deepak Hardware"]
+                    "Kumar Provision Stores", "A K Agencies", "New Deepak Hardware (Main)"]
+
+
+# ── same-name families: different parties that differ by area/branch ─────────
+FAMILY = ["Meenakshi Electricals KLP", "Meenakshi Electricals & Hardware",
+          "Meenakshi Electrical Aratur"]
+
+
+def test_same_stem_different_area_stays_distinct():
+    # None of them collapse to the same display name - identity preserved.
+    disp = [names.clean_display(n) for n in FAMILY]
+    assert len(set(disp)) == 3
+
+
+def test_typing_the_shared_stem_asks_which_one():
+    r = names.resolve("meenakshi", FAMILY)
+    assert r["status"] == "many"
+    assert len(r["indices"]) == 3               # all three offered, none guessed
+
+
+def test_typing_the_area_resolves_to_one():
+    # The distinguishing word picks the exact party.
+    assert FAMILY[names.resolve("meenakshi aratur", FAMILY)["index"]] == "Meenakshi Electrical Aratur"
+    assert FAMILY[names.resolve("meenakshi klp", FAMILY)["index"]] == "Meenakshi Electricals KLP"
+
+
+def test_distinguisher_highlights_the_area():
+    d = names.distinguisher(FAMILY)
+    assert d == ["Electricals KLP", "Electricals & Hardware", "Electrical Aratur"]
+
+
+def test_distinguisher_falls_back_when_no_shared_stem():
+    d = names.distinguisher(["Gopal Stores", "Suresh Textiles"])
+    assert d == ["Gopal Stores", "Suresh Textiles"]
+
+
+# ── true duplicates: the SAME party entered twice ───────────────────────────
+def test_duplicate_groups_flags_only_exact_same_party():
+    rows = ["M/S MEENAKSHI ELECTRICALS ARATUR",   # 0
+            "Meenakshi Electricals Aratur",        # 1  same party, prefix/case
+            "Meenakshi Electricals KLP",           # 2  different area -> NOT a dup
+            "Gopal Stores"]                        # 3
+    groups = names.duplicate_groups(rows)
+    assert groups == [[0, 1]]                       # only 0 and 1, never 2
+
+
+def test_duplicate_groups_empty_when_all_distinct():
+    assert names.duplicate_groups(FAMILY) == []
 
 
 def test_real_shop_owner_typed_lookups():

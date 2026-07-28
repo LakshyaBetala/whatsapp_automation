@@ -36,11 +36,13 @@ _CORE_PREFIX_RE = re.compile(r"^(?:m\s?s|messrs|shri|sri|smt|mr|mrs|the)\s+")
 # Short ALL-CAPS words that are ordinary words, not acronyms: title-case them
 # ("CO" -> "Co", "SONS" -> "Sons") instead of preserving as-is.
 _KEEP_CASE_LOWER = {"CO", "SONS", "AND", "THE", "LTD", "PVT", "OF", "IN", "ON"}
-# Trailing route / round tags Tally uses to bucket debtors by delivery line.
-_ROUTE_RE = re.compile(r"[\s\-,]+(?:rte|route|rout|rt|r)\.?\s*\d+\w*$", re.IGNORECASE)
-# A trailing short code that carries a digit, only after a dash ("- A12", "-4B").
-_CODE_RE = re.compile(r"\s*[\-]\s*[a-z]{0,4}\d+\w*$", re.IGNORECASE)
-_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
+# Trailing route / round tags Tally uses to bucket debtors by delivery line
+# ("-RTE4", "- ROUTE 12"). This is the ONLY trailing tag we treat as noise: it is
+# a delivery sequence, never a customer's identity. Area words (KLP, Aratur),
+# "& Hardware", branch parentheticals "(Kovur)", and bare codes are KEPT - they
+# are what tells two same-named parties apart, so stripping them would let the
+# owner chase the wrong customer.
+_ROUTE_RE = re.compile(r"[\s\-,]+(?:rte|route|rout|rt)\.?\s*\d+\w*$", re.IGNORECASE)
 
 STRONG = 0.9      # a confident single hit
 WEAK = 0.55       # plausible enough to offer as a choice
@@ -74,7 +76,11 @@ def _cap(w: str) -> str:
     # words even when Tally stored them shouting ("CO" -> "Co", "SONS" -> "Sons").
     if w.isupper() and len(w) <= 4 and w.isalpha() and w not in _KEEP_CASE_LOWER:
         return w
-    return w[:1].upper() + w[1:].lower() if w else w
+    m = re.search(r"[a-zA-Z]", w)          # capitalize the first LETTER, so a
+    if not m:                              # leading "(" ("(kovur)" -> "(Kovur)")
+        return w                           # or "&" is preserved
+    i = m.start()
+    return w[:i] + w[i].upper() + w[i + 1:].lower()
 
 
 def clean_display(raw: str) -> str:
@@ -87,9 +93,7 @@ def clean_display(raw: str) -> str:
     if not s:
         return ""
     original = s
-    s = _PAREN_RE.sub("", s)               # drop a trailing "(...)"
-    s = _ROUTE_RE.sub("", s)               # drop "- Route 4" / "-RTE4"
-    s = _CODE_RE.sub("", s)                # drop a trailing "- A12" style code
+    s = _ROUTE_RE.sub("", s)               # drop ONLY the delivery-round tag
     s = _PREFIX_RE.sub("", s)              # drop a leading "M/S " / "Shri "
     s = re.sub(r"\s+", " ", s).strip(" -,.")
     if not s:
@@ -180,3 +184,40 @@ def resolve(query: str, names: list[str], limit: int = 6) -> dict:
     if len(weak) >= 1:                     # 2+ plausible (or 2+ strong) -> ask
         return {"status": "many", "indices": weak[:limit], "scores": scores}
     return {"status": "none", "indices": [], "scores": scores}
+
+
+def distinguisher(names: list[str]) -> list[str]:
+    """Given similar names, return each one's DISTINGUISHING part - the area or
+    branch that tells them apart - so a which-one prompt can highlight it.
+
+    ["Meenakshi Electricals KLP", "Meenakshi Electricals & Hardware",
+     "Meenakshi Electrical Aratur"] -> ["Electricals KLP",
+     "Electricals & Hardware", "Electrical Aratur"]. When names share no leading
+    stem (or are identical), it falls back to the full display name."""
+    disp = [clean_display(n) for n in names]
+    norm = [[normalize(w) for w in d.split()] for d in disp]
+    common = 0
+    if norm and all(norm):
+        for col in range(min(len(t) for t in norm)):
+            if len({t[col] for t in norm}) == 1:
+                common += 1
+            else:
+                break
+    out = []
+    for d in disp:
+        tail = d.split()[common:]
+        out.append(" ".join(tail) if tail else d)
+    return out
+
+
+def duplicate_groups(names: list[str]) -> list[list[int]]:
+    """Indices of names that are the SAME party written more than once - only an
+    exact core match (identical after prefix/case/spacing normalization), so
+    'Meenakshi Electricals KLP' and 'Meenakshi Electricals Aratur' (different
+    areas) are NEVER grouped. This only FLAGS candidates; a real link is always
+    owner-confirmed, because wrongly merging two different customers is worse
+    than leaving a duplicate."""
+    seen: dict[str, list[int]] = {}
+    for i, n in enumerate(names):
+        seen.setdefault(core(n), []).append(i)
+    return [idxs for idxs in seen.values() if len(idxs) > 1]
