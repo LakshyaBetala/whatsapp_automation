@@ -94,6 +94,74 @@ def test_heartbeat_update_available(monkeypatch):
     assert hb["status"] == "active"   # no expiry = internal/active
 
 
+# ── The version floor: a build too old to update itself (below_min) ──────────
+def _hb_with_version(monkeypatch, agent_version, floor="1.8.0"):
+    _patch_counts(monkeypatch, debtors=1, used=0)
+    monkeypatch.setattr(lic.settings, "app_min_version", floor)
+    biz = {"id": "b1", "plan": "pro", "plan_expires_on": None,
+           "agent_version": agent_version}
+    return lic.build_heartbeat(db=None, biz=biz, today=_dt.date(2026, 7, 12))
+
+
+def test_below_min_flags_a_stranded_old_build(monkeypatch):
+    hb = _hb_with_version(monkeypatch, "1.4.0")     # the real stranded case
+    assert hb["below_min"] is True
+    assert hb["min_supported_version"] == "1.8.0"
+
+
+def test_at_or_above_floor_is_not_below_min(monkeypatch):
+    for v in ("1.8.0", "1.8.4", "1.9.0", "2.0.0"):  # floor is inclusive-safe
+        hb = _hb_with_version(monkeypatch, v)
+        assert hb["below_min"] is False, v
+
+
+def test_unknown_version_is_never_flagged(monkeypatch):
+    # A shop that has not reported a version yet (fresh/unpaired) must not be
+    # scared with a reinstall bar.
+    for v in ("", None):
+        hb = _hb_with_version(monkeypatch, v)
+        assert hb["below_min"] is False
+
+
+def test_below_min_is_version_aware_not_string_compare(monkeypatch):
+    # 1.10.0 > 1.9.0 numerically even though it sorts lower as a string.
+    hb = _hb_with_version(monkeypatch, "1.10.0", floor="1.9.0")
+    assert hb["below_min"] is False
+
+
+def test_heartbeat_endpoint_reflects_reported_version(monkeypatch):
+    """The endpoint must judge below_min on the version THIS ping reported, not
+    the previously stored one. A stale 1.4.0 in the row upgraded by a 1.8.4 ping
+    must come back below_min=False."""
+    import asyncio
+    from app.routers import license as lr
+
+    class _Q:
+        def __init__(self, rows): self.rows = rows
+        def select(self, *a, **k): return self
+        def eq(self, *a, **k): return self
+        def order(self, *a, **k): return self
+        def limit(self, n): return self
+        def update(self, u): self._u = u; return self
+        def execute(self):
+            return type("R", (), {"data": self.rows})()
+
+    class _DB:
+        def table(self, name):
+            return _Q([{"id": "b1", "business_name": "X", "plan": "pro",
+                        "plan_expires_on": None, "agent_token": "tok",
+                        "agent_version": "1.4.0"}])   # stored: old
+
+    monkeypatch.setattr(lr, "require_db", lambda: _DB())
+    monkeypatch.setattr(lr.settings, "app_min_version", "1.8.0")
+    _patch_counts(monkeypatch, debtors=1, used=0)
+    monkeypatch.setattr(lr.lic.settings, "app_min_version", "1.8.0")
+
+    hb = asyncio.run(lr.heartbeat(lr.HeartbeatPayload(
+        agent_token="tok", agent_version="1.8.4")))   # this ping: current
+    assert hb["below_min"] is False
+
+
 # ── Renewal cycle math ────────────────────────────────────────────────
 def test_renew_on_time_stacks_from_expiry():
     today = _dt.date(2026, 7, 12)

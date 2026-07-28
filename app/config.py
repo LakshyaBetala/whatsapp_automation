@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     # app version so the older app_releases dashboard banner stays quiet (it
     # fires only when app_releases > this) and shops never see two notices.
     app_version: str = "1.8.4"
+    # The oldest desktop build the fleet still supports. A build below this is too
+    # old to update itself (it predates the electron-updater), so the heartbeat
+    # flags it `below_min` and the app shows a blocking "download the latest"
+    # bar - the only way to recover a stranded old build. Keep this at or below
+    # the first version that shipped the self-updater; raising it above a healthy
+    # in-field build would nag those shops for no reason (the bar is a nudge, never
+    # a brick). 1.8.0 = the first userData/auto-update build; anything older
+    # (e.g. the pre-updater 1.4.x) must be reinstalled once.
+    app_min_version: str = "1.8.0"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake

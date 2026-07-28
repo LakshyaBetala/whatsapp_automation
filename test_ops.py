@@ -77,6 +77,35 @@ def test_build_ops_data_totals_status_online_sort():
     assert alpha["messages_limit"] == 8000 and beta["messages_limit"] == 2400
 
 
+def test_ops_flags_below_min_as_needs_reinstall(monkeypatch):
+    """A build below the fleet floor reads as 'needs_reinstall', distinct from a
+    merely-outdated one that will auto-update itself."""
+    monkeypatch.setattr(ops.settings, "app_min_version", "1.8.0")
+    today = _dt.date.today()
+    exp = (today + _dt.timedelta(days=20)).isoformat()
+    db = _DB({
+        "businesses": [
+            {"id": "old", "business_name": "Old", "plan": "pro", "plan_expires_on": exp,
+             "license_key": "ASVA-O", "last_seen": _iso(1), "agent_version": "1.4.0",
+             "whatsapp_number": "9"},                       # stranded, needs reinstall
+            {"id": "cur", "business_name": "Cur", "plan": "pro", "plan_expires_on": exp,
+             "license_key": "ASVA-C", "last_seen": _iso(1), "agent_version": "1.8.3",
+             "whatsapp_number": "9"},                       # merely outdated (auto-updates)
+            {"id": "new", "business_name": "New", "plan": "pro", "plan_expires_on": exp,
+             "license_key": "ASVA-N", "last_seen": _iso(1), "agent_version": "1.8.4",
+             "whatsapp_number": "9"},                       # current
+        ],
+        "app_releases": [{"version": "1.8.4", "mandatory": False}],
+    })
+    d = ops.build_ops_data(db)
+    by = {r["name"]: r for r in d["businesses"]}
+    assert by["Old"]["needs_reinstall"] is True
+    assert by["Cur"]["needs_reinstall"] is False and by["Cur"]["version_ok"] is False
+    assert by["New"]["needs_reinstall"] is False and by["New"]["version_ok"] is True
+    assert d["totals"]["needs_reinstall"] == 1
+    assert d["totals"]["outdated"] == 2          # Old + Cur both != latest 1.8.4
+
+
 def test_ops_data_requires_key(monkeypatch):
     monkeypatch.setattr(ops.settings, "admin_api_key", "K")
     from fastapi import HTTPException

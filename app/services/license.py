@@ -228,6 +228,16 @@ def build_heartbeat(db, biz: dict, today: Optional[_dt.date] = None) -> dict:
     latest, mandatory = _latest_release(db)
     update_available = _vparts(latest) > _vparts(settings.app_version)
 
+    # Is THIS shop's build too old to update itself? Compared against the fleet
+    # floor, using the version the client last reported (agent_version). A build
+    # below the floor predates the self-updater, so it can never pull the feed -
+    # the app must show a blocking "download the latest" bar instead. Unknown
+    # (never-reported) versions are NOT flagged: a fresh install pairs first, then
+    # reports, and we don't want to scare a shop that simply hasn't pinged yet.
+    min_ver = settings.app_min_version
+    client_ver = (biz.get("agent_version") or "").strip()
+    below_min = bool(client_ver) and _vparts(client_ver) < _vparts(min_ver)
+
     return {
         "ok": True,
         "business_id": biz["id"],
@@ -250,5 +260,7 @@ def build_heartbeat(db, biz: dict, today: Optional[_dt.date] = None) -> dict:
         "latest_version": latest,
         "update_available": update_available,
         "update_mandatory": mandatory and update_available,
+        "min_supported_version": min_ver,
+        "below_min": below_min,             # too old to self-update -> reinstall
         "server_time": _dt.datetime.now(_dt.timezone.utc).isoformat(),
     }

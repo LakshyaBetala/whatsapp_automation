@@ -89,8 +89,21 @@ const LEGACY_CONFIG_PATH = path.join(REPO, 'Asva', 'config.json');
 // pairing and stays linked. Best-effort: any failure just means one re-pair.
 function migrateData() {
   try {
+    // Where the install dir sits, so we can recover config/login that a
+    // pre-userData build wrote next to the exe (this is what strands an upgrade
+    // from a very old build - the pairing lived beside the program, not here).
+    let exeDir = '';
+    try { exeDir = path.dirname(app.getPath('exe')); } catch (_) {}
+
     if (!fs.existsSync(DATA_CONFIG)) {
-      for (const old of [RES_CONFIG, LEGACY_CONFIG_PATH]) {
+      // Broadest-first list of every place an older build may have kept config.
+      const oldConfigs = [
+        RES_CONFIG, LEGACY_CONFIG_PATH,
+        app.isPackaged ? path.join(process.resourcesPath, 'config.json') : '',
+        exeDir ? path.join(exeDir, 'config.json') : '',
+        exeDir ? path.join(exeDir, 'resources', 'config.json') : '',
+      ];
+      for (const old of oldConfigs) {
         if (old && fs.existsSync(old)) {
           fs.mkdirSync(USER_DATA, { recursive: true });
           fs.copyFileSync(old, DATA_CONFIG);
@@ -98,13 +111,23 @@ function migrateData() {
         }
       }
     }
-    const oldWaDir = app.isPackaged ? path.join(process.resourcesPath, 'wa_service')
-                                    : path.join(REPO, 'wa_service');
-    const oldAuth = path.join(oldWaDir, '.baileys_auth');
+
     const newAuth = path.join(WA_AUTH_ROOT, '.baileys_auth');
-    if (fs.existsSync(oldAuth) && !fs.existsSync(newAuth)) {
-      fs.mkdirSync(WA_AUTH_ROOT, { recursive: true });
-      fs.cpSync(oldAuth, newAuth, { recursive: true });
+    if (!fs.existsSync(newAuth)) {
+      // Every place an older build may have kept the Baileys WhatsApp login.
+      const oldAuths = [
+        app.isPackaged ? path.join(process.resourcesPath, 'wa_service', '.baileys_auth')
+                       : path.join(REPO, 'wa_service', '.baileys_auth'),
+        exeDir ? path.join(exeDir, 'wa_service', '.baileys_auth') : '',
+        exeDir ? path.join(exeDir, 'resources', 'wa_service', '.baileys_auth') : '',
+      ];
+      for (const oldAuth of oldAuths) {
+        if (oldAuth && fs.existsSync(oldAuth)) {
+          fs.mkdirSync(WA_AUTH_ROOT, { recursive: true });
+          fs.cpSync(oldAuth, newAuth, { recursive: true });
+          break;
+        }
+      }
     }
   } catch (e) { console.error('[main] data migration skipped:', (e && e.message) || e); }
 }
@@ -440,7 +463,16 @@ function sendHeartbeat() {
       machine_id: os.hostname(),
       agent_version: app.getVersion(),   // THIS shop's app build (e.g. 1.8.3), not the server's
       wa_ready: (typeof WA_READY === 'boolean') ? WA_READY : undefined,
-    }, () => { /* fire and forget */ });
+    }, (ok, j) => {
+      // If the server says this build is below the fleet floor, it is too old to
+      // update itself (predates the self-updater). Auto-update can't rescue it,
+      // so tell the owner plainly to reinstall the latest. Non-destructive nudge.
+      if (ok && j && j.below_min) {
+        sendToWindow('update', { state: 'required',
+          version: j.latest_version || j.min_supported_version,
+          url: `${CONFIG.backendUrl}/download` });
+      }
+    });
   } catch (e) { /* never let a heartbeat crash the app */ }
 }
 
@@ -632,6 +664,15 @@ ipcMain.handle('open-dashboard', () => {
 ipcMain.handle('wa-status', () => new Promise((resolve) => {
   ping('http://localhost:3001/api/wa/status', (ok, b) => resolve(parseWa(ok, b)));
 }));
+// Open a link in the owner's real browser (used by the "reinstall" bar to reach
+// the download page). Only ever opens http(s) - never a local file or command.
+ipcMain.handle('open-external', (e, url) => {
+  try {
+    const s = String(url || '');
+    if (/^https?:\/\//i.test(s)) require('electron').shell.openExternal(s);
+  } catch (_) {}
+  return true;
+});
 
 // ── Auto-update (notice style) ─────────────────────────────────────────────
 // The app quietly checks the ASVA server's /updates feed, downloads a newer

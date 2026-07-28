@@ -113,6 +113,9 @@ async def heartbeat(payload: HeartbeatPayload):
     except Exception:
         log.exception("heartbeat liveness write failed (continuing)")
 
+    # Reflect what this ping just reported (version especially) so the returned
+    # state - e.g. below_min - is about THIS build, not the previously stored one.
+    biz.update(update)
     return lic.build_heartbeat(db, biz)
 
 

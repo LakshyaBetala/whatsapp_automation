@@ -43,6 +43,8 @@
   webview { width: 100%; height: 100%; border: 0; }
   #updatebar { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; background: #294d38; color: #eef6ef; font-size: .9rem; flex-shrink: 0; }
   #updatebar b { color: #fff; }
+  #updatebar.must { background: #5a1e1a; color: #ffe6e2; }
+  #updatebar.must b { color: #fff; }
   #updatebtn { border: 0; background: #46d67e; color: #10321f; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: .84rem; flex-shrink: 0; }
   #updatebtn:hover { background: #5fe38f; }
   #updatebtn:active { transform: scale(.97); }
@@ -570,7 +572,12 @@ window.asva.onStatus((s) => {
 });
 
 // ── Update notice (auto-update runs in the background; this is just the bar) ──
+let _mustReinstall = false;     // set when the build is too old to self-update
+let _reinstallUrl = '';         // where the Download button should send the owner
 function applyUpdate() {
+  // In "reinstall" mode the button opens the download page; otherwise it applies
+  // a downloaded auto-update and restarts.
+  if (_mustReinstall) { try { window.asva.openExternal(_reinstallUrl); } catch (e) {} return; }
   const btn = document.getElementById('updatebtn');
   if (btn) { btn.textContent = 'Restarting...'; btn.disabled = true; }
   try { window.asva.installUpdate(); } catch (e) {}
@@ -581,6 +588,23 @@ if (window.asva.onUpdate) window.asva.onUpdate((u) => {
   const btn = document.getElementById('updatebtn');
   if (!bar || !msg || !btn) return;
   const en = currentLang() === 'english';
+  if (u.state === 'required') {
+    // Too old to update itself. A blocking, non-dismissable bar - the only fix is
+    // to reinstall the latest build. Sticky: later auto-update states can't hide it.
+    _mustReinstall = true;
+    _reinstallUrl = u.url || '';
+    const v = u.version ? ' (' + u.version + ')' : '';
+    msg.innerHTML = en
+      ? '<b>This copy of ASVA is too old to update itself.</b> Please install the latest version' + v + '. Your data and reminders are safe on the server.'
+      : '<b>ASVA ka yeh version bahut purana hai, khud update nahi ho sakta.</b> Kripya naya version' + v + ' install karein. Aapka data aur reminder server par surakshit hai.';
+    btn.style.display = 'inline-block';
+    btn.textContent = en ? 'Download the latest ASVA' : 'Naya ASVA download karein';
+    btn.disabled = false;
+    bar.classList.add('must');
+    bar.style.display = 'flex';
+    return;
+  }
+  if (_mustReinstall) return;   // reinstall bar wins over ordinary update states
   if (u.state === 'ready') {
     const v = u.version ? ' (' + u.version + ')' : '';
     msg.innerHTML = en

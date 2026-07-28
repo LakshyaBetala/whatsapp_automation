@@ -96,9 +96,11 @@ def build_ops_data(db) -> dict:
 
     latest_ver, _mand = _latest_release(db)
 
+    min_ver = settings.app_min_version
+
     rows = []
     tot = {"businesses": 0, "online": 0, "active": 0, "grace": 0, "suspended": 0,
-           "messages_month": 0, "failed_today": 0, "outdated": 0}
+           "messages_month": 0, "failed_today": 0, "outdated": 0, "needs_reinstall": 0}
     for b in bizes:
         plan = _plan(b)
         limits = PLAN_LIMITS[plan]
@@ -112,6 +114,9 @@ def build_ops_data(db) -> dict:
         failed = failed_by.get(b["id"], 0)
         ver = b.get("agent_version") or "-"
         version_ok = (ver == latest_ver) or ver == "-"
+        # Below the fleet floor = too old to self-update, needs a manual reinstall.
+        # Distinct from merely "outdated" (a build that will auto-update itself).
+        needs_reinstall = (ver != "-") and _vparts(ver) < _vparts(min_ver)
 
         tot["businesses"] += 1
         tot["online"] += 1 if online else 0
@@ -119,6 +124,7 @@ def build_ops_data(db) -> dict:
         tot["messages_month"] += used
         tot["failed_today"] += failed
         tot["outdated"] += 0 if version_ok else 1
+        tot["needs_reinstall"] += 1 if needs_reinstall else 0
 
         rows.append({
             "id": b["id"],
@@ -135,6 +141,7 @@ def build_ops_data(db) -> dict:
             "minutes_ago": mins,
             "version": ver,
             "version_ok": version_ok,
+            "needs_reinstall": needs_reinstall,
             "messages_used": used,
             "messages_limit": int(limits["messages"]),
             "failed_today": failed,
@@ -161,6 +168,14 @@ def _parse_ts(raw):
         return _dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return None
+
+
+def _vparts(v) -> tuple:
+    """Dotted version -> comparable int tuple. Junk sorts lowest ((0,))."""
+    try:
+        return tuple(int(x) for x in str(v or "0").strip().split("."))
+    except ValueError:
+        return (0,)
 
 
 def _latest_release(db) -> tuple[str, bool]:
@@ -270,6 +285,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .btn{font:inherit;font-size:.82rem;border:1px solid #2c5c42;background:#123524;color:#cfe6d8;border-radius:6px;padding:5px 10px;cursor:pointer}
  .btn:hover{background:#173f2a}.btn.sus{border-color:#5c2c2c;background:#341613;color:#f2b8b0}.btn.sus:hover{background:#4a1e19}
  .warnv{color:#f0b849}
+ .rin{color:#e2574c;font-size:11px;font-weight:700;border:1px solid #e2574c;border-radius:5px;padding:0 5px;margin-left:6px}
  .muted{color:#7c9787;font-size:.82rem}
  select.pl{font:inherit;font-size:.82rem;background:#0f1713;color:#cfe6d8;border:1px solid #2c5c42;border-radius:6px;padding:5px}
  #msg{color:#46d67e;font-size:.85rem;min-height:18px;margin:8px 0}
@@ -455,7 +471,8 @@ async function load(){
     const K=[['businesses','Businesses',''],['online','Online','good'],
       ['active','Active','good'],['grace','Grace','warn'],['suspended','Suspended','bad'],
       ['messages_month','Messages (mo)',''],['failed_today','Failed (today)', t.failed_today?'bad':''],
-      ['outdated','Outdated','warn']];
+      ['outdated','Outdated','warn'],
+      ['needs_reinstall','Reinstall', t.needs_reinstall?'bad':'']];
     document.getElementById('kpis').innerHTML = K.map(k=>
       '<div class="kpi '+(k[2])+'"><div class="n">'+inr(t[k[0]])+'</div><div class="l">'+k[1]+'</div></div>').join('');
     document.getElementById('rows').innerHTML = d.businesses.map(rowHtml).join('') ||
@@ -464,7 +481,8 @@ async function load(){
 }
 function rowHtml(b){
   const days = (b.days_left==null)?'-':b.days_left;
-  const verCls = b.version_ok?'':'warnv';
+  const verCls = b.needs_reinstall?'':(b.version_ok?'':'warnv');
+  const verExtra = b.needs_reinstall?'<span class="rin" title="Too old to update itself - reinstall the latest from tryasva.com/download">reinstall</span>':'';
   const plopts = PLANS.map(p=>'<option value="'+p+'"'+(p===b.plan?' selected':'')+'>'+PLABEL[p]+'</option>').join('');
   return '<tr>'+
     '<td><div><span class="dot '+(b.online?'on':'off')+'"></span>'+esc(b.name)+'</div>'+
@@ -475,7 +493,7 @@ function rowHtml(b){
     '<td>'+(b.expiry||'-')+'</td>'+
     '<td class="num">'+days+'</td>'+
     '<td>'+esc(b.last_seen_label)+'</td>'+
-    '<td class="'+verCls+'">'+esc(b.version)+'</td>'+
+    '<td class="'+verCls+'">'+esc(b.version)+verExtra+'</td>'+
     '<td class="num">'+inr(b.messages_used)+' / '+inr(b.messages_limit)+'</td>'+
     '<td class="num">'+(b.failed_today||0)+'</td>'+
     '<td><button class="btn" onclick="renew(\''+b.id+'\',1)">+1 mo</button></td>'+

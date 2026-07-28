@@ -22,10 +22,13 @@ contextBridge.exposeInMainWorld('asva', {
   // the owner (or the operator, remotely) exactly which link is broken.
   diagnose: () => ipcRenderer.invoke('run-diagnose'),
 
-  // Auto-update notice. main sends {state:'downloading'|'ready'|'current'|'error',
-  // version, percent}. installUpdate() applies a downloaded update and restarts.
+  // Auto-update notice. main sends {state:'downloading'|'ready'|'current'|'error'
+  // |'required', version, percent, url}. installUpdate() applies a downloaded
+  // update and restarts. 'required' = build too old to self-update -> reinstall.
   onUpdate: (cb) => ipcRenderer.on('update', (e, d) => cb(d)),
   installUpdate: () => ipcRenderer.invoke('install-update'),
+  // Open a link (the download page) in the owner's real browser. http(s) only.
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
   // Recent technical logs (backlog) for the "Show technical logs" panel.
   getLogs: () => ipcRenderer.invoke('get-logs'),
