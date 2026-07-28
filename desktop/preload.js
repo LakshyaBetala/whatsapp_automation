@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld('asva', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   // Open a link (the download page) in the owner's real browser. http(s) only.
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  // Owner language (english | hinglish). setLanguage saves it on the server so
+  // the WhatsApp assistant matches the app; onLang receives the server's value.
+  setLanguage: (l) => ipcRenderer.invoke('set-language', l),
+  onLang: (cb) => ipcRenderer.on('lang', (e, d) => cb(d)),
 
   // Recent technical logs (backlog) for the "Show technical logs" panel.
   getLogs: () => ipcRenderer.invoke('get-logs'),

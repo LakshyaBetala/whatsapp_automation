@@ -18,6 +18,7 @@ from typing import Optional
 
 from app.config import settings
 from app.models import PLAN_LABELS, PLAN_LIMITS, Plan
+from app.services import i18n
 from app.services import subscription as subs
 
 
@@ -262,5 +263,6 @@ def build_heartbeat(db, biz: dict, today: Optional[_dt.date] = None) -> dict:
         "update_mandatory": mandatory and update_available,
         "min_supported_version": min_ver,
         "below_min": below_min,             # too old to self-update -> reinstall
+        "owner_language": i18n.norm_lang(biz.get("owner_language")),
         "server_time": _dt.datetime.now(_dt.timezone.utc).isoformat(),
     }

@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import require_db
 from app.models import Plan
+from app.services import i18n
 from app.services import license as lic
 from app.services import outbox
 from app.services import pairing
@@ -75,7 +76,7 @@ class HeartbeatPayload(BaseModel):
 
 
 _BIZ_COLS = ("id, business_name, plan, plan_expires_on, license_key, "
-             "machine_id, agent_version")
+             "machine_id, agent_version, owner_language")
 
 
 def _biz_by_token(db, token: str) -> dict:
@@ -117,6 +118,27 @@ async def heartbeat(payload: HeartbeatPayload):
     # state - e.g. below_min - is about THIS build, not the previously stored one.
     biz.update(update)
     return lic.build_heartbeat(db, biz)
+
+
+class SetLanguagePayload(BaseModel):
+    agent_token: str
+    language: str
+
+
+@router.post("/set-language")
+async def set_language(payload: SetLanguagePayload):
+    """The app saves the owner's chosen language (english | hinglish) here, so the
+    WhatsApp assistant answers the owner in the SAME language as the app. Scoped
+    to the one business by its agent_token; unknown values normalise to English."""
+    db = require_db()
+    biz = _biz_by_token(db, payload.agent_token)
+    lang = i18n.norm_lang(payload.language)
+    try:
+        db.table("businesses").update({"owner_language": lang}).eq("id", biz["id"]).execute()
+    except Exception:
+        log.exception("set-language write failed (business %s)", biz["id"])
+        raise HTTPException(status_code=500, detail="Could not save language")
+    return {"ok": True, "owner_language": lang}
 
 
 @router.get("/status")

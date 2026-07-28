@@ -23,7 +23,7 @@ from datetime import date
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan, plan_has_bot
-from app.services import checkpoint, promises, replies
+from app.services import checkpoint, i18n, names, promises, replies
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
 from app.services.templates import apply_discount, inr
@@ -142,7 +142,7 @@ async def handle(
     business = _match_row(
         db, "businesses",
         "id, business_name, plan, whatsapp_number, upi_vpa, discount_pct, "
-        "msg_language, reminder_batches, reminder_hour",
+        "msg_language, owner_language, reminder_batches, reminder_hour",
         from_number)
     is_owner = business is not None
 
@@ -299,33 +299,14 @@ async def handle(
                 business_id, business.get("business_name", ""), from_number, team_match.group(1).strip())
 
         # ── HELP / unrecognised ──────────────────────────────────────
-        # For 20-70 year old shop owners: grouped by intent, one bold example
-        # per command, plain words, WhatsApp *bold* headers. "Ramesh" is only an
-        # example name. Tight on purpose: every real command, no wall of dashes.
+        # For 20-70 year old shop owners: grouped by intent, one bold example per
+        # command, plain words, WhatsApp *bold* headers. In the OWNER's chosen
+        # language (English -> pure English; Hinglish -> Hinglish), so the chat
+        # matches the app. "Ramesh" is only an example name.
+        lang = i18n.norm_lang(business.get("owner_language"))
         prefix = ("" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START")
-                  else "Sorry, I did not understand that. Here is what I can do:\n\n")
-        return (
-            prefix
-            + "*ASVA*, your collection helper.\n"
-            "Send a command with a party's name. Ramesh below is only an example.\n\n"
-            "*SEE YOUR MONEY*\n"
-            "*LIST*: everyone who owes you\n"
-            "*CHECK Ramesh*: one party's balance\n"
-            "*DIGEST*: today's summary\n"
-            "*SENT*: who was reminded today\n"
-            "*PROMISES*: who said they will pay\n\n"
-            "*GET PAID*\n"
-            "*REMIND Ramesh*: remind one party now\n"
-            "*REMIND TOP 10*: chase the 10 biggest\n"
-            "*BILL Ramesh 12500*: add a bill, or send its photo\n"
-            "*PAID Ramesh*: mark a payment received\n"
-            "*CHASE Ramesh*: resume a party on hold\n\n"
-            "*MANAGE A PARTY*\n"
-            "*STOP Ramesh*: pause reminders (START to resume)\n"
-            "*EXCLUDE Ramesh*: never chase (INCLUDE to undo)\n"
-            "*TERMS Ramesh 45*: set credit days\n\n"
-            "Need help? Send *TEAM* with your message."
-        )
+                  else i18n.t(lang, "unknown_prefix"))
+        return prefix + i18n.t(lang, "help")
 
     # ── Customer message (not owner) ──────────────────────────────────
     # Look up which business this customer belongs to (format-agnostic match)

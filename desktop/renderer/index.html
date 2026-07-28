@@ -363,12 +363,22 @@ function applyLangButtons() {
 function setLang(l) {
   localStorage.setItem('asva_lang', l);
   applyLangButtons();
+  // Save it on the SERVER too, so the WhatsApp assistant answers the owner in the
+  // same language as the app ("chosen in the app, reflected in chat"). Fire and
+  // forget - the local UI already switched.
+  try { if (window.asva.setLanguage) window.asva.setLanguage(l); } catch (e) {}
   // reload every webview in the new language
   Object.entries(WV).forEach(([id, key]) => {
     const w = document.getElementById(id), url = CONFIG && CONFIG[key];
     if (w && url) { loaded[id] = true; w.src = urlWithLang(url); }
   });
 }
+// The heartbeat tells us the server's saved language; on a fresh/re-paired laptop
+// adopt it so the app + chat stay in step without the owner re-choosing.
+if (window.asva.onLang) window.asva.onLang((d) => {
+  const l = d && d.language;
+  if ((l === 'english' || l === 'hinglish') && l !== currentLang()) setLang(l);
+});
 
 // ── Webview auto-recovery ─────────────────────────────────────────────────
 // A webview whose render process dies (low RAM, driver hiccup) shows a BLANK

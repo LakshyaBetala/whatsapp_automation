@@ -472,6 +472,10 @@ function sendHeartbeat() {
           version: j.latest_version || j.min_supported_version,
           url: `${CONFIG.backendUrl}/download` });
       }
+      // Let the app adopt the server's saved language (fresh/re-paired laptop).
+      if (ok && j && j.owner_language) {
+        sendToWindow('lang', { language: j.owner_language });
+      }
     });
   } catch (e) { /* never let a heartbeat crash the app */ }
 }
@@ -670,6 +674,17 @@ ipcMain.handle('open-external', (e, url) => {
   try {
     const s = String(url || '');
     if (/^https?:\/\//i.test(s)) require('electron').shell.openExternal(s);
+  } catch (_) {}
+  return true;
+});
+// Persist the owner's chosen language on the server so the WhatsApp assistant
+// answers in the same language as the app. Fire and forget.
+ipcMain.handle('set-language', (e, l) => {
+  if (!CONFIG.token) return false;
+  const lang = (l === 'hinglish') ? 'hinglish' : 'english';
+  try {
+    httpPostJson(`${CONFIG.backendUrl}/license/set-language`,
+      { agent_token: CONFIG.token, language: lang }, () => {});
   } catch (_) {}
   return true;
 });
