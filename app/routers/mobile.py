@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.db import require_db
-from app.services import promises
+from app.services import names, promises, proof
 
 router = APIRouter(prefix="/m", tags=["mobile"])
 
@@ -92,7 +92,7 @@ def _build_summary(db, biz: dict) -> dict:
         total_out += amt
         parties.append({
             "id": cid,
-            "name": c.get("name") or "(unnamed)",
+            "name": names.clean_display(c.get("name") or "") or "(unnamed)",
             "outstanding": _inr(amt),
             "_amt": float(amt),
             "overdue_days": worst_due.get(cid, 0),
@@ -103,11 +103,14 @@ def _build_summary(db, biz: dict) -> dict:
                    key=lambda p: (-p["overdue_days"], -p["_amt"]))
     for p in parties:
         p.pop("_amt", None)
+    pf = proof.build_proof(db, bid, today)
     return {
         "business_name": biz.get("business_name") or "Your shop",
         "total_outstanding": _inr(total_out),
         "parties_owing": owing_n,
         "on_promise": sum(1 for p in parties if p["paused"]),
+        "recovered_this_month": _inr(pf["recovered_this_month"]),
+        "recovered_month": pf["month"],
         "chase": chase[:100],
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
     }
@@ -221,6 +224,8 @@ _APP_HTML = r"""<!doctype html><html lang="en"><head>
  header .n{font-weight:800;letter-spacing:.03em;font-size:1.15rem}
  header .s{color:#9fb7a6;font-size:.82rem;margin-top:2px}
  .wrap{padding:14px 16px 40px}
+ .recov{background:linear-gradient(135deg,#1c5a40,#123a2a);border:1px solid #2c6a4c;border-radius:14px;padding:14px 16px;margin-bottom:12px;font-size:1.5rem;font-weight:800;color:#eafff2}
+ .recov span{display:block;font-size:.72rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8fd6b0;margin-top:2px}
  .kpis{display:flex;gap:10px;margin-bottom:16px}
  .kpi{flex:1;background:#16221b;border:1px solid #24332b;border-radius:14px;padding:14px}
  .kpi .v{font-size:1.35rem;font-weight:800}
@@ -280,6 +285,9 @@ async function home(){
   app.innerHTML=
    '<header><div class="n">'+esc(d.business_name)+'</div><div class="s">Tap a party to see details</div></header>'+
    '<div class="wrap">'+
+   ((d.recovered_this_month && d.recovered_this_month!=='0')
+     ? '<div class="recov">&#8377;'+esc(d.recovered_this_month)+' <span>recovered in '+esc(d.recovered_month||'')+'</span></div>'
+     : '')+
    '<div class="kpis">'+
      '<div class="kpi"><div class="v">&#8377;'+esc(d.total_outstanding)+'</div><div class="l">Outstanding</div></div>'+
      '<div class="kpi"><div class="v">'+d.parties_owing+'</div><div class="l">Parties owing</div></div>'+
