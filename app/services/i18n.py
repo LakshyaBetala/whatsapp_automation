@@ -84,8 +84,8 @@ _CATALOG: dict[str, dict[str, str]] = {
     # A few high-traffic replies, so the pipeline is proven end to end. The rest
     # of the bot's owner replies move onto t() as commands are wired.
     "which_one": {
-        ENGLISH: "'{q}' matches more than one:\n{list}\nReply with the number.",
-        HINGLISH: "'{q}' se ek se zyada milte hain:\n{list}\nNumber ke saath reply karein.",
+        ENGLISH: "'{q}' matches more than one: {list}. Type the fuller name.",
+        HINGLISH: "'{q}' se ek se zyada party milti hain: {list}. Poora naam likhein.",
     },
     "no_match": {
         ENGLISH: "No party matches '{q}'. Send LIST to see the names.",
@@ -95,9 +95,41 @@ _CATALOG: dict[str, dict[str, str]] = {
         ENGLISH: "Stopped reminders for {name}. Reply START {name} to resume.",
         HINGLISH: "{name} ke reminder rok diye. Dobara shuru karne ke liye START {name} bhejein.",
     },
+    "already_off": {
+        ENGLISH: "{name}'s reminders are already off.",
+        HINGLISH: "{name} ke reminder pehle se hi band hain.",
+    },
     "started": {
         ENGLISH: "Reminders resumed for {name}.",
         HINGLISH: "{name} ke reminder dobara shuru kar diye.",
+    },
+    "already_on": {
+        ENGLISH: "{name}'s reminders are already on.",
+        HINGLISH: "{name} ke reminder pehle se hi chalu hain.",
+    },
+    "excluded_on": {
+        ENGLISH: "{name} is on your do-not-chase list. No more reminders, and they will not show in your daily list. Send INCLUDE {name} to undo.",
+        HINGLISH: "{name} ab do-not-chase list par hai. Koi reminder nahi, aur roz ki list mein bhi nahi aayega. Wapas laane ke liye INCLUDE {name} bhejein.",
+    },
+    "excluded_off": {
+        ENGLISH: "{name} is back on. They will be reminded again.",
+        HINGLISH: "{name} wapas chalu. Ab dobara reminder jaayenge.",
+    },
+    "chase_resumed": {
+        ENGLISH: "Reminders for {name} have resumed.",
+        HINGLISH: "{name} ke reminder dobara shuru ho gaye.",
+    },
+    "chase_none": {
+        ENGLISH: "{name} is not on a promise hold, so there is nothing to resume.",
+        HINGLISH: "{name} kisi promise hold par nahi hai, isliye resume karne ke liye kuch nahi hai.",
+    },
+    "terms_set": {
+        ENGLISH: "{name}'s credit period is now {days} days. {updated} open bills got a new due date. Reminders will follow the new period.",
+        HINGLISH: "{name} ka credit period ab {days} din hai. {updated} open bills ki nayi due date lag gayi. Reminder naye period ke hisaab se jaayenge.",
+    },
+    "terms_range": {
+        ENGLISH: "Credit days must be between 1 and 365.",
+        HINGLISH: "Credit din 1 se 365 ke beech hone chahiye.",
     },
 }
 

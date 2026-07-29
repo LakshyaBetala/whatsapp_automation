@@ -188,6 +188,9 @@ async def handle(
 
     if is_owner:
         business_id = business["id"]
+        # The owner's chosen language, used for every reply below so the chat
+        # matches the app (English chosen -> pure English; else Hinglish).
+        lang = i18n.norm_lang(business.get("owner_language"))
 
         # ── Photo of a bill → OCR → confirm flow ─────────────────────
         if media_b64:
@@ -258,40 +261,40 @@ async def handle(
         stop_match = re.match(r"STOP\s+(.+)", upper)
         if stop_match:
             client_name = stop_match.group(1).strip()
-            return await _handle_stop(business_id, client_name)
+            return await _handle_stop(business_id, client_name, lang=lang)
 
         # ── START <name> ─────────────────────────────────────────────
         start_match = re.match(r"START\s+(.+)", upper)
         if start_match:
             client_name = start_match.group(1).strip()
-            return await _handle_start(business_id, client_name)
+            return await _handle_start(business_id, client_name, lang=lang)
 
         # ── EXCLUDE / INCLUDE <name> - the do-not-chase list ─────────
         excl_match = re.match(r"EXCLUDE\s+(.+)", upper)
         if excl_match:
-            return await _handle_exclude(business_id, excl_match.group(1).strip(), True)
+            return await _handle_exclude(business_id, excl_match.group(1).strip(), True, lang=lang)
         incl_match = re.match(r"INCLUDE\s+(.+)", upper)
         if incl_match:
-            return await _handle_exclude(business_id, incl_match.group(1).strip(), False)
+            return await _handle_exclude(business_id, incl_match.group(1).strip(), False, lang=lang)
 
         # ── PAID <name> ──────────────────────────────────────────────
         paid_match = re.match(r"PAID\s+(.+)", upper)
         if paid_match:
             client_name = paid_match.group(1).strip()
             return await _handle_paid_owner(
-                business_id, client_name, Plan(business["plan"])
+                business_id, client_name, Plan(business["plan"]), lang=lang
             )
 
         # ── CHECK <name> - live balance, matches Tally to the rupee ──
         check_match = re.match(r"CHECK\s+(.+)", upper)
         if check_match:
-            return await _handle_check(business_id, check_match.group(1).strip())
+            return await _handle_check(business_id, check_match.group(1).strip(), lang=lang)
 
         # ── TERMS <name> <days> - set a party's credit period ────────
         terms_match = re.match(r"TERMS\s+(.+?)\s+(\d{1,3})$", upper)
         if terms_match:
             return await _handle_terms(
-                business_id, terms_match.group(1).strip(), int(terms_match.group(2)))
+                business_id, terms_match.group(1).strip(), int(terms_match.group(2)), lang=lang)
 
         # ── REMIND - owner decides who gets reminded, right now ──────
         #    REMIND <naam>      one party (consolidated bills + QR)
@@ -308,7 +311,7 @@ async def handle(
         # ── CHASE <name> - cancel a Promise-to-Pay hold, resume now ──
         chase_match = re.match(r"CHASE\s+(.+)", upper)
         if chase_match:
-            return await _handle_chase(business_id, chase_match.group(1).strip())
+            return await _handle_chase(business_id, chase_match.group(1).strip(), lang=lang)
 
         # ── TEAM / SUPPORT <message> - reach the ASVA product team ───
         team_match = re.match(r"(?:TEAM|SUPPORT|PROBLEM|MADAD)\s+(.+)", text.strip(), re.IGNORECASE)
@@ -321,7 +324,6 @@ async def handle(
         # command, plain words, WhatsApp *bold* headers. In the OWNER's chosen
         # language (English -> pure English; Hinglish -> Hinglish), so the chat
         # matches the app. "Ramesh" is only an example name.
-        lang = i18n.norm_lang(business.get("owner_language"))
         prefix = ("" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START")
                   else i18n.t(lang, "unknown_prefix"))
         return prefix + i18n.t(lang, "help")
@@ -831,90 +833,80 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     return "\n".join(lines)
 
 
-async def _handle_stop(business_id: str, client_name: str) -> str:
-    """Pause reminders for a client by fuzzy name match."""
+# ── Shared party resolver (forgiving, area-aware, bilingual) ─────────────────
+# Every owner command that names a party goes through this instead of a raw
+# `ilike %query%`. It fetches the business's parties and lets names.resolve do
+# the forgiving match (case/typo/prefix tolerant, same-name families kept
+# distinct, asks when unsure). One place = one behaviour across all commands.
+def _resolve_party(db, business_id: str, query: str, select: str = "id, name"):
+    """Return (status, rows): ("one", [row]) | ("many", rows) | ("none", [])."""
+    try:
+        rows = (db.table("clients").select(select)
+                .eq("business_id", business_id).execute()).data or []
+    except Exception:
+        return "none", []
+    if not rows:
+        return "none", []
+    res = names.resolve(query, [r.get("name") or "" for r in rows])
+    if res["status"] == "one":
+        return "one", [rows[res["index"]]]
+    if res["status"] == "many":
+        return "many", [rows[i] for i in res["indices"]]
+    return "none", []
+
+
+def _party_pick_msg(status: str, query: str, rows: list, lang: str) -> str:
+    """The bilingual 'which one?' / 'no match' message for a non-single resolve."""
+    if status == "many":
+        listing = ", ".join(names.clean_display(r.get("name") or "") for r in rows[:6])
+        return i18n.t(lang, "which_one", q=query, list=listing)
+    return i18n.t(lang, "no_match", q=query)
+
+
+async def _handle_stop(business_id: str, client_name: str, *, lang: str = "english") -> str:
+    """Pause reminders for a client (forgiving name match, owner's language)."""
     db = require_db()
-    # Case-insensitive partial match
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, reminders_enabled")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(db, business_id, client_name, "id, name, reminders_enabled")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
+    disp = names.clean_display(client["name"])
     if not client["reminders_enabled"]:
-        return f"{client['name']}'s reminders are already off."
-
-    db.table("clients").update({"reminders_enabled": False}).eq(
-        "id", client["id"]
-    ).execute()
-
-    return (f"{client['name']}'s reminders are now OFF.\n"
-            f"To start again, send: START {client['name']}")
+        return i18n.t(lang, "already_off", name=disp)
+    db.table("clients").update({"reminders_enabled": False}).eq("id", client["id"]).execute()
+    return i18n.t(lang, "stopped", name=disp)
 
 
-async def _handle_start(business_id: str, client_name: str) -> str:
-    """Resume reminders for a client by fuzzy name match."""
+async def _handle_start(business_id: str, client_name: str, *, lang: str = "english") -> str:
+    """Resume reminders for a client (forgiving name match, owner's language)."""
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, reminders_enabled")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(db, business_id, client_name, "id, name, reminders_enabled")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
+    disp = names.clean_display(client["name"])
     if client["reminders_enabled"]:
-        return f"{client['name']}'s reminders are already on."
-
-    # Selection day = today: the overdue track restarts from the day the
-    # owner switches a party ON (see reminder_anchor in the sweep).
+        return i18n.t(lang, "already_on", name=disp)
+    # Selection day = today: the overdue track restarts from the day the owner
+    # switches a party ON (see reminder_anchor in the sweep).
     db.table("clients").update(
-        {"reminders_enabled": True, "reminder_anchor": date.today().isoformat()}).eq(
-        "id", client["id"]
-    ).execute()
-
-    return f"{client['name']}'s reminders are now ON."
+        {"reminders_enabled": True, "reminder_anchor": date.today().isoformat()}
+    ).eq("id", client["id"]).execute()
+    return i18n.t(lang, "started", name=disp)
 
 
-async def _handle_check(business_id: str, client_name: str) -> str:
+async def _handle_check(business_id: str, client_name: str, *, lang: str = "english") -> str:
     """Instant per-party statement - the anti-'sync is broken' command.
 
     Answers with open bills + total + last sync time so the owner can
     verify against Tally to the rupee, any time, in 5 seconds.
     """
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, whatsapp_number, reminders_enabled")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(
+        db, business_id, client_name, "id, name, whatsapp_number, reminders_enabled")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
     bills_resp = (
         db.table("bills")
         .select("invoice_number, outstanding, due_date, status")
@@ -927,7 +919,7 @@ async def _handle_check(business_id: str, client_name: str) -> str:
     open_bills = bills_resp.data or []
 
     from datetime import date as _date
-    lines = [f"{client['name']}"]
+    lines = [names.clean_display(client["name"])]
     if not open_bills:
         lines.append("Nothing pending. All clear.")
     else:
@@ -1321,26 +1313,14 @@ async def _handle_owner_msg(business: dict, rest: str) -> str:
 
 
 async def _handle_paid_owner(
-    business_id: str, client_name: str, plan: Plan
+    business_id: str, client_name: str, plan: Plan, *, lang: str = "english"
 ) -> str:
     """Owner confirmed payment - mark paid immediately."""
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name."
-
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(db, business_id, client_name)
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
 
     # Find oldest open bill to get amount
     bill_resp = (
@@ -1373,27 +1353,17 @@ async def _handle_paid_owner(
     return f"Could not apply the payment: {result.get('reason', 'unknown error')}"
 
 
-async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
+async def _handle_terms(business_id: str, client_name: str, days: int, *, lang: str = "english") -> str:
     """TERMS <name> <days>: set the party's credit period. The reminder
     cadence scales with it automatically (90 din -> nudges at 9/21/45/
     63/90), and open bills' due dates are recomputed."""
     if not 1 <= days <= 365:
-        return "Credit days must be between 1 and 365."
+        return i18n.t(lang, "terms_range")
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, credit_days")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(db, business_id, client_name, "id, name, credit_days")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
     db.table("clients").update({"credit_days": days}).eq("id", client["id"]).execute()
 
     # Recompute due dates on open bills so the new cadence applies to them
@@ -1414,11 +1384,8 @@ async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
         db.table("bills").update({"due_date": new_due}).eq("id", b["id"]).execute()
         updated += 1
 
-    return (
-        f"{client['name']}'s credit period is now {days} days.\n"
-        f"{updated} open bills got a new due date.\n"
-        f"Reminders will follow the new period."
-    )
+    return i18n.t(lang, "terms_set", name=names.clean_display(client["name"]),
+                  days=days, updated=updated)
 
 
 def _biz_is_en(business_id: str) -> bool:
@@ -1501,44 +1468,41 @@ async def _handle_customer_optout(client: dict, from_number: str) -> str:
 
 
 async def _find_client_by_name(business_id: str, name: str) -> dict | None:
-    """Find a client in this business by case-insensitive partial name (owner
-    typed it). Returns the first match, or None."""
+    """Find one client by the forgiving matcher. Returns the confident single
+    match, or None (including when the name is ambiguous - the caller should
+    prefer _resolve_party to show a which-one prompt)."""
     db = require_db()
-    try:
-        r = (db.table("clients").select("id, name")
-             .eq("business_id", business_id).ilike("name", f"%{name.strip()}%")
-             .limit(3).execute()).data or []
-    except Exception:
-        return None
-    return r[0] if r else None
+    status, rows = _resolve_party(db, business_id, name)
+    return rows[0] if status == "one" else None
 
 
-async def _handle_exclude(business_id: str, name: str, exclude: bool) -> str:
+async def _handle_exclude(business_id: str, name: str, exclude: bool, *, lang: str = "english") -> str:
     """Move a party on/off the do-not-chase list. Excluded parties get no more
     reminders and do not appear in the morning 'who to chase' checkpoint."""
     db = require_db()
-    c = await _find_client_by_name(business_id, name)
-    if not c:
-        return f"No party named '{name}' found. Check the spelling and try again."
+    status, rows = _resolve_party(db, business_id, name)
+    if status != "one":
+        return _party_pick_msg(status, name, rows, lang)
+    c = rows[0]
+    disp = names.clean_display(c["name"])
     try:
         db.table("clients").update({"excluded": bool(exclude)}).eq("id", c["id"]).execute()
     except Exception:
         return "Could not update that right now. Please try again."
-    if exclude:
-        return (f"OK. {c['name']} is on your do-not-chase list. No more reminders, "
-                f"and they will not show in your daily list. Send INCLUDE {c['name']} to undo.")
-    return f"OK. {c['name']} is back on. They will be reminded again."
+    return i18n.t(lang, "excluded_on" if exclude else "excluded_off", name=disp)
 
 
-async def _handle_chase(business_id: str, name: str) -> str:
+async def _handle_chase(business_id: str, name: str, *, lang: str = "english") -> str:
     """Owner override: cancel a Promise-to-Pay hold and resume reminders now."""
     db = require_db()
-    c = await _find_client_by_name(business_id, name)
-    if not c:
-        return f"No party named '{name}' found. Check the spelling and try CHASE again."
+    status, rows = _resolve_party(db, business_id, name)
+    if status != "one":
+        return _party_pick_msg(status, name, rows, lang)
+    c = rows[0]
+    disp = names.clean_display(c["name"])
     if promises.close_for_client(db, business_id, c["id"], "cancelled"):
-        return f"OK. Reminders for {c['name']} have resumed."
-    return f"{c['name']} is not on a promise hold, so there is nothing to resume."
+        return i18n.t(lang, "chase_resumed", name=disp)
+    return i18n.t(lang, "chase_none", name=disp)
 
 
 async def _handle_promises(business_id: str) -> str:

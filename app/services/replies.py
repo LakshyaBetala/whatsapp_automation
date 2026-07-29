@@ -30,7 +30,7 @@ import re
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
-from app.services import intent, promises, whatsapp
+from app.services import conversations, intent, promises, whatsapp
 from app.services.templates import inr
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,16 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     client_id = client.get("id")
     name = client.get("name") or "Customer"
     text = (text or "").strip()
+
+    # Remember every inbound reply (best-effort, before we act on it) so the
+    # party's story on the tracker and the payment-behaviour dataset both accrue.
+    _is_shot = bool(media_b64) and len(text) < 4
+    try:
+        conversations.record(require_db(), business_id, client_id,
+                             "[payment screenshot]" if _is_shot else text,
+                             intent="screenshot" if _is_shot else None)
+    except Exception:
+        pass
 
     # 1. A screenshot with no clear instruction: treat as payment proof.
     if media_b64 and len(text) < 4:

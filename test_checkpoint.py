@@ -161,7 +161,7 @@ def test_paid_unlisted_party_falls_through_to_normal_paid(monkeypatch):
     _owner(monkeypatch, {"items": ITEMS, "held": []})
     called = []
 
-    async def fake_paid(bid, name, plan):
+    async def fake_paid(bid, name, plan, *, lang="english"):
         called.append(name); return "NORMAL-PAID"
 
     monkeypatch.setattr(bot, "_handle_paid_owner", fake_paid)
@@ -175,7 +175,7 @@ def test_paid_with_no_active_checkpoint_is_normal(monkeypatch):
     _owner(monkeypatch, None)         # get_today -> None
     called = []
 
-    async def fake_paid(bid, name, plan):
+    async def fake_paid(bid, name, plan, *, lang="english"):
         called.append(name); return "NORMAL-PAID"
 
     monkeypatch.setattr(bot, "_handle_paid_owner", fake_paid)
