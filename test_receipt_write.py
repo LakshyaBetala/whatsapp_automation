@@ -124,3 +124,23 @@ def test_parse_cash_bank_ledgers():
 def test_parse_cash_bank_handles_junk():
     assert tx.parse_cash_bank_ledgers("not xml") == []
     assert tx.parse_cash_bank_ledgers("<ENVELOPE></ENVELOPE>") == []
+
+
+# ── party open-bills parser (drives FIFO allocation) ─────────────────────────
+def test_parse_party_open_bills_owed_only_oldest_first():
+    xml = ('<ENVELOPE><COLLECTION>'
+           '<BILL NAME="B3"><BILLDATE>20260309</BILLDATE><CLOSINGBALANCE>-3000.00</CLOSINGBALANCE><PARENT>RAMESH KPM</PARENT></BILL>'
+           '<BILL NAME="B1"><BILLDATE>20251021</BILLDATE><CLOSINGBALANCE>-2185.00</CLOSINGBALANCE><PARENT>RAMESH KPM</PARENT></BILL>'
+           '<BILL NAME="B2"><BILLDATE>20251128</BILLDATE><CLOSINGBALANCE>500.00</CLOSINGBALANCE><PARENT>RAMESH KPM</PARENT></BILL>'
+           '<BILL NAME="X1"><BILLDATE>20260101</BILLDATE><CLOSINGBALANCE>-999.00</CLOSINGBALANCE><PARENT>OTHER PARTY</PARENT></BILL>'
+           '</COLLECTION></ENVELOPE>')
+    out = tx.parse_party_open_bills(xml, "RAMESH KPM")
+    # only owed (negative) bills of THIS party, oldest first, sign flipped
+    assert [b["ref"] for b in out] == ["B1", "B3"]
+    assert out[0] == {"ref": "B1", "date": "2025-10-21", "outstanding": 2185.0}
+    assert out[1]["outstanding"] == 3000.0
+
+
+def test_parse_party_open_bills_handles_junk():
+    assert tx.parse_party_open_bills("nope", "P") == []
+    assert tx.parse_party_open_bills("<ENVELOPE></ENVELOPE>", "P") == []

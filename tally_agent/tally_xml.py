@@ -308,6 +308,43 @@ def build_receipt_import(company: str, party_ledger: str, deposit_ledger: str,
 </ENVELOPE>'''
 
 
+def build_bills_query(company: str = "") -> str:
+    """All outstanding bills (bill-wise). Each BILL carries NAME (the Agst Ref),
+    PARENT (the party ledger), BILLDATE, and CLOSINGBALANCE (NEGATIVE = still
+    owed) - verified live against RISHAB's books."""
+    return _collection_query('Bills', ['Name', 'BillDate', 'ClosingBalance', 'Parent'], company)
+
+
+def parse_party_open_bills(bills_xml: str, party_ledger: str) -> List[Dict[str, Any]]:
+    """A party's OPEN bills (still owed), oldest first, from a Bills response.
+
+    A bill belongs to a party via <PARENT>; it is open when CLOSINGBALANCE < 0
+    (negative = owed, same sign convention as ledgers). Returns
+    [{"ref", "date" (YYYY-MM-DD), "outstanding" (positive float)}] so a receipt
+    can be allocated FIFO with the exact Agst Ref names Tally expects.
+    """
+    try:
+        root = ET.fromstring(bills_xml)
+    except ET.ParseError:
+        return []
+    target = (party_ledger or '').strip()
+    out = []
+    for b in root.iter('BILL'):
+        if (b.findtext('PARENT') or '').strip() != target:
+            continue
+        closing = _to_float(b.findtext('CLOSINGBALANCE'))
+        if closing >= 0:                      # 0 or positive = settled / advance
+            continue
+        raw_date = (b.findtext('BILLDATE') or '').strip()
+        out.append({
+            'ref': (b.get('NAME') or b.findtext('NAME') or '').strip(),
+            'date': parse_tally_date(raw_date) or raw_date,
+            'outstanding': round(-closing, 2),   # flip sign: owed -> positive
+        })
+    out.sort(key=lambda x: x['date'] or '')      # oldest first (FIFO)
+    return out
+
+
 def parse_cash_bank_ledgers(masters_xml: str) -> List[str]:
     """From a masters (Ledger collection) response, the deposit accounts a
     receipt may debit: every ledger under Cash-in-Hand or Bank Accounts. CASH-type
