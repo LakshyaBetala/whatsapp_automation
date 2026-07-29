@@ -107,3 +107,20 @@ def test_import_failure_detection():
     assert tx.import_succeeded(mixed) is False
     # nothing created
     assert tx.import_succeeded("<RESPONSE><CREATED>0</CREATED></RESPONSE>") is False
+
+
+# ── deposit-account discovery (per-shop dropdown) ────────────────────────────
+def test_parse_cash_bank_ledgers():
+    xml = ('<ENVELOPE><COLLECTION>'
+           '<LEDGER NAME="CASH"><PARENT>Cash-in-Hand</PARENT></LEDGER>'
+           '<LEDGER NAME="HDFC BANK"><PARENT>Bank Accounts</PARENT></LEDGER>'
+           '<LEDGER NAME="Kotak"><PARENT>Bank Accounts</PARENT></LEDGER>'
+           '<LEDGER NAME="Ramesh Traders"><PARENT>Sundry Debtors</PARENT></LEDGER>'
+           '</COLLECTION></ENVELOPE>')
+    out = tx.parse_cash_bank_ledgers(xml)
+    assert out == ["CASH", "HDFC BANK", "Kotak"]     # cash first, banks sorted, debtor excluded
+
+
+def test_parse_cash_bank_handles_junk():
+    assert tx.parse_cash_bank_ledgers("not xml") == []
+    assert tx.parse_cash_bank_ledgers("<ENVELOPE></ENVELOPE>") == []

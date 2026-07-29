@@ -308,6 +308,34 @@ def build_receipt_import(company: str, party_ledger: str, deposit_ledger: str,
 </ENVELOPE>'''
 
 
+def parse_cash_bank_ledgers(masters_xml: str) -> List[str]:
+    """From a masters (Ledger collection) response, the deposit accounts a
+    receipt may debit: every ledger under Cash-in-Hand or Bank Accounts. CASH-type
+    first, then banks alphabetically. This is per-shop (never hardcoded), so each
+    owner's popup shows their own accounts."""
+    try:
+        root = ET.fromstring(masters_xml)
+    except ET.ParseError:
+        return []
+    cash, banks = [], []
+    for led in root.iter('LEDGER'):
+        name = (led.get('NAME') or led.findtext('NAME') or '').strip()
+        parent = (led.findtext('PARENT') or '').upper()
+        if not name:
+            continue
+        if 'CASH' in parent:
+            cash.append(name)
+        elif 'BANK' in parent:
+            banks.append(name)
+    # de-dup keeping order, CASH group first then sorted banks
+    seen = set()
+    out = []
+    for n in cash + sorted(banks):
+        if n not in seen:
+            seen.add(n); out.append(n)
+    return out
+
+
 def import_succeeded(response_text: str) -> bool:
     """Did a Tally Import response report success? Tally returns a
     <RESPONSE> with <CREATED>/<ALTERED> counts and <EXCEPTIONS>/<ERRORS>.
