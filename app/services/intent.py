@@ -16,6 +16,7 @@ function so the whole verdict-shaping (enum guarding, date validation, the
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import json
 import logging
@@ -33,6 +34,11 @@ GEMINI_URL = (
 )
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 INTENTS = {"paid_claim", "promise", "dispute", "chatter", "unclear"}
+# Transient statuses worth a retry. 429 = free-tier rate limit (a burst of
+# replies hits this); 5xx = Gemini hiccup. Everything else (400 bad request,
+# 403 bad key) is not retried - it will not fix itself.
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 3
 
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -148,14 +154,27 @@ async def classify(text: str) -> dict | None:
             "temperature": 0,
         },
     }
-    try:
-        async with httpx.AsyncClient(timeout=20) as http:
-            resp = await http.post(GEMINI_URL,
-                                   params={"key": settings.gemini_api_key},
-                                   json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception:
-        log.warning("intent.classify Gemini call failed - degrading to keyword/forward")
-        return None
-    return _parse(data, today)
+    # Retry transient failures (rate limit / hiccup) with a short backoff so a
+    # burst of replies does not silently degrade. A non-transient error (bad key,
+    # bad request) stops immediately; after all attempts we degrade to None and
+    # the caller forwards the reply to the owner - it never acts on a miss.
+    last_err = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            async with httpx.AsyncClient(timeout=20) as http:
+                resp = await http.post(GEMINI_URL,
+                                       params={"key": settings.gemini_api_key},
+                                       json=payload)
+            if resp.status_code in _RETRY_STATUS:
+                last_err = f"HTTP {resp.status_code}"
+            elif resp.status_code >= 400:
+                log.warning("intent.classify non-retryable HTTP %s - degrading", resp.status_code)
+                return None
+            else:
+                return _parse(resp.json(), today)
+        except Exception as e:                     # timeout / network - transient
+            last_err = repr(e)
+        if attempt < _MAX_ATTEMPTS - 1:
+            await asyncio.sleep(0.6 * (attempt + 1))   # 0.6s, then 1.2s
+    log.warning("intent.classify failed after %d attempts (%s) - degrading", _MAX_ATTEMPTS, last_err)
+    return None

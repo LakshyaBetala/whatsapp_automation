@@ -52,6 +52,29 @@ log = logging.getLogger(__name__)
 # we do not recognise (so a new customer or a pilot tester is never ghosted).
 _GREETING = ("HI", "HELLO", "HELP", "MENU", "START", "?", "HEY", "NAMASTE")
 
+# A non-owner who messages the ASVA marketing number (from the poster) saying any
+# of these is a warm lead ready to sign up.
+_JOIN_WORDS = {"YES", "HAAN", "HAA", "HA", "JOIN", "INTERESTED", "CHAHIYE", "SIGNUP"}
+
+
+def _prospect_reply(text: str, upper: str) -> str:
+    """Someone who is NOT a registered owner messaged the ASVA marketing/bot
+    number (e.g. off the poster). Never bounce them - invite them. A human watches
+    this number and follows up; a YES routes straight to that follow-up."""
+    tokens = set(re.findall(r"[A-Z]+", upper))
+    if tokens & _JOIN_WORDS:
+        log.info("ASVA lead (interested): %s -> %s", "prospect", text[:120])
+        return ("Bahut badhiya! ASVA aapka udhaar aapke hi WhatsApp number se recover karega, "
+                "aapke Tally ke saath. Humari team aapse jaldi baat karke setup kar degi. "
+                "Pehla mahina bilkul free.\n\n"
+                "Great, our team will contact you shortly to set up ASVA. First month free.")
+    log.info("ASVA lead (inquiry): %s", text[:120])
+    return ("Namaste! Main ASVA hoon, aapka collection assistant.\n"
+            "Main aapke Tally se aur aapke apne WhatsApp number se customers ko bill aur "
+            "payment reminder bhejta hoon, taaki aapka phasa hua paisa time par wapas aaye.\n"
+            "Shuru karne ke liye YES bhejein. Pehla mahina bilkul free.\n\n"
+            "I am ASVA, your collection assistant. Reply YES to start. First month free.")
+
 
 def _checkpoint_hold(db, business_id: str, cp: dict, arg: str) -> str | None:
     """Hold a party in today's morning checkpoint by number (1-based) or name.
@@ -152,15 +175,10 @@ async def handle(
     # customer self-service flow here - we reply to a greeting once so they
     # are not ghosted, and stay silent otherwise.
     if channel == "bot" and not is_owner:
-        if upper in _GREETING:
-            team = settings.product_team_number
-            tail = f"\n\nTo join ASVA, contact: {team}" if team else ""
-            return (
-                "Hello! This is the ASVA assistant number.\n"
-                "It works only for registered ASVA shop owners." + tail
-            )
-        log.info("Non-owner %s messaged the bot channel: %s", from_number, text)
-        return ""
+        # The marketing number IS this bot number, so a non-owner here is almost
+        # always a PROSPECT off the poster. Invite them into the funnel instead of
+        # bouncing them - every bounced message is a lost sale.
+        return _prospect_reply(text, upper)
 
     # ── Bot assistant is a paid feature (Basic plan does NOT include it) ──
     if channel == "bot" and is_owner and not plan_has_bot(business.get("plan")):

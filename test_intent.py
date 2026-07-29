@@ -85,3 +85,68 @@ def test_classify_none_without_key(monkeypatch):
 def test_classify_none_on_empty_text(monkeypatch):
     monkeypatch.setattr(intent.settings, "gemini_api_key", "key")
     assert asyncio.run(intent.classify("   ")) is None   # empty -> no network, None
+
+
+# ── retry / backoff on transient failures (the rate-limit flaw) ──────────────
+class _FakeResp:
+    def __init__(self, status, body=None):
+        self.status_code = status
+        self._body = body or {}
+    def json(self):
+        return self._body
+
+
+class _FakeClient:
+    """Returns a scripted sequence of responses (or raises) across .post calls."""
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = 0
+    async def __aenter__(self):
+        return self
+    async def __aexit__(self, *a):
+        return False
+    async def post(self, *a, **k):
+        self.calls += 1
+        item = self.script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return _FakeResp(*item)
+
+
+def _wire(monkeypatch, client):
+    monkeypatch.setattr(intent.settings, "gemini_api_key", "key")
+    monkeypatch.setattr(intent.httpx, "AsyncClient", lambda **k: client)
+    async def _no_sleep(_):    # do not actually wait during the test
+        return None
+    monkeypatch.setattr(intent.asyncio, "sleep", _no_sleep)
+
+
+def test_retry_recovers_after_rate_limit(monkeypatch):
+    ok = _gem({"intent": "paid_claim", "amount": 20000, "confidence": 0.9})
+    client = _FakeClient([(429, {}), (200, ok)])     # rate-limited, then success
+    _wire(monkeypatch, client)
+    v = asyncio.run(intent.classify("paisa bhej diya"))
+    assert v["intent"] == "paid_claim" and v["amount"] == 20000.0
+    assert client.calls == 2                          # it retried once
+
+
+def test_persistent_rate_limit_degrades_to_none(monkeypatch):
+    client = _FakeClient([(429, {}), (429, {}), (429, {})])
+    _wire(monkeypatch, client)
+    assert asyncio.run(intent.classify("paisa bhej diya")) is None
+    assert client.calls == 3                          # tried all attempts
+
+
+def test_bad_request_is_not_retried(monkeypatch):
+    client = _FakeClient([(400, {})])                 # non-transient -> stop at once
+    _wire(monkeypatch, client)
+    assert asyncio.run(intent.classify("paisa bhej diya")) is None
+    assert client.calls == 1                          # no retry on a 400
+
+
+def test_network_exception_is_retried(monkeypatch):
+    ok = _gem({"intent": "chatter", "confidence": 0.9})
+    client = _FakeClient([TimeoutError("boom"), (200, ok)])
+    _wire(monkeypatch, client)
+    v = asyncio.run(intent.classify("good morning"))
+    assert v["intent"] == "chatter" and client.calls == 2
