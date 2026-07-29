@@ -23,7 +23,7 @@ from datetime import date
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan, plan_has_bot
-from app.services import checkpoint, i18n, names, promises, replies
+from app.services import checkpoint, i18n, names, promises, proof, replies
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
 from app.services.templates import apply_discount, inr
@@ -239,6 +239,10 @@ async def handle(
         # ── SENT - the parties reminded today, by name ────────────────
         if upper in ("SENT", "SENT TODAY", "REMINDED", "REMINDERS"):
             return await _handle_sent_today(business_id)
+
+        # ── RECOVERED - the proof: money ASVA helped bring back ───────
+        if upper in ("RECOVERED", "RECOVERY", "WAPASI", "KITNA AAYA"):
+            return await _handle_recovered(business_id, lang=lang)
 
         # ── DIGEST 9PM / DIGEST TIME 21 - set the daily summary time ──
         dt_match = re.match(r"DIGEST(?:\s+TIME)?\s+(\d{1,2})\s*(AM|PM)?$", upper)
@@ -893,6 +897,21 @@ async def _handle_start(business_id: str, client_name: str, *, lang: str = "engl
         {"reminders_enabled": True, "reminder_anchor": date.today().isoformat()}
     ).eq("id", client["id"]).execute()
     return i18n.t(lang, "started", name=disp)
+
+
+async def _handle_recovered(business_id: str, *, lang: str = "english") -> str:
+    """The proof-of-value reply: what ASVA recovered this month + what is still
+    out. This is the number that renews subscriptions and fuels referrals."""
+    db = require_db()
+    p = proof.build_proof(db, business_id)
+    out = inr(p["outstanding"])
+    if p["recovered_this_month"] <= 0:
+        return i18n.t(lang, "recovered_zero", out=out)
+    delta = ""
+    if p["recovered_last_month"] > 0:
+        delta = i18n.t(lang, "recovered_delta", last=inr(p["recovered_last_month"]))
+    return i18n.t(lang, "recovered", this=inr(p["recovered_this_month"]),
+                  out=out, month=p["month"], delta=delta)
 
 
 async def _handle_check(business_id: str, client_name: str, *, lang: str = "english") -> str:

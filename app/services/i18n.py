@@ -44,6 +44,7 @@ _CATALOG: dict[str, dict[str, str]] = {
             "*SEE YOUR MONEY*\n"
             "*LIST*: everyone who owes you\n"
             "*CHECK Ramesh*: one party's balance\n"
+            "*RECOVERED*: what ASVA got back this month\n"
             "*DIGEST*: today's summary\n"
             "*SENT*: who was reminded today\n"
             "*PROMISES*: who said they will pay\n\n"
@@ -65,6 +66,7 @@ _CATALOG: dict[str, dict[str, str]] = {
             "*APNA PAISA DEKHEIN*\n"
             "*LIST*: jinke paise aapke paas baaki hain\n"
             "*CHECK Ramesh*: ek party ka balance\n"
+            "*RECOVERED*: is mahine kitna wapas aaya\n"
             "*DIGEST*: aaj ka summary\n"
             "*SENT*: aaj kisko reminder gaya\n"
             "*PROMISES*: kisne kaha paise denge\n\n"
@@ -130,6 +132,18 @@ _CATALOG: dict[str, dict[str, str]] = {
     "terms_range": {
         ENGLISH: "Credit days must be between 1 and 365.",
         HINGLISH: "Credit din 1 se 365 ke beech hone chahiye.",
+    },
+    "recovered": {
+        ENGLISH: "ASVA recovered {this} for you in {month}. {out} is still outstanding.{delta}",
+        HINGLISH: "ASVA ne {month} mein aapke {this} wapas dilaye. {out} abhi baaki hai.{delta}",
+    },
+    "recovered_delta": {
+        ENGLISH: "\nLast month: {last}.",
+        HINGLISH: "\nPichhle mahine: {last}.",
+    },
+    "recovered_zero": {
+        ENGLISH: "No payments recorded yet this month. {out} is outstanding. As receipts come into your Tally, ASVA will show what it helped bring back here.",
+        HINGLISH: "Is mahine abhi tak koi payment record nahi hui. {out} baaki hai. Jaise jaise Tally mein receipt aayenge, ASVA yahaan dikhayega ki kitna wapas aaya.",
     },
 }
 
