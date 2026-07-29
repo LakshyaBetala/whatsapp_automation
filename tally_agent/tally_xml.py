@@ -238,6 +238,88 @@ def build_voucher_register_query(company: str, from_date: str, to_date: str) -> 
   </ENVELOPE>'''
 
 
+# ── Receipt WRITE (payment entry) - Import Data ───────────────────────
+# Verified against RISHAB TRADING COMPANY's own receipts: the party ledger is
+# CREDITED (ISDEEMEDPOSITIVE=No, positive amount) with BILLALLOCATIONS of
+# BILLTYPE="Agst Ref" against specific bill numbers, and a Cash/Bank ledger is
+# DEBITED (ISDEEMEDPOSITIVE=Yes, negative amount). This builder produces exactly
+# that shape - one receipt for one party, allocated across its open bills.
+
+def build_receipt_import(company: str, party_ledger: str, deposit_ledger: str,
+                         date_yyyymmdd: str, allocations: List[tuple],
+                         narration: str = "Payment received (entered by ASVA)") -> str:
+    """Build a Tally 'Import Data' envelope that CREATES a Receipt voucher.
+
+    allocations: list of (bill_ref, amount) - the open bills this payment clears,
+    oldest first (FIFO). Amounts in rupees. Non-positive lines are dropped. The
+    voucher credits `party_ledger` against those bills and debits `deposit_ledger`
+    (CASH or a bank) for the total. Returns the XML string; POSTing it is the
+    caller's job (so a dry-run can inspect it without touching Tally).
+    """
+    from decimal import Decimal
+    allocs = [(str(ref), Decimal(str(amt))) for ref, amt in allocations
+              if Decimal(str(amt)) > 0]
+    if not allocs:
+        raise ValueError("receipt needs at least one positive bill allocation")
+    total = sum((a for _, a in allocs), Decimal(0))
+    party_bills = ''.join(
+        f'<BILLALLOCATIONS.LIST>'
+        f'<NAME>{escape(ref)}</NAME>'
+        f'<BILLTYPE>Agst Ref</BILLTYPE>'
+        f'<AMOUNT>{a:.2f}</AMOUNT>'
+        f'</BILLALLOCATIONS.LIST>'
+        for ref, a in allocs)
+    sv_company = f'<SVCURRENTCOMPANY>{escape(company)}</SVCURRENTCOMPANY>' if company else ''
+    return f'''<ENVELOPE>
+  <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
+  <BODY>
+    <IMPORTDATA>
+      <REQUESTDESC>
+        <REPORTNAME>Vouchers</REPORTNAME>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+          {sv_company}
+        </STATICVARIABLES>
+      </REQUESTDESC>
+      <REQUESTDATA>
+        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+          <VOUCHER VCHTYPE="Receipt" ACTION="Create" OBJVIEW="Accounting Voucher View">
+            <DATE>{date_yyyymmdd}</DATE>
+            <EFFECTIVEDATE>{date_yyyymmdd}</EFFECTIVEDATE>
+            <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
+            <PARTYLEDGERNAME>{escape(party_ledger)}</PARTYLEDGERNAME>
+            <NARRATION>{escape(narration)}</NARRATION>
+            <ALLLEDGERENTRIES.LIST>
+              <LEDGERNAME>{escape(party_ledger)}</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+              <AMOUNT>{total:.2f}</AMOUNT>
+              {party_bills}
+            </ALLLEDGERENTRIES.LIST>
+            <ALLLEDGERENTRIES.LIST>
+              <LEDGERNAME>{escape(deposit_ledger)}</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+              <AMOUNT>-{total:.2f}</AMOUNT>
+            </ALLLEDGERENTRIES.LIST>
+          </VOUCHER>
+        </TALLYMESSAGE>
+      </REQUESTDATA>
+    </IMPORTDATA>
+  </BODY>
+</ENVELOPE>'''
+
+
+def import_succeeded(response_text: str) -> bool:
+    """Did a Tally Import response report success? Tally returns a
+    <RESPONSE> with <CREATED>/<ALTERED> counts and <EXCEPTIONS>/<ERRORS>.
+    Success = at least one created/altered and zero errors/exceptions."""
+    def _num(tag: str) -> int:
+        m = re.search(rf'<{tag}>\s*(\d+)\s*</{tag}>', response_text, re.IGNORECASE)
+        return int(m.group(1)) if m else 0
+    created = _num('CREATED') + _num('ALTERED')
+    errors = _num('ERRORS') + _num('EXCEPTIONS') + _num('LINEERROR')
+    return created >= 1 and errors == 0
+
+
 def build_company_list_query() -> str:
     return _collection_query('Company', ['Name'])
 
