@@ -43,8 +43,10 @@ DOWNLOAD_FILE = f"{APP_BASE}/download/ASVA-Setup.exe"
 # The version of the installer being served, and a short honest changelog (newest
 # first). Shown on the download page ("you are downloading X") and the What's new
 # section. Bump DOWNLOAD_VERSION and prepend a row here on every shipped build.
-DOWNLOAD_VERSION = "1.8.4"
+DOWNLOAD_VERSION = "1.8.5"
 VERSIONS = [
+    ("1.8.5", "Speaks your language, finds the right party",
+     "ASVA now replies in your chosen language, English or Hinglish, in the app and on WhatsApp. It finds the right party even from a short name or a small typo, keeps same-name shops apart, and asks you when it is unsure instead of guessing. Reply-reading is steadier, it remembers what each customer said, and a new RECOVERED command shows how much money came back this month."),
     ("1.8.4", "Knows when a customer promises to pay",
      "When a customer replies that they have paid, or promises a date, ASVA pauses that party's reminders and shows you exactly why on the party page, with the customer's own message. So you never chase someone who just told you they will pay."),
     ("1.8.3", "Steadier, and updates itself",

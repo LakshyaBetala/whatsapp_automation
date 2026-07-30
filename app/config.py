@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # is the in-app "Restart to update" bar. Keep this in step with the shipped
     # app version so the older app_releases dashboard banner stays quiet (it
     # fires only when app_releases > this) and shops never see two notices.
-    app_version: str = "1.8.4"
+    app_version: str = "1.8.5"
     # The oldest desktop build the fleet still supports. A build below this is too
     # old to update itself (it predates the electron-updater), so the heartbeat
     # flags it `below_min` and the app shows a blocking "download the latest"
