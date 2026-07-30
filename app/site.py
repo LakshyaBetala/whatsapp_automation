@@ -113,6 +113,18 @@ img{max-width:100%}
 @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 @keyframes glow{0%,100%{opacity:.45}50%{opacity:.85}}
 
+/* PROMO BAR */
+.promo{display:block;background:var(--ink);color:#fff;text-decoration:none;
+  font-size:.86rem;font-weight:600;text-align:center;padding:9px 14px;
+  border-bottom:2px solid var(--accent)}
+.promo .wrap{display:inline-flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:center}
+.promo b{color:var(--accent);font-weight:800}
+.promo .tag{background:var(--accent);color:var(--ink);font-weight:800;font-size:.72rem;
+  letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:999px}
+.promo .go{font-weight:800;text-decoration:underline;text-underline-offset:3px}
+.promo:hover .go{color:var(--accent)}
+@media(max-width:540px){.promo{font-size:.8rem;padding:8px 12px}.promo .tag{display:none}}
+
 /* NAV */
 header.nav{position:sticky;top:0;z-index:50;background:rgba(249,248,245,.82);
   backdrop-filter:blur(12px);border-bottom:2px solid var(--ink)}
@@ -386,7 +398,11 @@ def _nav(active: str) -> str:
     links = "".join(
         f'<a class="hidem{" on" if p == active else ""}" href="{p}">{label}</a>'
         for p, label in NAV)
-    return f"""<header class="nav"><div class="wrap"><div class="row">
+    return f"""<a class="promo" href="/download">
+  <span class="wrap"><span class="tag">Open pilot</span>
+  ASVA is <b>free for every shop till 15 September</b>. Limited spots.
+  <span class="go">Start free &rarr;</span></span></a>
+<header class="nav"><div class="wrap"><div class="row">
   <a class="logo" href="/"><span class="mark">A</span>ASVA</a>
   <nav class="navlinks">{links}
     <a class="navcta" href="/download">Download app</a>

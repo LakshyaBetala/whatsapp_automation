@@ -83,3 +83,29 @@ def test_english_owner_is_answered_in_english(monkeypatch):
     _owner(monkeypatch, rec, [{"id": "c1", "name": "Ramesh Traders"}], lang="english")
     out = asyncio.run(bot.handle("919444294894", "EXCLUDE Ramesh", channel="bot"))
     assert "do-not-chase" in out and "par hai" not in out
+
+
+# ── Hindi/Hinglish command aliases ───────────────────────────────────────────
+def test_canon_command_maps_hindi_verbs():
+    assert bot._canon_command("BAND RAMESH") == "STOP RAMESH"
+    assert bot._canon_command("SOOCHI") == "LIST"
+    assert bot._canon_command("CHALU RAMESH TRADERS") == "START RAMESH TRADERS"
+    assert bot._canon_command("SHURU RAMESH") == "START RAMESH"
+    assert bot._canon_command("YAAD RAMESH") == "REMIND RAMESH"
+
+
+def test_canon_command_leaves_english_and_unknowns():
+    assert bot._canon_command("STOP RAMESH") == "STOP RAMESH"
+    assert bot._canon_command("LIST") == "LIST"
+    assert bot._canon_command("RANDOM TEXT") == "RANDOM TEXT"
+    # must not touch checkpoint/photo words
+    assert bot._canon_command("HOLD") == "HOLD"
+    assert bot._canon_command("HAAN") == "HAAN"
+
+
+def test_band_alias_stops_a_party(monkeypatch):
+    rec = _Rec()
+    _owner(monkeypatch, rec, [{"id": "c1", "name": "Ramesh Traders", "reminders_enabled": True}])
+    out = asyncio.run(bot.handle("919444294894", "BAND Ramesh", channel="bot"))
+    assert rec.updates == [{"reminders_enabled": False}]     # BAND -> STOP worked end to end
+    assert "Ramesh Traders" in out

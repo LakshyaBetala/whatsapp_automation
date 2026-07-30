@@ -56,6 +56,25 @@ _GREETING = ("HI", "HELLO", "HELP", "MENU", "START", "?", "HEY", "NAMASTE")
 # of these is a warm lead ready to sign up.
 _JOIN_WORDS = {"YES", "HAAN", "HAA", "HA", "JOIN", "INTERESTED", "CHAHIYE", "SIGNUP"}
 
+# Hindi/Hinglish first-word aliases so an owner types the way he speaks
+# ("BAND Ramesh", "SOOCHI", "CHALU Ramesh"). Only unambiguous verbs, and NONE
+# that collide with the checkpoint/photo words (OK/HOLD/RUKO/YES/HAAN), which are
+# handled before this runs. Maps the leading verb to its canonical English command.
+_CMD_ALIASES = {
+    "BAND": "STOP", "SOOCHI": "LIST", "SUCHI": "LIST", "SUCHII": "LIST",
+    "CHALU": "START", "SHURU": "START", "YAAD": "REMIND", "YAD": "REMIND",
+}
+
+
+def _canon_command(upper: str) -> str:
+    """Rewrite a leading Hindi/Hinglish command verb to its English form, so the
+    normal command dispatch below understands it. Only the first word is touched."""
+    parts = upper.split(None, 1)
+    if parts and parts[0] in _CMD_ALIASES:
+        rest = f" {parts[1]}" if len(parts) > 1 else ""
+        return (_CMD_ALIASES[parts[0]] + rest).strip()
+    return upper
+
 
 def _prospect_reply(text: str, upper: str) -> str:
     """Someone who is NOT a registered owner messaged the ASVA marketing/bot
@@ -227,6 +246,12 @@ async def handle(
         if fix_match:
             return await _correct_photo_bill(
                 business_id, fix_match.group(1), text.strip().split(None, 1)[1])
+
+        # Rewrite a Hindi/Hinglish command verb to English so every command below
+        # understands it (BAND -> STOP, SOOCHI -> LIST, CHALU -> START, YAAD ->
+        # REMIND). Done here, after the checkpoint/photo words, so nothing above
+        # is affected.
+        upper = _canon_command(upper)
 
         # ── LIST ──────────────────────────────────────────────────────
         if upper == "LIST":
