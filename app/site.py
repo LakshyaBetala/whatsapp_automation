@@ -125,6 +125,18 @@ img{max-width:100%}
 .promo:hover .go{color:var(--accent)}
 @media(max-width:540px){.promo{font-size:.8rem;padding:8px 12px}.promo .tag{display:none}}
 
+/* COMMAND REFERENCE (guide) */
+.cmdgrp{margin:22px 0}
+.cmdgrp h3{font-size:1.05rem;font-weight:800;margin:0 0 12px}
+.cmds{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.cmd{border:2px solid var(--ink);border-radius:12px;padding:14px 16px;background:#fff}
+.cmd .c{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.cmd code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;font-weight:700;
+  background:var(--paper-2,#f1efe8);border-radius:6px;padding:3px 8px}
+.cmd .hi{font-size:.72rem;font-weight:700;color:var(--accent-d);background:#eef7f0;
+  border-radius:999px;padding:2px 8px}
+.cmd p{margin:0;font-size:.88rem;color:var(--muted)}
+
 /* NAV */
 header.nav{position:sticky;top:0;z-index:50;background:rgba(249,248,245,.82);
   backdrop-filter:blur(12px);border-bottom:2px solid var(--ink)}
@@ -390,7 +402,7 @@ els.forEach(function(e){io.observe(e)});})();
 """
 
 NAV = [("/", "Home"), ("/how-it-works", "How it works"),
-       ("/features", "Features"),
+       ("/features", "Features"), ("/guide", "Guide"),
        ("/use-cases", "Use cases")]
 
 
@@ -1072,12 +1084,93 @@ def _whats_next() -> str:
             f'<div class="grid g2 reveal" style="margin-top:16px">{coming}</div>')
 
 
+_CMD_GROUPS = [
+    ("See your money", [
+        ("LIST", "SOOCHI", "Everyone who owes you, biggest first"),
+        ("CHECK Ramesh", "", "One party's balance, matched to Tally"),
+        ("RECOVERED", "WAPASI", "How much money came back this month"),
+        ("DIGEST", "AAJ", "Today's summary"),
+        ("SENT", "", "Who was reminded today"),
+        ("PROMISES", "", "Who said they will pay"),
+    ]),
+    ("Get paid", [
+        ("REMIND Ramesh", "YAAD Ramesh", "Remind one party right now"),
+        ("REMIND TOP 10", "", "Chase your 10 biggest at once"),
+        ("BILL Ramesh 12500", "", "Add a bill by text, or send its photo"),
+        ("PAID Ramesh 5000", "", "Mark a payment you received"),
+        ("CHASE Ramesh", "", "Resume a party that is on hold"),
+    ]),
+    ("Manage a party", [
+        ("STOP Ramesh", "BAND Ramesh", "Pause reminders for one party"),
+        ("START Ramesh", "CHALU Ramesh", "Turn reminders back on"),
+        ("EXCLUDE Ramesh", "", "Never chase this party (INCLUDE to undo)"),
+        ("TERMS Ramesh 45", "", "Set that party's credit days"),
+    ]),
+    ("Anytime", [
+        ("HELP", "MADAD", "See every command"),
+        ("TEAM your message", "", "Reach the ASVA team"),
+    ]),
+]
+
+
+def _commands_ref() -> str:
+    out = []
+    for title, rows in _CMD_GROUPS:
+        cells = "".join(
+            f'<div class="cmd"><div class="c"><code>{en}</code>'
+            + (f'<span class="hi">{hi}</span>' if hi else "")
+            + f'</div><p>{desc}</p></div>'
+            for en, hi, desc in rows)
+        out.append(f'<div class="cmdgrp reveal"><h3>{title}</h3><div class="cmds">{cells}</div></div>')
+    return "".join(out)
+
+
+def _guide() -> str:
+    body = f"""<div class="wrap">
+ <section class="page-hero reveal">
+  <span class="eyebrow">User guide</span>
+  <h1>How to use <span class="hl">ASVA</span></h1>
+  <p class="lede">Set up once in about five minutes. After that ASVA runs on its own, and you
+    control everything by sending a simple WhatsApp message. Nothing to learn, nothing to open daily.</p>
+ </section>
+
+ <section>
+  <div class="sechead"><span class="eyebrow">Setup, once</span><h2>Three steps, about five minutes</h2></div>
+  {_simple_steps()}
+  <p class="undernote">The setup wizard does the rest, it connects your Tally and saves your bills to a folder on your computer for you. Keep TallyPrime open while you use ASVA.</p>
+ </section>
+
+ <section>
+  <div class="sechead"><span class="eyebrow">Every day</span><h2>You do nothing, it just works</h2></div>
+  <p class="lede" style="max-width:760px">ASVA reads new entries from Tally on its own, sends each bill and reminder from your
+    own WhatsApp number, pauses the moment a customer says they have paid or gives a date, and every
+    evening sends you one WhatsApp: who paid, and who to call. When you want to do something yourself,
+    just message ASVA any of the commands below, in English or Hindi.</p>
+ </section>
+
+ <section>
+  <div class="sechead"><span class="eyebrow">WhatsApp commands</span><h2>Type the way you speak</h2>
+   <p>Send these to ASVA on WhatsApp. "Ramesh" is only an example, use any party's name. Hindi words work too.</p></div>
+  {_commands_ref()}
+ </section>
+</div>
+{_band("Stuck on anything?",
+       "Send TEAM with your question on WhatsApp, or message us and we will help you set up, free till 15 September.")}"""
+    return page_shell(
+        path="/guide",
+        title="How to use ASVA | setup + WhatsApp commands guide",
+        description="How to set up and use ASVA: five-minute setup, then control everything by WhatsApp. Full command list (LIST, PAID, STOP, RECOVERED and more) in English and Hindi.",
+        keywords="how to use ASVA, ASVA setup, ASVA WhatsApp commands, Tally reminder app guide, ASVA manual",
+        body=body)
+
+
 PAGES = {
     "/": _home,
     "/how-it-works": _how,
     "/features": _features,
     "/pricing": _pricing,
     "/use-cases": _use_cases,
+    "/guide": _guide,
     "/download": _download,
 }
 
@@ -1119,7 +1212,8 @@ _AI_AGENTS = [
 _STATIC_FILES = {
     "/": "index.html", "/how-it-works": "how-it-works.html",
     "/features": "features.html", "/pricing": "pricing.html",
-    "/use-cases": "use-cases.html", "/download": "download.html",
+    "/use-cases": "use-cases.html", "/guide": "guide.html",
+    "/download": "download.html",
 }
 
 
@@ -1275,6 +1369,11 @@ def pricing_page():
 @router.get("/use-cases", response_class=HTMLResponse)
 def use_cases_page():
     return _serve("/use-cases")
+
+
+@router.get("/guide", response_class=HTMLResponse)
+def guide_page():
+    return _serve("/guide")
 
 
 @router.get("/sitemap.xml")
