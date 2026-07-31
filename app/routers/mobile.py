@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.db import require_db
-from app.services import names, promises, proof
+from app.services import conversations, names, promises, proof
 
 router = APIRouter(prefix="/m", tags=["mobile"])
 
@@ -142,9 +142,13 @@ def _build_party(db, biz: dict, client_id: str) -> dict:
             "said": pr.get("raw_text") or "",
             "when": str(pr.get("created_at") or "")[:10],
         }
+    recent = [{
+        "text": r.get("body") or "",
+        "when": str(r.get("created_at") or "")[:10],
+    } for r in conversations.recent_for_client(db, bid, client_id, limit=8)]
     return {
         "id": c["id"],
-        "name": c.get("name") or "(unnamed)",
+        "name": names.clean_display(c.get("name") or "") or "(unnamed)",
         "whatsapp": c.get("whatsapp_number") or "",
         "excluded": bool(c.get("excluded")),
         "reminders_on": bool(c.get("reminders_enabled", True)),
@@ -155,6 +159,7 @@ def _build_party(db, biz: dict, client_id: str) -> dict:
             "overdue_days": _overdue_days(b.get("due_date"), today),
             "due": str(b.get("due_date") or "")[:10],
         } for b in open_bills[:60]],
+        "recent": recent,
         "promise": promise,
     }
 
@@ -266,6 +271,13 @@ _APP_HTML = r"""<!doctype html><html lang="en"><head>
  .bill{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #24332b;font-size:.92rem}
  .bill:last-child{border-bottom:0}
  .od{color:#e2916a;font-size:.82rem}
+ .callbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+   min-height:52px;background:#25d366;color:#0a2e17;font-weight:800;font-size:1.02rem;
+   border-radius:14px;text-decoration:none;margin-bottom:12px}
+ .callbtn:active{filter:brightness(.94)}
+ .msg{color:#cdd9cf;font-size:.9rem;line-height:1.5;padding:9px 0;border-bottom:1px solid #24332b}
+ .msg:last-child{border-bottom:0}
+ .msg span{display:block;color:#7f978a;font-size:.72rem;margin-top:3px}
  .login{padding:40px 22px;text-align:center}
  .login input{width:100%;padding:13px;border-radius:10px;border:1px solid #2c4536;background:#16221b;color:#eef3ef;font-size:1rem;margin:14px 0}
  .login button{width:100%;padding:13px;border:0;border-radius:10px;background:#46d67e;color:#10321f;font-weight:800;font-size:1rem}
@@ -337,14 +349,23 @@ async function party(id){
   let bills=d.open_bills.map(b=>'<div class="bill"><div>'+esc(b.invoice)+
     (b.overdue_days>0?(' <span class="od">'+b.overdue_days+'d</span>'):'')+
     '</div><div>&#8377;'+esc(b.amount)+'</div></div>').join('')||'<div style="color:#9fb7a6">No open bills.</div>';
+  const tel=(d.whatsapp||'').replace(/[^0-9+]/g,'');
+  const call=tel?('<a class="callbtn" href="tel:'+esc(tel)+'">&#128222; Call '+esc(d.name)+'</a>'):'';
+  let recent='';
+  if(d.recent&&d.recent.length){
+    recent='<div class="sect">Recent replies</div><div class="card">'+
+      d.recent.map(m=>'<div class="msg">&ldquo;'+esc(m.text)+'&rdquo;'+(m.when?('<span>'+esc(m.when)+'</span>'):'')+'</div>').join('')+'</div>';
+  }
   app.innerHTML=
    '<header><button class="back" onclick="home()">&#8592; Back</button>'+
      '<div class="n">'+esc(d.name)+'</div><div class="s">'+esc(d.whatsapp||'no number')+'</div></header>'+
    '<div class="wrap">'+
    '<div class="kpis"><div class="kpi"><div class="v">&#8377;'+esc(d.outstanding)+'</div><div class="l">Outstanding</div></div>'+
      '<div class="kpi"><div class="v">'+(d.reminders_on?'ON':'OFF')+'</div><div class="l">Reminders</div></div></div>'+
+   call+
    promise+
    '<div class="sect">Open bills</div><div class="card">'+bills+'</div>'+
+   recent+
    '</div>';
 }
 if(TOKEN)home();else loginView();
