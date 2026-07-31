@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('asva', {
   // update and restarts. 'required' = build too old to self-update -> reinstall.
   onUpdate: (cb) => ipcRenderer.on('update', (e, d) => cb(d)),
   installUpdate: () => ipcRenderer.invoke('install-update'),
+  checkUpdate: () => ipcRenderer.invoke('check-update'),
   // Open a link (the download page) in the owner's real browser. http(s) only.
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   // Owner language (english | hinglish). setLanguage saves it on the server so

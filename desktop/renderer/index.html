@@ -30,9 +30,10 @@
   #pagereload { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
   #pagereload:hover { background: #eef3ef; }
   #pagereload:active { transform: scale(.97); }
-  #phonebtn { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
-  #phonebtn:hover { background: #eef3ef; }
-  #phonebtn:active { transform: scale(.97); }
+  #phonebtn, #updchk { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
+  #phonebtn:hover, #updchk:hover { background: #eef3ef; }
+  #phonebtn:active, #updchk:active { transform: scale(.97); }
+  body.dark #updchk { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
   #phonemodal { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45); align-items: center; justify-content: center; }
   #phonemodal .pcard { background: #fff; border-radius: 14px; padding: 24px; max-width: 340px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
   #phonemodal h3 { margin: 0 0 8px; font-size: 1.15rem; color: #14201a; }
@@ -178,6 +179,7 @@
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
       <div style="display:flex;align-items:center;gap:10px">
         <button id="pagereload" onclick="reloadActive()" title="Refresh this page">&#8635; Reload</button>
+        <button id="updchk" onclick="checkForUpdate()" title="Check for a new ASVA version">&#8681; Check update</button>
         <button id="phonebtn" onclick="openPhoneApp()" title="Open ASVA on your phone">&#128241; Phone app</button>
         <div class="langtoggle">
           <button id="lang-en" onclick="setLang('english')">EN</button>
@@ -457,7 +459,17 @@ function reloadAll() {
 function reloadActive() {
   const view = document.querySelector('.view.on');
   const w = view && view.querySelector('webview');
-  try { if (w && w.reload) w.reload(); } catch (e) {}
+  if (!w) return;
+  try {
+    // Bypass the cache so it truly re-fetches (a plain reload can re-render the
+    // same cached page and look like "nothing refreshed"). If the view was never
+    // loaded (still about:blank), load it fresh instead.
+    if (w.src && w.src !== 'about:blank' && w.reloadIgnoringCache) {
+      w.reloadIgnoringCache();
+    } else if (w.reload) {
+      w.reload();
+    }
+  } catch (e) {}
 }
 // Top-bar / sidebar "Reload data": force an immediate Tally refresh, then reload
 // the webviews once the sync lands (so the dashboard re-renders with fresh data).
@@ -620,6 +632,7 @@ window.asva.onStatus((s) => {
 });
 
 // ── Update notice (auto-update runs in the background; this is just the bar) ──
+let _manualCheck = false;       // true while an owner-clicked "Check update" is in flight
 let _mustReinstall = false;     // set when the build is too old to self-update
 let _reinstallUrl = '';         // where the Download button should send the owner
 function applyUpdate() {
@@ -666,10 +679,41 @@ if (window.asva.onUpdate) window.asva.onUpdate((u) => {
     msg.textContent = (en ? 'Downloading the latest ASVA update' : 'ASVA ka naya update aa raha hai') + pct + '...';
     btn.style.display = 'none';
     bar.style.display = 'flex';
+    _manualCheck = false;
+  } else if (u.state === 'checking') {
+    msg.textContent = en ? 'Checking for a new version...' : 'Naya version check kar rahe hain...';
+    btn.style.display = 'none';
+    bar.style.display = 'flex';
+  } else if (u.state === 'current') {
+    // "You are up to date" - only worth showing when the owner clicked Check.
+    if (_manualCheck) {
+      msg.textContent = en ? 'You are on the latest version of ASVA.' : 'Aap ASVA ke latest version par hain.';
+      btn.style.display = 'none'; bar.style.display = 'flex';
+      setTimeout(() => { bar.style.display = 'none'; }, 4000);
+      _manualCheck = false;
+    } else { bar.style.display = 'none'; }
+  } else if (u.state === 'error') {
+    if (_manualCheck) {
+      msg.textContent = en ? 'Could not check right now. Try again in a bit.' : 'Abhi check nahi ho paya. Thodi der baad try karein.';
+      btn.style.display = 'none'; bar.style.display = 'flex';
+      setTimeout(() => { bar.style.display = 'none'; }, 4000);
+      _manualCheck = false;
+    } else { bar.style.display = 'none'; }
   } else {
     bar.style.display = 'none';
   }
 });
+
+// Owner-triggered "Check for updates" (top bar). Shows checking -> ready / up to date.
+function checkForUpdate() {
+  _manualCheck = true;
+  try { window.asva.checkUpdate(); }
+  catch (e) {
+    const bar = document.getElementById('updatebar'), msg = document.getElementById('updatemsg');
+    if (bar && msg) { msg.textContent = 'Update check is only available in the installed app.'; bar.style.display = 'flex'; setTimeout(() => { bar.style.display = 'none'; }, 4000); }
+    _manualCheck = false;
+  }
+}
 
 // ── Real sync progress (from the Tally reader's stage markers) ─────────────
 let _syncDoneTimer = null;

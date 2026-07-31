@@ -721,9 +721,15 @@ function setupAutoUpdate() {
     return true;
   });
 
-  const check = () => { try { autoUpdater.checkForUpdates(); } catch (e) {} };
-  setTimeout(check, 60 * 1000);              // ~1 min after launch (let it settle)
-  setInterval(check, 6 * 60 * 60 * 1000);    // and every 6 hours after that
+  const check = (manual) => {
+    if (manual) sendToWindow('update', { state: 'checking' });
+    try { autoUpdater.checkForUpdates(); } catch (e) { sendToWindow('update', { state: 'error' }); }
+  };
+  // A manual "Check for updates" button (owner can pull an update the moment one
+  // is published, instead of waiting for the 6-hour poll).
+  ipcMain.handle('check-update', () => { check(true); return true; });
+  setTimeout(check, 12 * 1000);              // shortly after launch
+  setInterval(check, 3 * 60 * 60 * 1000);    // and every 3 hours after that
 }
 
 // Single instance - double-clicking the launcher again just focuses the app
