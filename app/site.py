@@ -18,8 +18,8 @@ import os
 import shutil
 from urllib.parse import quote
 
-from fastapi import APIRouter
-from fastapi.responses import (HTMLResponse, PlainTextResponse,
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import (FileResponse, HTMLResponse, PlainTextResponse,
                                RedirectResponse, Response)
 
 from app.config import settings
@@ -462,6 +462,8 @@ def page_shell(*, path: str, title: str, description: str, body: str,
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light"><meta name="theme-color" content="#16a34a">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/favicon.png">
 <title>{title}</title>
 <meta name="description" content="{description}">
 {kw}
@@ -642,11 +644,10 @@ def _home() -> str:
     body = f"""<div class="wrap">
  <section class="page-hero reveal herogrid" style="max-width:none;padding-top:56px">
   <div>
-   <span class="badge"><span class="d"></span> Windows app for TallyPrime</span>
-   <h1 style="margin-top:20px">Send every bill and reminder<br>on WhatsApp, <span class="hl">by itself.</span></h1>
-   <p class="lede">ASVA is a small app you install on the same Windows computer as your Tally.
-     It reads your bills, messages your customers on WhatsApp from your own number, and gets you
-     paid faster. You chase no one.</p>
+   <span class="badge"><span class="d"></span> AI recovery agent for TallyPrime</span>
+   <h1 style="margin-top:20px">The all-in-one AI agent that gets your <span class="hl">udhaar back.</span></h1>
+   <p class="lede">Bills, reminders, reading every reply, and who to chase today, all automatic,
+     from your own WhatsApp number, straight off your Tally. You chase no one.</p>
    <div class="cta-row">
      <a class="btn btn-p" href="{DOWNLOAD_FILE}" download>Download for Windows</a>
      <a class="btn btn-s" href="/how-it-works">See how it works</a>
@@ -1294,6 +1295,16 @@ def export_static(dest_dir: str, *, base: str = "https://tryasva.com",
         _copy_og_image(dest_dir)
         if os.path.exists(os.path.join(dest_dir, "og.png")):
             written.append("og.png")
+        # Favicon (square, built from the logo). Ship it so the browser tab shows
+        # the ASVA mark instead of a blank default.
+        for cand in ("app/static/favicon.png", "favicon.png"):
+            if os.path.exists(cand):
+                try:
+                    shutil.copyfile(cand, os.path.join(dest_dir, "favicon.png"))
+                    written.append("favicon.png")
+                    break
+                except Exception:
+                    pass
         return written
     finally:
         _BASE_OVERRIDE = None
@@ -1400,6 +1411,22 @@ def guide_page():
 @router.get("/sitemap.xml")
 def sitemap():
     return Response(sitemap_xml(), media_type="application/xml")
+
+
+@router.get("/favicon.png")
+def favicon():
+    for p in ("app/static/favicon.png", "favicon.png"):
+        if os.path.exists(p):
+            return FileResponse(p, media_type="image/png")
+    raise HTTPException(status_code=404, detail="no favicon")
+
+
+@router.get("/og.png")
+def og_image():
+    for p in ("app/static/og.png", "og.png", "pdf/og_logo.png"):
+        if os.path.exists(p):
+            return FileResponse(p, media_type="image/png")
+    raise HTTPException(status_code=404, detail="no og image")
 
 
 @router.get("/robots.txt", response_class=PlainTextResponse)
