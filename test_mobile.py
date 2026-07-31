@@ -211,3 +211,17 @@ def test_api_end_to_end_auth_and_data(monkeypatch):
     assert d["business_name"] == "RISHAB TRADING"
     assert d["parties_owing"] == 2 and d["total_outstanding"] == "8,000"
     assert [p["name"] for p in d["chase"]] == ["Ramesh", "Suresh"]
+
+
+def test_qr_requires_valid_token(monkeypatch):
+    c = _client(monkeypatch, _db([], []))
+    assert c.get("/m/qr?token=nope").status_code == 401
+    assert c.get("/m/qr").status_code == 401
+
+
+def test_qr_returns_png_for_valid_token(monkeypatch):
+    c = _client(monkeypatch, _db([], []))
+    r = c.get("/m/qr?token=tok-good")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"      # real PNG bytes

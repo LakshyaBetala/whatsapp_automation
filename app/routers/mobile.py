@@ -170,6 +170,25 @@ def api_party(token: str = Query(""), id: str = Query("")):
     return JSONResponse(_build_party(require_db(), _biz(token), id))
 
 
+@router.get("/qr")
+def phone_link_qr(token: str = Query("")):
+    """A QR the desktop app shows so the owner scans it to open their OWN phone
+    app - it encodes /m?token=<their token>, so the phone lands already linked to
+    their shop's live data. Token is verified first, so this is not an open QR
+    maker."""
+    _biz(token)                       # 401s on a bad token
+    import base64
+    from fastapi.responses import Response
+    from app.config import settings
+    from app.services import upi
+    base = (settings.public_base_url or "https://app.tryasva.com").rstrip("/")
+    b64 = upi.qr_png_base64(f"{base}/m?token={token}")
+    if not b64:
+        raise HTTPException(status_code=503, detail="QR not available")
+    return Response(content=base64.b64decode(b64), media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
 # ── PWA shell + manifest + service worker ───────────────────────────────────
 @router.get("/manifest.webmanifest")
 def manifest():

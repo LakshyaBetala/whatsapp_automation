@@ -1153,6 +1153,17 @@ def _guide() -> str:
    <p>Send these to ASVA on WhatsApp. "Ramesh" is only an example, use any party's name. Hindi words work too.</p></div>
   {_commands_ref()}
  </section>
+
+ <section>
+  <div class="sechead"><span class="eyebrow">On your phone</span><h2>Your shop in your pocket</h2>
+   <p>A view-only phone app that shows your live dues and who to chase, wherever you are. Nothing to type, nothing you can break.</p></div>
+  <div class="simple reveal">
+    <div class="st"><div class="n">1</div><h3>Open ASVA on your computer</h3><p>Click the <b>Phone app</b> button at the top. A QR code appears.</p></div>
+    <div class="st"><div class="n">2</div><h3>Scan it with your phone camera</h3><p>It opens your shop's app, already linked to the same live data as your computer. No login, no code to type.</p></div>
+    <div class="st"><div class="n">3</div><h3>Add to Home Screen</h3><p>Tap your browser menu and "Add to Home Screen". Now it opens like an app, any time.</p></div>
+  </div>
+  <p class="undernote">The phone app is view-only, so you can hand your phone to anyone safely. Everything is controlled from WhatsApp or your computer.</p>
+ </section>
 </div>
 {_band("Stuck on anything?",
        "Send TEAM with your question on WhatsApp, or message us and we will help you set up, free till 15 September.")}"""

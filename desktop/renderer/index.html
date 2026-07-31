@@ -30,6 +30,19 @@
   #pagereload { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
   #pagereload:hover { background: #eef3ef; }
   #pagereload:active { transform: scale(.97); }
+  #phonebtn { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
+  #phonebtn:hover { background: #eef3ef; }
+  #phonebtn:active { transform: scale(.97); }
+  #phonemodal { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45); align-items: center; justify-content: center; }
+  #phonemodal .pcard { background: #fff; border-radius: 14px; padding: 24px; max-width: 340px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
+  #phonemodal h3 { margin: 0 0 8px; font-size: 1.15rem; color: #14201a; }
+  #phonemodal p { margin: 0 0 16px; font-size: .86rem; color: #6b7d72; line-height: 1.5; }
+  #phonemodal img { width: 220px; height: 220px; border: 1px solid #EAEAEA; border-radius: 10px; }
+  #phonemodal .plink { margin: 12px 0; font-size: .72rem; color: #9aa; word-break: break-all; }
+  #phonemodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
+  body.dark #phonebtn { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+  body.dark #phonemodal .pcard { background: #17211b; }
+  body.dark #phonemodal h3 { color: #eef3ef; }
   .langtoggle { display: inline-flex; flex-shrink: 0; }
   .langtoggle button { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; cursor: pointer; font-size: .78rem; font-weight: 600; }
   .langtoggle button:first-child { border-radius: 6px 0 0 6px; }
@@ -165,11 +178,21 @@
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
       <div style="display:flex;align-items:center;gap:10px">
         <button id="pagereload" onclick="reloadActive()" title="Refresh this page">&#8635; Reload</button>
+        <button id="phonebtn" onclick="openPhoneApp()" title="Open ASVA on your phone">&#128241; Phone app</button>
         <div class="langtoggle">
           <button id="lang-en" onclick="setLang('english')">EN</button>
           <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
         </div>
         <button id="themebtn" onclick="toggleTheme()" title="Switch dark / light">Dark</button>
+      </div>
+    </div>
+    <div id="phonemodal" onclick="if(event.target===this)this.style.display='none'">
+      <div class="pcard">
+        <h3>ASVA on your phone</h3>
+        <p>Scan this with your phone camera, then tap <b>Add to Home Screen</b>. It shows your live dues and who to chase, read-only, linked to this shop.</p>
+        <img id="phoneqr" alt="Scan to open ASVA on your phone">
+        <div class="plink"><span id="phonelink"></span></div>
+        <button class="pclose" onclick="document.getElementById('phonemodal').style.display='none'">Close</button>
       </div>
     </div>
     <div id="syncbar"><div class="fill"></div></div>
@@ -360,6 +383,21 @@ function applyLangButtons() {
   if (hi) hi.classList.toggle('on', !en);
   if (e) e.classList.toggle('on', en);
 }
+// Show the QR + link that opens this shop's read-only phone app. The token in
+// the URL links the phone to the SAME live data as this desktop app.
+function openPhoneApp() {
+  const backend = (CONFIG && CONFIG.backendUrl) || '';
+  const token = (CONFIG && CONFIG.token) || '';
+  if (!backend || !token) { alert('Pair ASVA first, then open the phone app.'); return; }
+  const link = backend + '/m?token=' + encodeURIComponent(token);
+  const img = document.getElementById('phoneqr');
+  if (img) img.src = backend + '/m/qr?token=' + encodeURIComponent(token) + '&t=' + Date.now();
+  const lk = document.getElementById('phonelink');
+  if (lk) lk.textContent = link;
+  const m = document.getElementById('phonemodal');
+  if (m) m.style.display = 'flex';
+}
+
 function setLang(l) {
   localStorage.setItem('asva_lang', l);
   applyLangButtons();
