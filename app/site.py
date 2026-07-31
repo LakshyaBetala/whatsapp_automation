@@ -200,7 +200,7 @@ section{padding:52px 0}
 /* Cards + grids */
 .grid{display:grid;gap:16px}
 .g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}
-.g4{grid-template-columns:repeat(4,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}.g5{grid-template-columns:repeat(5,1fr)}
 @media(max-width:900px){.g3,.g4,.g5{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){.g2,.g3,.g4,.g5{grid-template-columns:1fr}}
 .card{background:var(--paper);border:1px solid var(--hair);border-radius:16px;padding:24px;
@@ -215,7 +215,7 @@ section{padding:52px 0}
 .knum{font-family:var(--mono);font-size:.9rem;font-weight:700;color:var(--accent)}
 
 /* Stats bar */
-.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--hair);
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--hair);
   border-radius:18px;overflow:hidden;background:var(--paper);box-shadow:var(--sh)}
 .stats .s{padding:24px 20px;border-right:2px solid var(--ink)}
 .stats .s:last-child{border-right:0}
@@ -257,7 +257,7 @@ section{padding:52px 0}
 .darkband .eyebrow{color:var(--wa)}
 .darkband h2{color:var(--bg)}
 .darkband p.sub{color:#b7c6bc;font-size:1.05rem;max-width:54ch;margin:14px 0 0}
-.msgs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px}
+.msgs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-top:28px}
 @media(max-width:640px){.msgs{grid-template-columns:1fr}}
 .msg{background:#0f2417;border:2px solid #1e3a29;border-radius:16px;padding:15px}
 .msg .k{font-family:var(--mono);font-size:.68rem;color:var(--wa);font-weight:700;letter-spacing:.04em}
@@ -309,8 +309,16 @@ section{padding:52px 0}
 .plan.best .buy:hover{color:#fff}
 
 /* Split panels */
-.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:640px){.split{grid-template-columns:1fr}}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.split>.card{min-width:0}
+.split .line{overflow-wrap:anywhere}
+@media(max-width:720px){.split{grid-template-columns:1fr}}
+.duo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:44px;align-items:center}
+.duo>*{min-width:0}
+@media(max-width:820px){.duo{grid-template-columns:1fr;gap:28px}}
+.herogrid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:44px;align-items:center}
+.herogrid>*{min-width:0}
+@media(max-width:820px){.herogrid{grid-template-columns:1fr;gap:30px}}
 .panel{background:var(--wash);border:1px solid var(--hair);border-radius:16px;padding:24px;box-shadow:var(--sh)}
 .panel .h{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;
   color:var(--accent-d);margin-bottom:6px;font-weight:700}
@@ -632,7 +640,7 @@ def _pricing_grid() -> str:
 # ── pages ───────────────────────────────────────────────────────────────────
 def _home() -> str:
     body = f"""<div class="wrap">
- <section class="page-hero reveal" style="max-width:none;display:grid;grid-template-columns:1.12fr .88fr;gap:44px;align-items:center;padding-top:56px">
+ <section class="page-hero reveal herogrid" style="max-width:none;padding-top:56px">
   <div>
    <span class="badge"><span class="d"></span> Windows app for TallyPrime</span>
    <h1 style="margin-top:20px">Send every bill and reminder<br>on WhatsApp, <span class="hl">by itself.</span></h1>
@@ -783,7 +791,7 @@ def _how() -> str:
  <section><div class="grid g3 reveal">{pcards}</div></section>
 </div>
 <div class="darkband"><div class="wrap">
-  <div style="display:grid;grid-template-columns:.9fr 1.1fr;gap:44px;align-items:center">
+  <div class="duo">
    <div class="reveal">
     <span class="eyebrow">What it actually sends</span>
     <h2 style="margin-top:14px">Real messages that read like you sent them.</h2>
