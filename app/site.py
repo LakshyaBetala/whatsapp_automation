@@ -43,8 +43,10 @@ DOWNLOAD_FILE = f"{APP_BASE}/download/ASVA-Setup.exe"
 # The version of the installer being served, and a short honest changelog (newest
 # first). Shown on the download page ("you are downloading X") and the What's new
 # section. Bump DOWNLOAD_VERSION and prepend a row here on every shipped build.
-DOWNLOAD_VERSION = "1.8.5"
+DOWNLOAD_VERSION = "1.8.6"
 VERSIONS = [
+    ("1.8.6", "Enter a payment into Tally in one tap",
+     "When a customer says they have paid, it shows up in a new Payments tab. Check the amount and the deposit account, your own Cash or bank, and the exact bill it clears, then post the receipt straight into Tally with one tap. ASVA never posts on its own. Reminders can now lead with a chosen UPI or your bank account and always carry your bank details, so customers stop asking for them. The phone app gains search, sort and pages for who to chase, plus each party's promise-to-pay and latest replies."),
     ("1.8.5", "Speaks your language, finds the right party",
      "ASVA now replies in your chosen language, English or Hinglish, in the app and on WhatsApp. It finds the right party even from a short name or a small typo, keeps same-name shops apart, and asks you when it is unsure instead of guessing. Reply-reading is steadier, it remembers what each customer said, and a new RECOVERED command shows how much money came back this month."),
     ("1.8.4", "Knows when a customer promises to pay",

@@ -70,3 +70,57 @@ def api_root():
         "docs": "/docs",
         "health": "/health",
     }
+
+
+@app.get("/pay")
+def pay_page(plan: str = "pro"):
+    """A tappable renewal-pay page. The renewal WhatsApp notice links here with an
+    https URL (which WhatsApp DOES make clickable, unlike a raw upi:// scheme).
+    Tapping opens this page, which then opens the owner's UPI app with ASVA's UPI
+    id and the exact amount prefilled - so 'renew' really does start a UPI payment.
+    The UPI id is also shown as copyable text for anyone whose phone doesn't hand
+    off automatically."""
+    from html import escape
+    from urllib.parse import quote
+    from fastapi.responses import HTMLResponse
+    from app.config import settings
+    from app.services.subscription import _plan_price
+
+    _plan, price = _plan_price(plan)
+    upi = (settings.operator_upi_id or "").strip()
+    payee = (settings.operator_upi_name or "ASVA").strip()
+    if not upi:
+        return HTMLResponse("<p style='font-family:sans-serif;padding:24px'>"
+                            "Payment is not set up yet. Please reply to us on WhatsApp to renew.</p>")
+    note = f"ASVA renewal ({_plan.value})"
+    # Keep the VPA's @ and . raw - UPI apps expect the literal id in pa=.
+    link = (f"upi://pay?pa={quote(upi, safe='@._-')}&pn={quote(payee)}"
+            f"&am={price}&cu=INR&tn={quote(note)}")
+    esc_upi, esc_link = escape(upi), escape(link, quote=True)
+    html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Renew ASVA</title><style>
+ body{{font-family:'SF Pro Display','Helvetica Neue',system-ui,sans-serif;background:#F7F6F3;color:#2F3437;margin:0;
+  display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}}
+ .card{{background:#fff;border:1px solid #EAEAEA;border-radius:16px;padding:28px 24px;max-width:360px;width:100%;text-align:center}}
+ .amt{{font-size:2rem;font-weight:800;letter-spacing:-.02em;margin:6px 0 2px}}
+ .sub{{color:#787774;font-size:.9rem;margin-bottom:20px}}
+ .pay{{display:block;background:#0a7d33;color:#fff;font-weight:700;font-size:1.05rem;
+  padding:14px;border-radius:12px;text-decoration:none}}
+ .pay:active{{background:#086b2b}}
+ .upi{{margin-top:16px;font-size:.86rem;color:#5a6b60}}
+ .upi b{{user-select:all}}
+</style></head><body>
+ <div class="card">
+   <div class="sub">Renew ASVA</div>
+   <div class="amt">&#8377;{price:,}</div>
+   <div class="sub">{escape(payee)} plan</div>
+   <a class="pay" id="pay" href="{esc_link}">Pay with any UPI app</a>
+   <div class="upi">Or pay this UPI id in your app:<br><b>{esc_upi}</b></div>
+ </div>
+ <script>
+   // Best-effort auto-open of the UPI app; the button is the reliable fallback.
+   setTimeout(function(){{ try{{ window.location.href={link!r}; }}catch(e){{}} }}, 350);
+ </script>
+</body></html>"""
+    return HTMLResponse(html)

@@ -44,6 +44,15 @@
   body.dark #phonebtn { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
   body.dark #phonemodal .pcard { background: #17211b; }
   body.dark #phonemodal h3 { color: #eef3ef; }
+  #whatsnewmodal { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45); align-items: center; justify-content: center; }
+  #whatsnewmodal .wncard { background: #fff; border-radius: 14px; padding: 24px 26px; max-width: 400px; text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
+  #whatsnewmodal h3 { margin: 0 0 14px; font-size: 1.15rem; color: #14201a; }
+  #whatsnewmodal ul { margin: 0 0 18px; padding-left: 20px; }
+  #whatsnewmodal li { font-size: .88rem; color: #3a4a41; line-height: 1.55; margin-bottom: 8px; }
+  #whatsnewmodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
+  body.dark #whatsnewmodal .wncard { background: #17211b; }
+  body.dark #whatsnewmodal h3 { color: #eef3ef; }
+  body.dark #whatsnewmodal li { color: #ccd8d0; }
   .langtoggle { display: inline-flex; flex-shrink: 0; }
   .langtoggle button { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; cursor: pointer; font-size: .78rem; font-weight: 600; }
   .langtoggle button:first-child { border-radius: 6px 0 0 6px; }
@@ -161,6 +170,7 @@
     <select id="cosel" title="Switch company" style="display:none;margin:0 12px 12px;padding:8px;border-radius:6px;background:#123524;color:#dfe9e2;border:1px solid #2c5c42;width:calc(100% - 24px);font-size:.9rem"></select>
     <button class="nav on" data-v="dash">Dashboard<small>Parties, dues and bills</small></button>
     <button class="nav" data-v="reminders">Reminders<small>Batches, time and holidays</small></button>
+    <button class="nav" data-v="payments">Payments<small>Who paid, confirm to Tally</small></button>
     <button class="nav" data-v="analytics">Analytics<small>Your business numbers</small></button>
     <button class="nav" data-v="accounts">Accounts<small>UPI and bank details</small></button>
     <button class="nav" data-v="setup">WhatsApp Setup<small>Connect your number</small></button>
@@ -198,6 +208,13 @@
         <button class="pclose" onclick="document.getElementById('phonemodal').style.display='none'">Close</button>
       </div>
     </div>
+    <div id="whatsnewmodal" onclick="if(event.target===this)this.style.display='none'">
+      <div class="pcard wncard">
+        <h3 id="wntitle">What's new</h3>
+        <ul id="wnlist"></ul>
+        <button class="pclose" onclick="document.getElementById('whatsnewmodal').style.display='none'">Got it</button>
+      </div>
+    </div>
     <div id="syncbar"><div class="fill"></div></div>
     <div id="synclabel"></div>
     <div id="updatebar">
@@ -218,6 +235,12 @@
     <div class="view" id="v-reminders">
       <div class="grow" style="position:absolute;inset:0">
         <webview id="wv-reminders" src="about:blank"></webview>
+      </div>
+    </div>
+
+    <div class="view" id="v-payments">
+      <div class="grow" style="position:absolute;inset:0">
+        <webview id="wv-payments" src="about:blank"></webview>
       </div>
     </div>
 
@@ -377,7 +400,7 @@ function setDot(id, ok) { const el = document.getElementById(id); if (el) { el.c
 function restart(name) { window.asva.restartService(name); }
 
 // ── UI language (persisted on this laptop) ────────────────────────────
-const WV = { 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
+const WV = { 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-payments': 'paymentsUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
 function currentLang() { return localStorage.getItem('asva_lang') || 'english'; }
 function urlWithLang(url) { if (!url) return url; return url + (url.includes('?') ? '&' : '?') + 'lang=' + encodeURIComponent(currentLang()); }
 function applyLangButtons() {
@@ -450,7 +473,7 @@ function loadPage(id, url) {
   if (url && !loaded[id]) { loaded[id] = true; const w = document.getElementById(id); hardenWebview(w); w.src = urlWithLang(url); }
 }
 function reloadAll() {
-  ['wv-dash', 'wv-reminders', 'wv-analytics', 'wv-accounts'].forEach(id => {
+  ['wv-dash', 'wv-reminders', 'wv-payments', 'wv-analytics', 'wv-accounts'].forEach(id => {
     const w = document.getElementById(id);
     try { if (w && w.reload && loaded[id]) w.reload(); } catch (e) {}
   });
@@ -481,6 +504,13 @@ function setReloadLabel(html) {
   if (b) b.innerHTML = html;
 }
 async function reloadData() {
+  // A full Tally refresh re-reads every party + bill; on a big shop this takes
+  // a couple of minutes. Confirm first so it is never triggered by accident.
+  const en = currentLang() === 'english';
+  const ask = en
+    ? 'A full Tally refresh reads every party and every bill again. This can take about 2 minutes to finish. Your reminders and sending keep working while it runs.\n\nRefresh everything now?'
+    : 'Poora Tally refresh sabhi party aur sabhi bill dobara padhta hai. Ismein takreeban 2 minute lag sakte hain. Iske dauraan reminder aur sending chalte rehte hain.\n\nAbhi sab kuch refresh karein?';
+  if (!confirm(ask)) return;
   let res = {};
   try { res = await window.asva.tallyReload(); } catch (e) {}
   if (res && res.ok === false && res.cooldown) {
@@ -534,6 +564,7 @@ function applyCompany(i) {
   if (!co) return;
   CONFIG.dashboardUrl = co.dashboardUrl;
   CONFIG.remindersUrl = co.remindersUrl;
+  CONFIG.paymentsUrl = co.paymentsUrl;
   CONFIG.analyticsUrl = co.analyticsUrl;
   CONFIG.accountsUrl = co.accountsUrl;
   Object.entries(WV).forEach(([id, key]) => {
@@ -556,7 +587,42 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
   const cb = document.getElementById('autostart');
   cb.checked = await window.asva.getAutostart();
   cb.onchange = async () => { cb.checked = await window.asva.setAutostart(cb.checked); };
+  showWhatsNewIfUpdated();          // one-time "what's new" after an update
 })();
+
+// After an update installs and the new version launches, show a one-time
+// "What's new" so the owner sees what changed (the update BAR shows it before
+// restart; this shows it AFTER, when they are on the new build).
+const WHATS_NEW = {
+  '1.8.6': [
+    'Phone app now shows each party’s promise-to-pay and recent replies, with a tap-to-call button.',
+    'The who-to-chase list has search, sort and pages.',
+    'Enter a customer’s payment straight into Tally from a confirm popup.',
+    'Clearer language handling and a clickable renew link.',
+    'One-tap "Check for updates" and a "what’s new" note on every update.',
+  ],
+  '1.8.5': [
+    'Replies in your language (English or Hinglish), in the app and on WhatsApp.',
+    'Finds the right party even from a short name or a small typo.',
+    'RECOVERED shows how much money came back this month.',
+    'Scan a QR to open ASVA on your phone (view only).',
+  ],
+};
+function showWhatsNewIfUpdated() {
+  try {
+    const v = (CONFIG && CONFIG.appVersion) || '';
+    if (!v) return;
+    const seen = localStorage.getItem('asva_seen_version') || '';
+    localStorage.setItem('asva_seen_version', v);
+    if (!seen || seen === v) return;             // first run ever, or no change
+    const notes = WHATS_NEW[v];
+    if (!notes || !notes.length) return;
+    const list = notes.map(n => '<li>' + esc(n) + '</li>').join('');
+    document.getElementById('wnlist').innerHTML = list;
+    document.getElementById('wntitle').textContent = 'What’s new in ASVA ' + v;
+    document.getElementById('whatsnewmodal').style.display = 'flex';
+  } catch (e) {}
+}
 
 window.asva.onStatus((s) => {
   // ── Top bar: Tally sync freshness + reload-watch ──
@@ -613,6 +679,7 @@ window.asva.onStatus((s) => {
     window._backendDownSince = 0;
     loadPage('wv-dash', CONFIG.dashboardUrl);
     loadPage('wv-reminders', CONFIG.remindersUrl);
+    loadPage('wv-payments', CONFIG.paymentsUrl);
     loadPage('wv-analytics', CONFIG.analyticsUrl);
     loadPage('wv-accounts', CONFIG.accountsUrl);
     if (loaded['wv-dash']) ov.classList.add('hide');

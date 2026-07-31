@@ -245,23 +245,66 @@ def build_voucher_register_query(company: str, from_date: str, to_date: str) -> 
 # DEBITED (ISDEEMEDPOSITIVE=Yes, negative amount). This builder produces exactly
 # that shape - one receipt for one party, allocated across its open bills.
 
+def allocate_fifo(open_bills: List[Dict[str, Any]], amount) -> tuple:
+    """Split `amount` across `open_bills` (oldest first), filling each up to its
+    outstanding before moving on. Mirrors the backend's allocator exactly so the
+    popup preview and the posted voucher agree.
+
+    open_bills: [{"ref", "outstanding"}, ...] oldest first. Returns
+    (allocations, on_account) where allocations = [(ref, Decimal amount)] and
+    on_account = leftover (an advance) when the payment exceeds total owed.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    def _money(x):
+        try:
+            return Decimal(str(x if x is not None else 0)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except Exception:
+            return Decimal("0.00")
+    remaining = _money(amount)
+    allocs = []
+    for b in open_bills:
+        if remaining <= 0:
+            break
+        out = _money(b.get("outstanding"))
+        if out <= 0:
+            continue
+        take = min(remaining, out)
+        if take <= 0:
+            continue
+        allocs.append((str(b.get("ref") or ""), take))
+        remaining -= take
+    return allocs, remaining
+
+
+def parse_import_voucher_id(response_text: str) -> Optional[str]:
+    """The created voucher's id from a Tally import RESPONSE (LASTVCHID), so a
+    wrong entry can be located and reverted. None when Tally didn't return one."""
+    m = re.search(r'<LASTVCHID>\s*(\d+)\s*</LASTVCHID>', response_text or "", re.IGNORECASE)
+    return m.group(1) if m and m.group(1) != "0" else None
+
+
 def build_receipt_import(company: str, party_ledger: str, deposit_ledger: str,
                          date_yyyymmdd: str, allocations: List[tuple],
-                         narration: str = "Payment received (entered by ASVA)") -> str:
+                         narration: str = "Payment received (entered by ASVA)",
+                         on_account=0) -> str:
     """Build a Tally 'Import Data' envelope that CREATES a Receipt voucher.
 
     allocations: list of (bill_ref, amount) - the open bills this payment clears,
     oldest first (FIFO). Amounts in rupees. Non-positive lines are dropped. The
-    voucher credits `party_ledger` against those bills and debits `deposit_ledger`
-    (CASH or a bank) for the total. Returns the XML string; POSTing it is the
-    caller's job (so a dry-run can inspect it without touching Tally).
+    voucher credits `party_ledger` against those bills (and, when the payment
+    exceeds the open bills, an 'On Acc' advance line for the surplus) and debits
+    `deposit_ledger` (CASH or a bank) for the full total. Returns the XML string;
+    POSTing it is the caller's job (so a dry-run can inspect it without touching
+    Tally). A pure advance (no open bills) posts a single On Acc line.
     """
     from decimal import Decimal
     allocs = [(str(ref), Decimal(str(amt))) for ref, amt in allocations
               if Decimal(str(amt)) > 0]
-    if not allocs:
-        raise ValueError("receipt needs at least one positive bill allocation")
-    total = sum((a for _, a in allocs), Decimal(0))
+    adv = Decimal(str(on_account or 0))
+    if not allocs and adv <= 0:
+        raise ValueError("receipt needs at least one positive allocation or advance")
+    total = sum((a for _, a in allocs), Decimal(0)) + (adv if adv > 0 else Decimal(0))
     party_bills = ''.join(
         f'<BILLALLOCATIONS.LIST>'
         f'<NAME>{escape(ref)}</NAME>'
@@ -269,6 +312,15 @@ def build_receipt_import(company: str, party_ledger: str, deposit_ledger: str,
         f'<AMOUNT>{a:.2f}</AMOUNT>'
         f'</BILLALLOCATIONS.LIST>'
         for ref, a in allocs)
+    if adv > 0:
+        # Surplus over the open bills: book it as an on-account advance so the
+        # receipt total always equals the money actually received.
+        party_bills += (
+            f'<BILLALLOCATIONS.LIST>'
+            f'<NAME>Advance</NAME>'
+            f'<BILLTYPE>On Acc</BILLTYPE>'
+            f'<AMOUNT>{adv:.2f}</AMOUNT>'
+            f'</BILLALLOCATIONS.LIST>')
     sv_company = f'<SVCURRENTCOMPANY>{escape(company)}</SVCURRENTCOMPANY>' if company else ''
     return f'''<ENVELOPE>
   <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>

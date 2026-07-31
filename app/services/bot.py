@@ -183,7 +183,8 @@ async def handle(
     # ── Identify sender: owner or customer? ───────────────────────────
     business = _match_row(
         db, "businesses",
-        "id, business_name, plan, whatsapp_number, upi_vpa, discount_pct, "
+        "id, business_name, plan, whatsapp_number, upi_vpa, upi_vpa_2, upi_vpa_3, "
+        "bank_account_name, bank_account_no, bank_ifsc, bank_name, discount_pct, "
         "msg_language, owner_language, reminder_batches, reminder_hour",
         from_number)
     is_owner = business is not None
@@ -367,12 +368,15 @@ async def handle(
         # everything else, so the bot never auto-replies to ordinary chatter
         # (which would be intrusive and risk the number being flagged).
         if upper in _GREETING:
+            # Unknown number, so we have no business/language context: answer in
+            # both English and Hinglish so nobody is stuck with the wrong one.
             return (
-                "Namaste! Main is dukaan ka WhatsApp assistant hoon.\n\n"
-                "HISAB bhejein - apna baaki dekhein\n"
-                "PAID bhejein - payment ki khabar dein\n\n"
-                "Aapka number hamare records me nahi mila.\n"
-                "Dukaan se baat karni ho to TEAM likhkar apni baat bhejein."
+                "Hello! I am this shop's WhatsApp assistant.\n"
+                "Send HISAB to see your balance, or PAID to report a payment.\n"
+                "Your number is not in our records yet. Send TEAM + your message to reach the shop.\n\n"
+                "Namaste! Main is dukaan ka assistant hoon.\n"
+                "HISAB bhejein apna baaki dekhne ke liye, ya PAID payment batane ke liye.\n"
+                "Dukaan se baat karni ho to TEAM likhkar bhejein."
             )
         log.info("Message from unknown number %s: %s", from_number, text)
         return ""  # stay silent on non-greeting messages from unknown numbers
@@ -1080,13 +1084,38 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     # Early-payment discount from the batch: QR + line reflect the discount
     # (line appears only when the batch actually sets one).
     pay_amount, discount_line = apply_discount(total, batch["disc"], batch["lang"])
-    from app.services.batches import batch_vpa
-    vpa = batch_vpa(business, batch)
+    from app.services.batches import batch_payment
+    pay = batch_payment(business, batch)
+    vpa, bank = pay["vpa"], pay["bank"]
     qr_b64 = None
+
+    upi_block: list[str] = []
     if vpa:
         link = upi.upi_link(vpa, biz_name, pay_amount, f"{len(bills)} bills")
         qr_b64 = upi.qr_png_base64(link)
-        lines += ["", (f"To pay via UPI: {link}" if en else f"UPI se payment: {link}")]
+        upi_block = ["", (f"To pay via UPI: {link}" if en else f"UPI se payment: {link}")]
+
+    # Bank/NEFT details are sent ONLY when this batch's account is set to "Bank
+    # transfer" - not on every reminder. A UPI batch stays UPI-only.
+    bank_block: list[str] = []
+    if bank and pay["primary"] == "bank":
+        bank_block = ["", ("For bank transfer (NEFT/IMPS/RTGS):"
+                           if en else "Bank transfer (NEFT/IMPS) ke liye:")]
+        if bank["name"]:
+            bank_block.append((f"Name: {bank['name']}" if en else f"Naam: {bank['name']}"))
+        bank_block.append(f"A/c No: {bank['no']}")
+        if bank["ifsc"]:
+            bank_block.append(f"IFSC: {bank['ifsc']}")
+        if bank["bank"]:
+            bank_block.append(f"Bank: {bank['bank']}")
+
+    if pay["primary"] == "bank":
+        # Bank chosen for this batch: lead with the bank details, still offer UPI.
+        lines += bank_block + upi_block
+    else:
+        # UPI chosen: UPI only - no bank details unless the batch asks for them.
+        lines += upi_block
+
     if discount_line:
         lines += ["", discount_line]
     if batch.get("line"):
@@ -1356,45 +1385,93 @@ async def _handle_owner_msg(business: dict, rest: str) -> str:
     return f"{client['name']}: {_send_fail_note(result)}"
 
 
+_PAID_AMT_RE = re.compile(
+    r"^(.*?)[\s,]+(?:rs\.?\s*|₹\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:/-)?\s*$",
+    re.IGNORECASE)
+
+
+def _split_paid_amount(arg: str):
+    """Pull a trailing rupee amount off a PAID command:
+    "Ramesh Electricals 5000" -> ("Ramesh Electricals", Decimal(5000)).
+    Tolerates "rs 5000", "5,000", "5000/-". Returns (name, amount|None); the
+    caller falls back to the whole string when the leftover name does not match a
+    party (so a party name that ends in a number is not mangled)."""
+    m = _PAID_AMT_RE.match((arg or "").strip())
+    if not m:
+        return (arg or "").strip(), None
+    name = m.group(1).strip()
+    if not name:                       # "PAID 5000" with no name is not a party
+        return (arg or "").strip(), None
+    try:
+        return name, Decimal(m.group(2).replace(",", ""))
+    except Exception:
+        return name, None
+
+
 async def _handle_paid_owner(
     business_id: str, client_name: str, plan: Plan, *, lang: str = "english"
 ) -> str:
-    """Owner confirmed payment - mark paid immediately."""
+    """Owner confirms a customer paid: PAID <name> [amount].
+
+    This QUEUES the receipt for the app - it does not mark anything blindly. The
+    owner opens ASVA, checks the amount + deposit account (their Cash/bank) and
+    the bill it clears, then posts it into Tally with one tap. Tally stays the
+    single source of truth (no double counting): the next sync reflects it back
+    into the dashboard. A queued receipt also resolves any open promise/claim."""
+    from app.services import receipts_queue as rq
     db = require_db()
-    status, rows = _resolve_party(db, business_id, client_name)
+
+    # Split an optional trailing amount: "PAID Ramesh Electricals 5000" ->
+    # name="Ramesh Electricals", amt=5000 (also "rs 5000", "5,000", "5000/-").
+    sel = "id, name, tally_ledger_name"
+    raw = (client_name or "").strip()
+    name_try, amount = _split_paid_amount(raw)
+    status, rows = _resolve_party(db, business_id, name_try, sel)
+    # If stripping the number left a name that does not resolve, the digits may
+    # be part of the party name (e.g. a shop literally called "SHOP 21"): retry
+    # with the whole string and no amount.
+    if status != "one" and amount is not None:
+        s2, r2 = _resolve_party(db, business_id, raw, sel)
+        if s2 == "one":
+            status, rows, amount = s2, r2, None
     if status != "one":
-        return _party_pick_msg(status, client_name, rows, lang)
+        return _party_pick_msg(status, name_try, rows, lang)
     client = rows[0]
 
-    # Find oldest open bill to get amount
+    # Outstanding drives the default amount (owner can edit it in the popup).
     bill_resp = (
-        db.table("bills")
-        .select("outstanding")
-        .eq("business_id", business_id)
-        .eq("client_id", client["id"])
+        db.table("bills").select("outstanding")
+        .eq("business_id", business_id).eq("client_id", client["id"])
         .in_("status", ["pending", "partial", "overdue"])
-        .order("invoice_date", desc=False)
-        .limit(1)
-        .execute()
-    )
+        .order("invoice_date", desc=False).execute())
+    open_total = sum(Decimal(str(b.get("outstanding") or 0)) for b in (bill_resp.data or []))
+    if amount is None:
+        amount = open_total
+    if amount is None or amount <= 0:
+        return f"{client['name']} has no pending amount to record."
 
-    if not bill_resp.data:
-        return f"{client['name']} has no pending bill."
+    disp = names.clean_display(client["name"])
+    ledger = client.get("tally_ledger_name") or client["name"]
+    try:
+        row = rq.create_pending(
+            db, business_id, client_id=client["id"], party_ledger=ledger,
+            party_display=disp, amount=amount)
+    except ValueError:
+        return f"{client['name']}: amount must be more than zero."
+    if not row:
+        return "Could not queue that right now. Please try again."
 
-    outstanding = Decimal(str(bill_resp.data[0]["outstanding"]))
-    result = await payments_service.apply_payment(
-        business_id=business_id,
-        client_id=client["id"],
-        amount=outstanding,
-        source="bot",
-    )
+    # A queued receipt supersedes any promise/claim hold (it's being handled).
+    try:
+        promises.close_for_client(db, business_id, client["id"], "kept")
+    except Exception:
+        pass
 
-    if result.get("applied"):
-        return (
-            f"Payment of {inr(outstanding)} marked for {client['name']}.\n"
-            f"{result['bills_affected']} bill(s) updated."
-        )
-    return f"Could not apply the payment: {result.get('reason', 'unknown error')}"
+    if lang == "hinglish":
+        return (f"{disp} ka {inr(amount)} receipt app mein add kar diya. "
+                f"ASVA kholein, deposit account (Cash/bank) check karke Tally mein post karein.")
+    return (f"Queued {inr(amount)} from {disp}. Open ASVA, check the deposit "
+            f"account (Cash/bank) and post it into Tally with one tap.")
 
 
 async def _handle_terms(business_id: str, client_name: str, days: int, *, lang: str = "english") -> str:

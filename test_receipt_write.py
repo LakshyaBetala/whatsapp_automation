@@ -144,3 +144,51 @@ def test_parse_party_open_bills_owed_only_oldest_first():
 def test_parse_party_open_bills_handles_junk():
     assert tx.parse_party_open_bills("nope", "P") == []
     assert tx.parse_party_open_bills("<ENVELOPE></ENVELOPE>", "P") == []
+
+
+# ── FIFO allocation in the agent (mirrors the backend) ───────────────────────
+def test_agent_allocate_fifo_spills_oldest_first():
+    bills = [{"ref": "A", "outstanding": 550}, {"ref": "B", "outstanding": 3000}]
+    allocs, on_acct = tx.allocate_fifo(bills, 2000)
+    assert allocs == [("A", Decimal("550.00")), ("B", Decimal("1450.00"))]
+    assert on_acct == Decimal("0.00")
+
+
+def test_agent_allocate_fifo_overpayment_leaves_advance():
+    bills = [{"ref": "A", "outstanding": 1000}]
+    allocs, on_acct = tx.allocate_fifo(bills, 1500)
+    assert allocs == [("A", Decimal("1000.00"))]
+    assert on_acct == Decimal("500.00")
+
+
+def test_agent_allocate_fifo_no_bills():
+    allocs, on_acct = tx.allocate_fifo([], 800)
+    assert allocs == [] and on_acct == Decimal("800.00")
+
+
+# ── on-account (advance) receipt shape ───────────────────────────────────────
+def test_receipt_with_advance_totals_full_amount():
+    xml = tx.build_receipt_import("Co", "Party", "CASH", "20260730",
+                                  [("A", 1000)], on_account="500")
+    v = _voucher(xml)
+    party, deposit = _entries(v)
+    bills = party.findall("BILLALLOCATIONS.LIST")
+    assert [b.findtext("BILLTYPE") for b in bills] == ["Agst Ref", "On Acc"]
+    assert [b.findtext("AMOUNT") for b in bills] == ["1000.00", "500.00"]
+    assert party.findtext("AMOUNT") == "1500.00"          # receipt = money received
+    assert deposit.findtext("AMOUNT") == "-1500.00"       # deposit debit matches
+
+
+def test_pure_advance_receipt_when_no_open_bills():
+    xml = tx.build_receipt_import("Co", "Party", "CASH", "20260730", [], on_account="700")
+    party = _entries(_voucher(xml))[0]
+    bills = party.findall("BILLALLOCATIONS.LIST")
+    assert len(bills) == 1 and bills[0].findtext("BILLTYPE") == "On Acc"
+    assert party.findtext("AMOUNT") == "700.00"
+
+
+# ── voucher id (for revert) ──────────────────────────────────────────────────
+def test_parse_import_voucher_id():
+    assert tx.parse_import_voucher_id("<RESPONSE><LASTVCHID>4567</LASTVCHID></RESPONSE>") == "4567"
+    assert tx.parse_import_voucher_id("<RESPONSE><LASTVCHID>0</LASTVCHID></RESPONSE>") is None
+    assert tx.parse_import_voucher_id("<RESPONSE></RESPONSE>") is None

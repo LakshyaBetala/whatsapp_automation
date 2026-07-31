@@ -195,6 +195,95 @@ async def run_drain_outbox(config: dict, interval: int = 20) -> None:
         await asyncio.sleep(interval)
 
 
+# ── Payment-entry drain (PAID -> queue -> confirm -> Tally) ────────────────
+# The owner confirms a receipt in the app; it is held on the backend as
+# 'confirmed'. This loop pulls confirmed receipts, allocates the amount FIFO
+# against the party's OWN open bills in Tally (exact Agst Refs), writes the
+# Receipt voucher, verifies Tally accepted it, and reports the outcome back. It
+# only touches Tally when there is something to post, so it stays cheap.
+
+async def _push_deposit_ledgers(config: dict) -> int:
+    """Cache the shop's Cash/Bank ledger names on the backend so the confirm
+    popup can offer the owner their own deposit accounts."""
+    try:
+        masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(config['company_name']))
+        ledgers = tally_xml.parse_cash_bank_ledgers(masters_xml)
+        if not ledgers:
+            return 0
+        base = config['backend_url'].rstrip('/')
+        async with httpx.AsyncClient(timeout=30.0, headers={"User-Agent": USER_AGENT}) as http:
+            await http.post(f"{base}/tally/deposit-ledgers", json={
+                "business_id": config['business_id'],
+                "agent_token": config['agent_token'],
+                "ledgers": ledgers})
+        return len(ledgers)
+    except Exception as e:
+        log_and_print(f"Deposit-ledger push failed (continuing): {e}", is_error=True)
+        return 0
+
+
+async def run_receipts_drain(config: dict, push_ledgers: bool = False) -> int:
+    """Post every owner-confirmed receipt into Tally. Returns how many posted.
+    Each failure is reported (not raised) so one bad receipt never blocks the
+    rest, and the owner sees the exact reason in the app."""
+    base = config['backend_url'].rstrip('/')
+    company = config['company_name']
+    if push_ledgers:
+        await _push_deposit_ledgers(config)
+    posted = 0
+    async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}) as http:
+        r = await http.get(f"{base}/tally/receipts/confirmed", params={
+            "business_id": config['business_id'], "agent_token": config['agent_token']})
+        if r.status_code != 200:
+            return 0
+        receipts = r.json().get("receipts", [])
+        if not receipts:
+            return 0
+        # One Tally read of all outstanding bills, reused for every receipt.
+        bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
+        for rc in receipts:
+            ok, voucher_id, err, alloc_out = False, None, None, None
+            try:
+                open_bills = tally_xml.parse_party_open_bills(bills_xml, rc['party_ledger'])
+                allocs, on_account = tally_xml.allocate_fifo(open_bills, rc['amount'])
+                if not allocs and on_account <= 0:
+                    err = "Nothing to record for this party."
+                else:
+                    date_str = (rc.get('receipt_date') or '').replace('-', '')
+                    xml = tally_xml.build_receipt_import(
+                        company, rc['party_ledger'], rc.get('deposit_ledger') or 'Cash',
+                        date_str, [(ref, str(a)) for ref, a in allocs],
+                        on_account=str(on_account) if on_account > 0 else 0)
+                    resp = await post_to_tally(config['tally_host'], config['tally_port'], xml)
+                    text = tally_xml.sanitize_xml(resp)
+                    ok = tally_xml.import_succeeded(text)
+                    if ok:
+                        voucher_id = tally_xml.parse_import_voucher_id(text)
+                        alloc_out = [{"ref": ref, "amount": float(a)} for ref, a in allocs]
+                        if on_account > 0:
+                            alloc_out.append({"ref": "On Account", "amount": float(on_account)})
+                    else:
+                        err = ("Tally did not accept the receipt. Check the party and "
+                               "deposit account names, then try again.")
+            except Exception as e:                              # noqa: BLE001
+                err = str(e)[:300]
+            try:
+                await http.post(f"{base}/tally/receipts/report", json={
+                    "business_id": config['business_id'], "agent_token": config['agent_token'],
+                    "id": rc['id'], "ok": ok, "voucher_id": voucher_id,
+                    "error": err, "allocation": alloc_out})
+            except Exception as e:
+                log_and_print(f"Receipt report failed for {rc.get('id')}: {e}", is_error=True)
+            if ok:
+                posted += 1
+                log_and_print(f"Receipt posted to Tally: {rc.get('party_display') or rc.get('party_ledger')} "
+                              f"Rs {rc.get('amount')}")
+            elif err:
+                log_and_print(f"Receipt NOT posted ({rc.get('party_display') or rc.get('party_ledger')}): {err}",
+                              is_error=True)
+    return posted
+
+
 async def check_company(config: dict):
     """Warn early if the configured company is not loaded in Tally."""
     try:
@@ -391,6 +480,10 @@ async def run_watch(config: dict):
     seen = _pending_pdfs()
     last_sync = 0.0          # monotonic time of the last Tally read (0 = never)
     last_outstanding = 0.0
+    last_receipts = 0.0      # confirmed-receipt drain (cheap; hits Tally only if any)
+    last_ledgers = 0.0       # deposit-ledger cache push (heavy read; slow cadence)
+    receipts_every = max(15, int(config.get('receipts_every_seconds', 25) or 25))
+    ledgers_every = max(1800, int(config.get('deposit_ledgers_every_seconds', 21600) or 21600))
     failures = 0
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
@@ -433,6 +526,30 @@ async def run_watch(config: dict):
             raise
         except Exception as e:
             log_and_print(f"[{stamp}] Outstanding refresh failed ({e}) - bills/heartbeat unaffected.", is_error=True)
+
+        # Deposit-ledger cache (Cash/bank names for the confirm popup): heavy read,
+        # so once at start and then on a long beat.
+        try:
+            if (last_ledgers == 0.0) or (now_mono - last_ledgers >= ledgers_every):
+                n = await _push_deposit_ledgers(config)
+                if n:
+                    log_and_print(f"[{stamp}] Deposit accounts synced ({n}).")
+                last_ledgers = asyncio.get_event_loop().time()
+        except Exception as e:
+            log_and_print(f"[{stamp}] Deposit-ledger sync failed ({e}) - non-fatal.", is_error=True)
+
+        # Confirmed-receipt drain: cheap backend check every ~25s; touches Tally
+        # only when the owner has confirmed a payment to post.
+        try:
+            if (now_mono - last_receipts >= receipts_every):
+                n = await run_receipts_drain(config)
+                if n:
+                    log_and_print(f"[{stamp}] Posted {n} confirmed receipt(s) to Tally.")
+                last_receipts = asyncio.get_event_loop().time()
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            log_and_print(f"[{stamp}] Receipt drain failed ({e}) - will retry.", is_error=True)
 
         await asyncio.sleep(folder_poll)
 
@@ -923,6 +1040,7 @@ def main():
     parser.add_argument('--list-companies-json', action='store_true', help='Print Tally companies as JSON (setup wizard)')
     parser.add_argument('--set-company', metavar='NAME', help='Save the chosen Tally company (setup wizard)')
     parser.add_argument('--drain-outbox', action='store_true', help='Deliver queued customer sends from this shop\'s WhatsApp (thin client)')
+    parser.add_argument('--drain-receipts', action='store_true', help='Post owner-confirmed payments into Tally right now (one-shot)')
     parser.add_argument('--diagnose', action='store_true', help='Check server/Tally/WhatsApp connectivity and print JSON (setup wizard / doctor)')
     parser.add_argument('--backend', metavar='URL', help='Server URL to pair against')
     parser.add_argument('--tally-host', default='localhost')
@@ -944,9 +1062,10 @@ def main():
 
     if not (args.import_masters or args.sync or args.watch or args.check_outstanding
             or args.refresh_outstanding or args.companies or args.add_company
-            or args.drain_outbox):
+            or args.drain_outbox or args.drain_receipts):
         print("Please specify --import-masters, --sync, --watch, --check-outstanding, "
-              "--refresh-outstanding, --companies, --add-company \"NAME\" or --drain-outbox")
+              "--refresh-outstanding, --companies, --add-company \"NAME\", --drain-outbox "
+              "or --drain-receipts")
         sys.exit(1)
 
     config = load_config()
@@ -993,6 +1112,9 @@ def main():
             asyncio.run(run_import(cfg))
         if args.sync:
             asyncio.run(run_sync(cfg))
+        if args.drain_receipts:
+            n = asyncio.run(run_receipts_drain(cfg, push_ledgers=True))
+            log_and_print(f"Confirmed receipts posted to Tally: {n}")
 
     if args.watch:
         try:

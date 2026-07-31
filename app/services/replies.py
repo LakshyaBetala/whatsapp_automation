@@ -140,8 +140,9 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
         await _notify_owner(business_id,
             f"{name} sent a payment screenshot. ASVA PAUSED their reminders for "
             f"{settings.promise_grace_days} days (nothing was replied to {name}). "
-            f"Enter the receipt in Tally when it lands. Reply CHASE {name} to resume now, "
-            f"or message {name} yourself.")
+            f"When the money lands, reply PAID {name} to record it (you confirm the "
+            f"amount + account in the app, then it posts to Tally). "
+            f"Reply CHASE {name} to resume now, or message {name} yourself.")
         return True
 
     if not text:
@@ -157,7 +158,8 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
         await _notify_owner(business_id,
             f'{name} replied: "{text[:200]}". ASVA read this as "already paid"'
             f'{_amt_phrase(amount)} and PAUSED their reminders for {settings.promise_grace_days} '
-            f"days (nothing was replied to {name}). Enter the receipt in Tally when it lands. "
+            f"days (nothing was replied to {name}). When it lands, reply PAID {name} to record "
+            f"it (confirm the amount + account in the app, then it posts to Tally). "
             f"Reply CHASE {name} to resume reminders now.")
         return True
 
@@ -191,7 +193,8 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
         await _notify_owner(business_id,
             f'{name} replied: "{text[:200]}". ASVA read this as "already paid"'
             f'{_amt_phrase(amount)} and PAUSED their reminders for {settings.promise_grace_days} '
-            f"days (nothing was replied to {name}). Enter the receipt in Tally when it lands. "
+            f"days (nothing was replied to {name}). When it lands, reply PAID {name} to record "
+            f"it (confirm the amount + account in the app, then it posts to Tally). "
             f"Reply CHASE {name} to resume reminders now.")
         return True
 

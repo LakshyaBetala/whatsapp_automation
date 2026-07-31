@@ -80,7 +80,9 @@ async def send_message(
         .execute()
     )
     if biz_row.data:
-        status = subs.effective_status(biz_row.data[0].get("plan_expires_on"))
+        # live_status = 'active' for everyone during the free pilot, so nobody is
+        # suspended while the pilot runs.
+        status = subs.live_status(biz_row.data[0].get("plan_expires_on"))
         if status == "suspended" and message_type != MessageType.owner_alert:
             log.warning("Business %s suspended - send blocked", business_id)
             db.table("messages").insert({
@@ -97,7 +99,9 @@ async def send_message(
             return {"sent": False, "reason": "subscription_suspended"}
 
     # ── 1. Atomic plan-limit check ────────────────────────────────────
-    allowed = await _check_usage_and_increment(business_id, plan)
+    # During the free pilot every business gets Pro-tier limits.
+    plan_for_limit = Plan.pro if subs.free_pilot_active() else plan
+    allowed = await _check_usage_and_increment(business_id, plan_for_limit)
     if not allowed:
         log.warning("Plan limit reached for business %s - skipping send", business_id)
         db.table("messages").insert({

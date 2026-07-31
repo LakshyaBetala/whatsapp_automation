@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # is the in-app "Restart to update" bar. Keep this in step with the shipped
     # app version so the older app_releases dashboard banner stays quiet (it
     # fires only when app_releases > this) and shops never see two notices.
-    app_version: str = "1.8.5"
+    app_version: str = "1.8.6"
     # The oldest desktop build the fleet still supports. A build below this is too
     # old to update itself (it predates the electron-updater), so the heartbeat
     # flags it `below_min` and the app shows a blocking "download the latest"
@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # is suspended. Like a paid app: pay -> access continues; lapse -> a short
     # grace, then cut off. Max 3.
     subscription_grace_days: int = 3
+    # Free pilot: while today <= this date (YYYY-MM-DD), EVERY business is treated
+    # as active on the Pro tier - no suspension, no plan-limit block, no renewal
+    # nagging. Matches the public "free pilot till 15 Sep 2026" promise. Set to ""
+    # to switch billing back on. This is the single global free switch.
+    free_pilot_until: str = "2026-09-15"
     # Direct-UPI billing: where shops pay you. When set, renewal notices carry
     # the amount + this UPI id + a tap-to-pay upi:// link, so "pay directly"
     # feels hands-off. You confirm payment and click Renew in the Command Center.

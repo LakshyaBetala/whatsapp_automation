@@ -94,15 +94,15 @@ def _build_summary(db, biz: dict) -> dict:
             "id": cid,
             "name": names.clean_display(c.get("name") or "") or "(unnamed)",
             "outstanding": _inr(amt),
-            "_amt": float(amt),
+            "amt": float(amt),                 # numeric -> phone sorts by amount
             "overdue_days": worst_due.get(cid, 0),
             "paused": cid in held,
         })
-    # Who to chase = owing, not paused, most overdue first.
-    chase = sorted([p for p in parties if not p["paused"]],
-                   key=lambda p: (-p["overdue_days"], -p["_amt"]))
-    for p in parties:
-        p.pop("_amt", None)
+    # Full owing list, ordered as the default "who to chase": active parties
+    # first (most overdue, then biggest), paused/on-promise parties last. The
+    # phone searches, sorts and pages this list locally, so every owing party
+    # (not just the top 100) is reachable from the phone.
+    chase = sorted(parties, key=lambda p: (p["paused"], -p["overdue_days"], -p["amt"]))
     pf = proof.build_proof(db, bid, today)
     return {
         "business_name": biz.get("business_name") or "Your shop",
@@ -111,7 +111,7 @@ def _build_summary(db, biz: dict) -> dict:
         "on_promise": sum(1 for p in parties if p["paused"]),
         "recovered_this_month": _inr(pf["recovered_this_month"]),
         "recovered_month": pf["month"],
-        "chase": chase[:100],
+        "chase": chase,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
     }
 
@@ -264,6 +264,13 @@ _APP_HTML = r"""<!doctype html><html lang="en"><head>
  .paused{color:#e0b34a}
  .empty,.err{color:#9fb7a6;text-align:center;padding:36px 16px;line-height:1.6}
  .err{color:#e2916a}
+ .find{display:flex;gap:8px;margin-bottom:10px}
+ .find input{flex:1;min-width:0;padding:11px 13px;border-radius:11px;border:1px solid #2c4536;background:#16221b;color:#eef3ef;font-size:.95rem}
+ .find select{padding:11px 10px;border-radius:11px;border:1px solid #2c4536;background:#16221b;color:#eef3ef;font-size:.85rem;max-width:44%}
+ .pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
+ .pager button{flex:1;padding:11px;border:1px solid #2c4536;border-radius:11px;background:#16221b;color:#cfe0d5;font-weight:700;font-size:.9rem}
+ .pager button:disabled{opacity:.4}
+ .pager .pinfo{color:#9fb7a6;font-size:.8rem;white-space:nowrap}
  .back{background:none;border:0;color:#8fdca9;font:inherit;font-size:.95rem;padding:6px 0;cursor:pointer}
  .card{background:#16221b;border:1px solid #24332b;border-radius:14px;padding:15px;margin-bottom:12px}
  .promise{border-left:4px solid #c9a227;background:#241f10}
@@ -307,12 +314,14 @@ function loginView(){
 }
 function doLogin(){const v=document.getElementById('tk').value.trim();
   if(!v)return;localStorage.setItem('asva_m_token',v);TOKEN=v;home();}
+let CHASE=[], chaseSearch='', chaseSort='chase', chasePage=0;
+const PER=50;
 async function home(){
   app.innerHTML='<div class="empty">Loading...</div>';
   let d;try{d=await api('summary');}catch(e){
     if(e.message==='unauthorised')return;
     app.innerHTML='<div class="err">Could not reach ASVA. Check the internet and pull to refresh.</div>';return;}
-  let chase=d.chase.map(p=>rowHtml(p)).join('')||'<div class="empty">Nobody to chase right now. All caught up.</div>';
+  CHASE=d.chase||[]; chasePage=0;
   app.innerHTML=
    '<header><div class="n">'+esc(d.business_name)+'</div><div class="s">Tap a party to see details</div></header>'+
    '<div class="wrap">'+
@@ -324,9 +333,61 @@ async function home(){
      '<div class="kpi"><div class="v">'+d.parties_owing+'</div><div class="l">Parties owing</div></div>'+
      '<div class="kpi"><div class="v">'+d.on_promise+'</div><div class="l">On promise</div></div>'+
    '</div>'+
-   '<div class="sect">Who to chase</div>'+chase+
+   '<div class="sect">Who to chase</div>'+
+   '<div class="find">'+
+     '<input id="q" placeholder="Search a party by name" autocomplete="off" value="'+esc(chaseSearch)+'">'+
+     '<select id="srt">'+
+       '<option value="chase">Who to chase</option>'+
+       '<option value="amt_desc">Amount: high to low</option>'+
+       '<option value="amt_asc">Amount: low to high</option>'+
+       '<option value="overdue">Most overdue</option>'+
+       '<option value="name">Name: A to Z</option>'+
+     '</select>'+
+   '</div>'+
+   '<div id="chaselist"></div><div id="chasepager"></div>'+
    '</div>';
+  const q=document.getElementById('q'), srt=document.getElementById('srt');
+  srt.value=chaseSort;
+  q.oninput=()=>{chaseSearch=q.value;chasePage=0;renderChase();};
+  srt.onchange=()=>{chaseSort=srt.value;chasePage=0;renderChase();};
+  renderChase();
 }
+function renderChase(){
+  const list=document.getElementById('chaselist'), pager=document.getElementById('chasepager');
+  if(!list)return;
+  const term=chaseSearch.trim().toLowerCase();
+  // Default view = who to chase (active parties). Searching reaches EVERY owing
+  // party, including those paused on a promise, so any name can be opened.
+  let rows=term?CHASE.filter(p=>(p.name||'').toLowerCase().includes(term))
+               :CHASE.filter(p=>!p.paused);
+  const cmp={
+    amt_desc:(a,b)=>b.amt-a.amt,
+    amt_asc:(a,b)=>a.amt-b.amt,
+    overdue:(a,b)=>(b.overdue_days-a.overdue_days)||(b.amt-a.amt),
+    name:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    chase:(a,b)=>((a.paused?1:0)-(b.paused?1:0))||(b.overdue_days-a.overdue_days)||(b.amt-a.amt),
+  }[chaseSort];
+  if(cmp)rows.sort(cmp);
+  const total=rows.length, pages=Math.max(1,Math.ceil(total/PER));
+  if(chasePage>=pages)chasePage=pages-1;
+  if(chasePage<0)chasePage=0;
+  const start=chasePage*PER, page=rows.slice(start,start+PER);
+  if(!total){
+    list.innerHTML='<div class="empty">'+(term?'No party matches that name.':'Nobody to chase right now. All caught up.')+'</div>';
+    pager.innerHTML='';return;
+  }
+  list.innerHTML=page.map(p=>rowHtml(p)).join('');
+  if(pages>1){
+    pager.innerHTML='<div class="pager">'+
+      '<button onclick="pageStep(-1)"'+(chasePage<=0?' disabled':'')+'>&#8592; Prev</button>'+
+      '<span class="pinfo">'+(start+1)+'-'+(start+page.length)+' of '+total+'</span>'+
+      '<button onclick="pageStep(1)"'+(chasePage>=pages-1?' disabled':'')+'>Next &#8594;</button>'+
+      '</div>';
+  }else{
+    pager.innerHTML='<div class="pinfo" style="text-align:center;margin-top:10px">'+total+(term?' match'+(total>1?'es':''):' part'+(total>1?'ies':'y'))+'</div>';
+  }
+}
+function pageStep(n){chasePage+=n;renderChase();window.scrollTo(0,0);}
 function rowHtml(p){
   const od=p.overdue_days>0?('<span>'+p.overdue_days+' days overdue</span>'):(p.paused?'<span class="paused">Paused &middot; promised</span>':'<span>not overdue</span>');
   return '<div class="row" onclick="party('+JSON.stringify(p.id).replace(/"/g,'&quot;')+')">'+

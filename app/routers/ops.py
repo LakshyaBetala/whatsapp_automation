@@ -156,6 +156,7 @@ def build_ops_data(db) -> dict:
         "server_version": settings.app_version,
         "latest_version": latest_ver,
         "public_url": settings.public_base_url,
+        "free_pilot_until": (settings.free_pilot_until or "") if subs.free_pilot_active() else "",
         "totals": tot,
         "businesses": rows,
     }
@@ -345,6 +346,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <div class="meta"><button class="add" onclick="openAdd()">+ Add business</button>
     &nbsp;&nbsp;<span id="clock"></span> &middot; server v<span id="sv"></span></div>
 </div>
+<div id="pilotbar" style="display:none;background:#123524;color:#8fe0af;border:1px solid #1e5a3a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.9rem"></div>
 
 <div class="modal" id="addModal">
  <div class="card" id="addCard">
@@ -467,6 +469,10 @@ async function load(){
     const d = await r.json();
     PUBLIC_URL = d.public_url || '';
     document.getElementById('sv').textContent = d.server_version;
+    const pilot = document.getElementById('pilotbar');
+    if(d.free_pilot_until){ pilot.style.display='block';
+      pilot.textContent='Free pilot is ON - every business is Pro and active until '+d.free_pilot_until+' (no suspension, no limits, no renewal nagging). Change it with FREE_PILOT_UNTIL in the server config.'; }
+    else { pilot.style.display='none'; }
     const t = d.totals;
     const K=[['businesses','Businesses',''],['online','Online','good'],
       ['active','Active','good'],['grace','Grace','warn'],['suspended','Suspended','bad'],
@@ -496,7 +502,8 @@ function rowHtml(b){
     '<td class="'+verCls+'">'+esc(b.version)+verExtra+'</td>'+
     '<td class="num">'+inr(b.messages_used)+' / '+inr(b.messages_limit)+'</td>'+
     '<td class="num">'+(b.failed_today||0)+'</td>'+
-    '<td><button class="btn" onclick="renew(\''+b.id+'\',1)">+1 mo</button></td>'+
+    '<td><button class="btn" onclick="renew(\''+b.id+'\',1)">+1 mo</button>'+
+      '<button class="btn" onclick="renewUntil(\''+b.id+'\')" title="Free/paid until an exact date">Till date</button></td>'+
     '<td><button class="btn sus" onclick="suspend(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Suspend</button></td>'+
     '<td><button class="btn" onclick="pairCode(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Get code</button></td>'+
   '</tr>';
@@ -509,6 +516,14 @@ async function post(url,body){
 async function renew(id,months){
   const x=await post('/license/renew',{admin_key:KEY,business_id:id,months:months});
   flash(x.ok?('Renewed until '+x.j.renewed_until):(x.j.detail||'Renew failed')); load();
+}
+async function renewUntil(id){
+  const d=prompt('Give this shop access until which date? (YYYY-MM-DD)','2026-09-15');
+  if(!d)return;
+  const pro=confirm('Also set them to the Pro tier? (OK = Pro, Cancel = keep current plan)');
+  const body={admin_key:KEY,business_id:id,until:d.trim()}; if(pro)body.plan='pro';
+  const x=await post('/license/renew-until',body);
+  flash(x.ok?('Access set until '+x.j.until+(x.j.plan?(' ('+x.j.plan+')'):'')):(x.j.detail||'Failed')); load();
 }
 async function setPlan(id,plan){
   const x=await post('/license/set-plan',{admin_key:KEY,business_id:id,plan:plan});

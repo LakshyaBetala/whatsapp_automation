@@ -271,6 +271,7 @@ async def run() -> None:
             "id, business_name, whatsapp_number, plan, blackout_dates, "
             "reminders_enabled, upi_vpa, reminder_cadence, weekly_off_day, "
             "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
+            "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
             "discount_pct, overdue_repeat_days, overdue_max_repeats, plan_expires_on, "
             "reminder_batches, catchup_date, catchup_action"
         )
@@ -287,7 +288,7 @@ async def run() -> None:
     # holidays (blackout_dates) pause a day (handled per-bill below).
     businesses = {
         b["id"]: b for b in (biz_resp.data or [])
-        if subs.effective_status(b.get("plan_expires_on")) != "suspended"
+        if subs.live_status(b.get("plan_expires_on")) != "suspended"
     }
     if not businesses:
         log.info("Reminder sweep - nothing to do (no active businesses)")

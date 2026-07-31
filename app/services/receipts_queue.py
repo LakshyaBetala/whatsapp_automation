@@ -99,14 +99,17 @@ def list_pending(db, business_id: str) -> list[dict]:
 
 
 def mark(db, pending_id: str, status: str, *, voucher_id: str | None = None,
-         error: str | None = None) -> bool:
+         error: str | None = None, allocation: list | None = None) -> bool:
     """Move a pending receipt to posted / failed / skipped. On 'posted' we keep
-    the Tally voucher id so a wrong entry can be reverted."""
+    the Tally voucher id (and the exact FIFO allocation) so a wrong entry can be
+    reverted and audited."""
     patch: dict = {"status": status}
     if status == "posted":
         patch["posted_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
         if voucher_id:
             patch["tally_voucher_id"] = voucher_id
+        if allocation is not None:
+            patch["allocation"] = allocation
     if error is not None:
         patch["error"] = error[:500]
     try:
@@ -115,3 +118,101 @@ def mark(db, pending_id: str, status: str, *, voucher_id: str | None = None,
     except Exception:
         log.exception("could not mark pending receipt %s -> %s", pending_id, status)
         return False
+
+
+def confirm(db, business_id: str, pending_id: str, *, amount=None,
+            deposit_ledger: str | None = None, receipt_date: str | None = None) -> dict | None:
+    """The owner approved this receipt in the confirm popup (optionally editing
+    the amount / deposit account / date). Move pending -> confirmed so the agent
+    picks it up and posts it to Tally. Scoped by business_id (tenant isolation)."""
+    patch: dict = {"status": "confirmed",
+                   "confirmed_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+    if amount is not None:
+        amt = money(amount)
+        if amt <= 0:
+            raise ValueError("amount must be positive")
+        patch["amount"] = float(amt)
+    if deposit_ledger:
+        patch["deposit_ledger"] = deposit_ledger
+    if receipt_date:
+        patch["receipt_date"] = str(receipt_date)[:10]
+    try:
+        r = (db.table("pending_receipts").update(patch)
+             .eq("id", pending_id).eq("business_id", business_id)
+             .eq("status", "pending").execute())
+        return (r.data or [None])[0]
+    except Exception:
+        log.exception("could not confirm pending receipt %s", pending_id)
+        return None
+
+
+def list_for_owner(db, business_id: str) -> list[dict]:
+    """Every receipt the owner should see in the Payments tab: awaiting confirm,
+    in-flight, or recently failed - so nothing silently disappears. Newest first,
+    posted/skipped older than a short window are dropped by the caller if wanted."""
+    try:
+        r = (db.table("pending_receipts").select("*")
+             .eq("business_id", business_id)
+             .in_("status", ["pending", "confirmed", "failed"])
+             .order("created_at", desc=True).execute())
+        return r.data or []
+    except Exception:
+        log.debug("list_for_owner failed (business %s)", business_id, exc_info=True)
+        return []
+
+
+def list_confirmed(db, business_id: str) -> list[dict]:
+    """Owner-approved receipts the agent must post to Tally, oldest first."""
+    try:
+        r = (db.table("pending_receipts").select("*")
+             .eq("business_id", business_id).eq("status", "confirmed")
+             .order("confirmed_at").execute())
+        return r.data or []
+    except Exception:
+        log.debug("list_confirmed failed (business %s)", business_id, exc_info=True)
+        return []
+
+
+def get_by_id(db, business_id: str, pending_id: str) -> dict | None:
+    try:
+        r = (db.table("pending_receipts").select("*")
+             .eq("id", pending_id).eq("business_id", business_id)
+             .limit(1).execute())
+        return (r.data or [None])[0]
+    except Exception:
+        return None
+
+
+def set_deposit_ledgers(db, business_id: str, ledgers: list[str]) -> bool:
+    """Cache the shop's Cash/Bank ledger names (from the agent) for the popup."""
+    clean = [str(x).strip() for x in (ledgers or []) if str(x).strip()][:40]
+    try:
+        db.table("businesses").update({
+            "tally_deposit_ledgers": clean,
+            "tally_deposit_ledgers_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        }).eq("id", business_id).execute()
+        return True
+    except Exception:
+        log.exception("could not store deposit ledgers (business %s)", business_id)
+        return False
+
+
+def get_deposit_ledgers(db, business_id: str) -> list[str]:
+    """The shop's cached deposit accounts; always includes 'Cash' as a fallback."""
+    out: list[str] = []
+    try:
+        r = (db.table("businesses").select("tally_deposit_ledgers")
+             .eq("id", business_id).limit(1).execute())
+        raw = (r.data or [{}])[0].get("tally_deposit_ledgers") or []
+        if isinstance(raw, str):
+            import json
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = []
+        out = [str(x).strip() for x in raw if str(x).strip()]
+    except Exception:
+        out = []
+    if not any(x.strip().lower() == "cash" for x in out):
+        out = ["Cash"] + out
+    return out

@@ -124,11 +124,17 @@ def test_summary_totals_and_excludes_the_excluded_party():
     assert names == ["Ramesh", "Suresh"]             # most overdue/biggest first
 
 
-def test_a_promised_party_is_counted_but_not_in_the_chase_list(monkeypatch):
+def test_a_promised_party_is_counted_and_flagged_paused_but_sorted_last(monkeypatch):
+    # The list now carries EVERY owing party (so the phone can search/open any of
+    # them), but a paused/on-promise party is flagged and sorted after the active
+    # ones - the default "who to chase" view hides paused parties client-side.
     monkeypatch.setattr(promises, "held_now", lambda db, bids: {"biz1": {"c1"}})
     d = mobile._build_summary(_db(_clients(), _bills()), BIZ)
     assert d["on_promise"] == 1
-    assert [p["name"] for p in d["chase"]] == ["Suresh"]   # c1 paused -> off the chase list
+    by_name = {p["name"]: p for p in d["chase"]}
+    assert by_name["Ramesh"]["paused"] is True and by_name["Suresh"]["paused"] is False
+    # active party first, paused party last
+    assert [p["name"] for p in d["chase"]] == ["Suresh", "Ramesh"]
 
 
 # ── party detail ────────────────────────────────────────────────────────────

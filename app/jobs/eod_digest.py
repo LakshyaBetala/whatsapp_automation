@@ -272,7 +272,7 @@ async def run() -> None:
     biz_resp = (
         db.table("businesses")
         .select("id, business_name, whatsapp_number, plan, eod_enabled, "
-                "plan_expires_on, digest_hour")
+                "plan_expires_on, digest_hour, owner_language")
         .eq("eod_enabled", True)
         .execute()
     )

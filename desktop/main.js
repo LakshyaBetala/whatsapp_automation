@@ -57,6 +57,7 @@ function pageUrls(backend, token) {
   return {
     dashboardUrl: `${backend}/admin${q}`,
     remindersUrl: `${backend}/admin/reminders${q}`,
+    paymentsUrl: `${backend}/admin/payments${q}`,
     analyticsUrl: `${backend}/admin/analytics${q}`,
     accountsUrl: `${backend}/admin/accounts${q}`,
   };
@@ -170,11 +171,12 @@ function loadConfig() {
     // config missing/invalid - dashboard tab will show a helpful message
   }
   const base = token ? pageUrls(backend, token) : {
-    dashboardUrl: '', remindersUrl: '', analyticsUrl: '', accountsUrl: '',
+    dashboardUrl: '', remindersUrl: '', paymentsUrl: '', analyticsUrl: '', accountsUrl: '',
   };
   return {
     token,
     backendUrl: backend,
+    appVersion: app.getVersion(),
     companies: companies.map((co) => ({ name: co.name, ...pageUrls(backend, co.token) })),
     ...base,
     waShopUrl: 'http://localhost:3001/qr',

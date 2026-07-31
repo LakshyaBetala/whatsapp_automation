@@ -122,6 +122,66 @@ async def pending_refresh(business_id: uuid.UUID, agent_token: str):
     return {"requested": req}
 
 
+# ── Payment-entry pipeline (PAID -> queue -> confirm -> Tally) ────────────────
+class DepositLedgersPayload(BaseModel):
+    business_id: uuid.UUID
+    agent_token: str
+    ledgers: List[str] = []
+
+
+@router.post("/deposit-ledgers")
+async def push_deposit_ledgers(payload: DepositLedgersPayload):
+    """The agent reports the shop's Cash/Bank ledger names (read from Tally) so
+    the confirm popup can offer the owner their own deposit accounts."""
+    db = _verify_token(payload.business_id, payload.agent_token)
+    from app.services import receipts_queue as rq
+    rq.set_deposit_ledgers(db, str(payload.business_id), payload.ledgers)
+    return {"stored": len(payload.ledgers or [])}
+
+
+@router.get("/receipts/confirmed")
+async def receipts_confirmed(business_id: uuid.UUID, agent_token: str):
+    """Owner-approved receipts the agent must write into Tally, oldest first.
+    The agent does the exact FIFO bill allocation against Tally's own open bills
+    at post time, so the backend only needs to hand over party + amount + deposit."""
+    db = _verify_token(business_id, agent_token)
+    from app.services import receipts_queue as rq
+    rows = rq.list_confirmed(db, str(business_id))
+    return {"receipts": [{
+        "id": r["id"],
+        "party_ledger": r["party_ledger"],
+        "party_display": r.get("party_display"),
+        "amount": float(r["amount"]),
+        "deposit_ledger": r.get("deposit_ledger") or "Cash",
+        "receipt_date": str(r.get("receipt_date") or "")[:10],
+    } for r in rows]}
+
+
+class ReceiptReportPayload(BaseModel):
+    business_id: uuid.UUID
+    agent_token: str
+    id: str
+    ok: bool
+    voucher_id: Optional[str] = None
+    error: Optional[str] = None
+    allocation: Optional[list] = None
+
+
+@router.post("/receipts/report")
+async def receipts_report(payload: ReceiptReportPayload):
+    """The agent reports the outcome of writing a confirmed receipt into Tally.
+    Success -> 'posted' (keeps the voucher id + allocation for revert/audit);
+    failure -> 'failed' (with the error surfaced to the owner in the app)."""
+    db = _verify_token(payload.business_id, payload.agent_token)
+    from app.services import receipts_queue as rq
+    if payload.ok:
+        rq.mark(db, payload.id, "posted", voucher_id=payload.voucher_id,
+                allocation=payload.allocation)
+    else:
+        rq.mark(db, payload.id, "failed", error=payload.error or "Tally rejected the entry")
+    return {"recorded": True}
+
+
 class RegisterCompanyPayload(BaseModel):
     account_token: str      # agent_token of the customer's PRIMARY company
     company_name: str       # the Tally company to add

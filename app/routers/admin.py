@@ -31,8 +31,9 @@ def _biz_by_token(token: str) -> dict:
     db = require_db()
     resp = (db.table("businesses")
             .select("id, business_name, weekly_off_day, blackout_dates, "
-                    "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
+                    "reminder_style, reminder_custom_line, reminder_hour, msg_language, owner_language, "
                     "discount_pct, plan, upi_vpa, upi_vpa_2, upi_vpa_3, whatsapp_number, reminder_cadence, "
+                    "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
                     "overdue_repeat_days, overdue_max_repeats, reminder_batches, plan_expires_on, "
                     "catchup_date, catchup_action")
             .eq("agent_token", token).limit(1).execute())
@@ -429,6 +430,7 @@ _NAV_CSS = """
 _NAV_PAGES = [
     ("dashboard", "Dashboard", "/admin"),
     ("reminders", "Reminders", "/admin/reminders"),
+    ("payments", "Payments", "/admin/payments"),
     ("analytics", "Analytics", "/admin/analytics"),
     ("accounts", "Accounts", "/admin/accounts"),
 ]
@@ -1111,9 +1113,14 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("english"))
     upi_vpa = biz.get("upi_vpa") or ""
     upi_vpa_2 = biz.get("upi_vpa_2") or ""
     upi_vpa_3 = biz.get("upi_vpa_3") or ""
+    _bank_no = (biz.get("bank_account_no") or "").strip()
+    bank_set_js = "true" if _bank_no else "false"
+    _bank_nm = (biz.get("bank_name") or "").strip()
+    bank_label = ("Bank: " + _bank_nm) if _bank_nm else ("Bank transfer (A/c " + _bank_no[-4:] + ")" if _bank_no else "Bank transfer")
 
-    from app.services.batches import get_batches
+    from app.services.batches import get_batches, BANK_SENTINEL
     batches_json = json.dumps(get_batches(biz))
+    bank_sentinel_js = json.dumps(BANK_SENTINEL)
     # Batch editor JS kept as a plain string (single braces) and interpolated, so
     # it needs no f-string brace-doubling.
     batch_js = r"""
@@ -1122,15 +1129,17 @@ function besc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,
 function bopts(list,val){return list.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('');}
 function hourOpts(val){var v=(val==null?11:Number(val));var s='';for(var h=0;h<24;h++){var hh=(h<10?'0':'')+h;s+='<option value="'+h+'"'+(h===v?' selected':'')+'>'+hh+':00</option>';}return s;}
 function upiOpts(val) {
-  var opts = [['', 'Shop Default']];
+  var opts = [['', 'Shop Default (UPI)']];
   if (typeof UPI_1 !== 'undefined' && UPI_1) opts.push([UPI_1, 'UPI 1: ' + UPI_1]);
   if (typeof UPI_2 !== 'undefined' && UPI_2) opts.push([UPI_2, 'UPI 2: ' + UPI_2]);
   if (typeof UPI_3 !== 'undefined' && UPI_3) opts.push([UPI_3, 'UPI 3: ' + UPI_3]);
+  if (typeof BANK_SET !== 'undefined' && BANK_SET) opts.push([BANK_VAL, BANK_LABEL]);
   if (val && !opts.some(function(o){ return o[0] === val; })) {
-    opts.push([val, 'Custom: ' + val]);
+    // A saved bank/custom value whose account is not (yet) configured.
+    opts.push([val, val === BANK_VAL ? 'Bank transfer' : ('Custom: ' + val)]);
   }
   return opts.map(function(o){
-    return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';
+    return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+besc(o[1])+'</option>';
   }).join('');
 }
 function renderBatches(){
@@ -1139,7 +1148,7 @@ function renderBatches(){
     +'<div class="hcol-num">#</div>'
     +'<div class="hcol-name">Batch Name</div>'
     +'<div class="hcol-lang">Language</div>'
-    +'<div class="hcol-upi">UPI Account</div>'
+    +'<div class="hcol-upi">Payment Account</div>'
     +'<div class="hcol-time">Send Time</div>'
     +'<div class="hcol-disc">Discount</div>'
     +'<div class="hcol-acts"></div>'
@@ -1149,7 +1158,7 @@ function renderBatches(){
     return '<div class="brow"><span class="bnum">'+(i+1)+'</span>'
       +'<input class="bname" value="'+besc(b.name)+'" placeholder="Name">'
       +'<select class="blang" title="Language">'+bopts(LANGS,b.lang)+'</select>'
-      +'<select class="bupi" title="UPI Account">'+upiOpts(b.upi||'')+'</select>'
+      +'<select class="bupi" title="Payment Account">'+upiOpts(b.upi||'')+'</select>'
       +'<select class="btime" title="Send time">'+hourOpts(b.hour)+'</select>'
       +'<div class="bdisc-wrap"><input class="bdisc" type="number" min="0" max="50" step="0.5" value="'+(b.disc||0)+'" title="Optional early-pay discount %"><span class="pct">%</span></div>'
       +'<div class="bacts">'
@@ -1337,6 +1346,9 @@ Ek party = EK message: saare bills jodkar, total + QR ke saath.</details>
  const UPI_1 = {upi_vpa!r};
  const UPI_2 = {upi_vpa_2!r};
  const UPI_3 = {upi_vpa_3!r};
+ const BANK_SET = {bank_set_js};
+ const BANK_LABEL = {bank_label!r};
+ const BANK_VAL = {bank_sentinel_js};
  let FEST = {festivals_json};
  let BATCHES = {batches_json};
  let calY, calM;
@@ -1875,9 +1887,12 @@ async def admin_preview(
         style_v = "standard"
 
     # Sample figures for a realistic preview.
+    from app.services.batches import BANK_SENTINEL, bank_details
     sample_amt = Decimal("12500")
     biz_name = biz.get("business_name", "")
-    vpa = (upi or "").strip() or biz.get("upi_vpa") or "shopupi@bank"
+    sel = (upi or "").strip()
+    bank_primary = sel == BANK_SENTINEL
+    vpa = ("" if bank_primary else sel) or biz.get("upi_vpa") or "shopupi@bank"
     pay_amount, discount_line = apply_discount(sample_amt, discount_pct, lang)
 
     template_key = "reminder"
@@ -1894,6 +1909,20 @@ async def admin_preview(
         invoice_number="2526RTC0203", outstanding=inr(sample_amt),
         days_overdue="5", upi_link=pay_link,
     )
+    # Bank/NEFT block - ONLY when this batch's account is set to Bank transfer.
+    bank = bank_details(biz)
+    if bank and bank_primary:
+        en = lang == "english"
+        blk = [("For bank transfer (NEFT/IMPS/RTGS):"
+                if en else "Bank transfer (NEFT/IMPS) ke liye:")]
+        if bank["name"]:
+            blk.append((f"Name: {bank['name']}" if en else f"Naam: {bank['name']}"))
+        blk.append(f"A/c No: {bank['no']}")
+        if bank["ifsc"]:
+            blk.append(f"IFSC: {bank['ifsc']}")
+        if bank["bank"]:
+            blk.append(f"Bank: {bank['bank']}")
+        body = "\n".join(blk) + f"\n\n{body}"
     if discount_line:
         body = f"{body}\n\n{discount_line}"
     cl = (custom_line or "").strip()[:120]
@@ -1922,6 +1951,12 @@ async def admin_send_now(payload: SendNowPayload):
         "plan": biz.get("plan", "starter"),
         "whatsapp_number": biz.get("whatsapp_number"),
         "upi_vpa": biz.get("upi_vpa"),
+        "upi_vpa_2": biz.get("upi_vpa_2"),
+        "upi_vpa_3": biz.get("upi_vpa_3"),
+        "bank_account_name": biz.get("bank_account_name"),
+        "bank_account_no": biz.get("bank_account_no"),
+        "bank_ifsc": biz.get("bank_ifsc"),
+        "bank_name": biz.get("bank_name"),
         "discount_pct": biz.get("discount_pct"),
         "msg_language": biz.get("msg_language"),
         "reminder_style": biz.get("reminder_style"),
@@ -3040,6 +3075,383 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("english"))
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}</style><div class="wrap">{_topnav(token, lang, "analytics")}{body}</div>',
         _is_en(lang)))
+
+
+def _promise_head(pr: dict, name: str, en: bool) -> str:
+    """One human line describing what the customer said, for the Payments tab."""
+    kind = pr.get("kind")
+    amt = f" {_inr(pr['amount'])}" if pr.get("amount") else ""
+    if kind == "paid_claim":
+        return (f"{name} says they have already paid{amt}"
+                if en else f"{name} ne kaha already pay kar diya{amt}")
+    if kind == "promise" and pr.get("promise_date"):
+        return (f"{name} promised to pay by {str(pr['promise_date'])[:10]}{amt}"
+                if en else f"{name} ne {str(pr['promise_date'])[:10]} tak dene ka kaha{amt}")
+    return (f"{name} - payment update{amt}" if en else f"{name} - payment update{amt}")
+
+
+@router.get("/admin/payments", response_class=HTMLResponse)
+async def admin_payments(token: str = Query(...), lang: str = Query("english")):
+    """The Payments tab: AI-read promise/claim ledger (B6) on the left, and the
+    receipt queue awaiting confirm-and-post-to-Tally (C7) on the right."""
+    biz = _biz_by_token(token)
+    en = _is_en(lang)
+    title = biz.get("business_name") or "ASVA"
+    body = f"""<h1>Payments</h1><div class="muted">{title}</div>
+<div class="hint" style="margin:6px 0 2px">When a customer says they paid, it appears here. Check the amount and the deposit account, then post it into Tally with one tap. ASVA never posts on its own.</div>
+<div id="pmflash" class="flash"></div>
+<div id="pmwrap"><div class="card" style="margin-top:18px">Loading...</div></div>
+
+<div id="cf" class="cfback" style="display:none">
+  <div class="cfbox">
+    <h3 id="cftitle">Enter payment</h3>
+    <div class="cfparty" id="cfparty"></div>
+    <label>Amount received</label>
+    <input id="cfamt" type="number" min="1" step="0.01" inputmode="decimal">
+    <label>Deposit into (Tally account)</label>
+    <select id="cfdep"></select>
+    <label>Date of entry</label>
+    <input id="cfdate" type="date">
+    <div class="hint" id="cfalloc" style="margin-top:10px"></div>
+    <div style="margin-top:18px;display:flex;gap:10px">
+      <button onclick="postReceipt()" id="cfpost">Post to Tally</button>
+      <button class="ghost" onclick="closeCf()">Cancel</button>
+    </div>
+    <div id="cfmsg" class="okmsg" style="display:block;margin:10px 0 0"></div>
+  </div>
+</div>
+<script>
+const TOKEN = {token!r};
+const EN = {str(en).lower()};
+let DATA = {{promises:[], pending:[], deposit_ledgers:[]}};
+let CF = null;   // the receipt being confirmed
+function esc(s){{return String(s==null?'':s).replace(/[&<>]/g,m=>({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[m]));}}
+function inr(n){{try{{return Number(n).toLocaleString('en-IN');}}catch(e){{return n;}}}}
+let PREV_INFLIGHT = null;   // ids that were pending/confirmed last load
+function flash(msg){{
+  const f=document.getElementById('pmflash'); if(!f)return;
+  f.textContent=msg; f.classList.add('on');
+  setTimeout(()=>{{f.classList.remove('on');}}, 4000);
+}}
+async function load(){{
+  let prev = PREV_INFLIGHT;
+  try{{
+    const r = await fetch('/admin/payments/data?token='+encodeURIComponent(TOKEN));
+    if(!r.ok) throw new Error('http '+r.status);
+    DATA = await r.json();
+  }}catch(e){{
+    document.getElementById('pmwrap').innerHTML='<div class="card" style="margin-top:18px">Could not load. <a href="#" onclick="load();return false">Retry</a></div>';
+    return;
+  }}
+  // A receipt that was in-flight last time and is gone now (not failed) reached
+  // Tally: give the owner a clear, positive confirmation.
+  const now = new Set((DATA.pending||[]).map(q=>q.id));
+  const failedNow = new Set((DATA.pending||[]).filter(q=>q.status==='failed').map(q=>q.id));
+  if(prev){{
+    let posted=0;
+    prev.forEach(id=>{{ if(!now.has(id) && !failedNow.has(id)) posted++; }});
+    if(posted>0) flash('\\u2713 '+posted+' payment'+(posted>1?'s':'')+' posted to Tally.');
+  }}
+  PREV_INFLIGHT = new Set((DATA.pending||[]).filter(q=>q.status==='pending'||q.status==='confirmed').map(q=>q.id));
+  render();
+}}
+function statusChip(s){{
+  if(s==='confirmed') return '<span class="chip wait">Posting to Tally...</span>';
+  if(s==='failed')    return '<span class="chip bad">Failed</span>';
+  return '';
+}}
+function render(){{
+  const P = DATA.promises||[], Q = DATA.pending||[];
+  let ph = P.length ? P.map(p=>(
+    '<div class="prow"><div class="pmain"><b>'+esc(p.head)+'</b>'+
+      (p.said?'<div class="said">&ldquo;'+esc(p.said)+'&rdquo;</div>':'')+
+      '<div class="meta">'+esc(p.outstanding_line||'')+'</div></div>'+
+    '<div class="pacts">'+
+      '<button class="mini" onclick=\\'enter('+JSON.stringify(p.client_id)+')\\'>Enter payment</button>'+
+      '<button class="mini ghost" onclick=\\'chase('+JSON.stringify(p.client_id)+')\\'>Chase</button>'+
+    '</div></div>'
+  )).join('') : '<div class="empty">No open promises. When a customer says they paid or gives a date, it shows here.</div>';
+
+  let qh = Q.length ? Q.map(q=>(
+    '<div class="prow"><div class="pmain"><b>'+esc(q.party_display||q.party_ledger)+'</b> '+statusChip(q.status)+
+      '<div class="meta">&#8377;'+inr(q.amount)+' &middot; into '+esc(q.deposit_ledger||'Cash')+'</div>'+
+      (q.error?'<div class="said" style="color:#9f2f2d">'+esc(q.error)+'</div>':'')+
+    '</div><div class="pacts">'+
+      (q.status==='pending'||q.status==='failed'
+        ? '<button class="mini" onclick=\\'enterPending('+JSON.stringify(q.id)+')\\'>Review &amp; post</button>'+
+          '<button class="mini ghost" onclick=\\'cancelPending('+JSON.stringify(q.id)+')\\'>Remove</button>'
+        : '')+
+    '</div></div>'
+  )).join('') : '<div class="empty">Nothing waiting to post. Reply PAID &lt;name&gt; on WhatsApp, or press Enter payment on a promise.</div>';
+
+  const posting = Q.filter(q=>q.status==='confirmed').length;
+  const cP = P.length?(' <span class="cnt">'+P.length+'</span>'):'';
+  const cQ = Q.length?(' <span class="cnt">'+Q.length+'</span>'):'';
+  const postingNote = posting?('<div class="postnote">&#8635; Posting '+posting+' receipt'+(posting>1?'s':'')+' to Tally...</div>'):'';
+  document.getElementById('pmwrap').innerHTML =
+    '<div class="cols">'+
+      '<div class="colp"><h2>Customers who say they paid'+cP+'</h2><div class="card pad0">'+ph+'</div></div>'+
+      '<div class="colp"><h2>Ready to post to Tally'+cQ+'</h2>'+postingNote+'<div class="card pad0">'+qh+'</div></div>'+
+    '</div>';
+}}
+function depOpts(sel){{
+  const L = DATA.deposit_ledgers||['Cash'];
+  return L.map(x=>'<option value="'+esc(x)+'"'+(x===sel?' selected':'')+'>'+esc(x)+'</option>').join('');
+}}
+function today(){{ return new Date().toISOString().slice(0,10); }}
+function openCf(title, party, amount, dep, dateStr, alloc){{
+  document.getElementById('cftitle').textContent = title;
+  document.getElementById('cfparty').textContent = party ? ((EN?'Party: ':'Party: ')+party) : '';
+  document.getElementById('cfamt').value = amount||'';
+  document.getElementById('cfdep').innerHTML = depOpts(dep||'Cash');
+  document.getElementById('cfdate').value = dateStr || today();
+  document.getElementById('cfalloc').textContent = alloc||'';
+  document.getElementById('cfmsg').textContent = '';
+  document.getElementById('cf').style.display='flex';
+}}
+function closeCf(){{document.getElementById('cf').style.display='none';CF=null;}}
+function enter(clientId){{
+  const p=(DATA.promises||[]).find(x=>x.client_id===clientId); if(!p)return;
+  CF = {{mode:'promise', client_id:clientId, name:p.name}};
+  openCf((EN?'Enter payment':'Payment'), p.name, p.outstanding||'', 'Cash', today(),
+    (p.outstanding>0?((EN?'Full outstanding: ':'Poora baaki: ')+'\\u20b9'+inr(p.outstanding)):''));
+}}
+function enterPending(id){{
+  const q=(DATA.pending||[]).find(x=>x.id===id); if(!q)return;
+  CF = {{mode:'pending', id:id, name:q.party_display}};
+  openCf((EN?'Review payment':'Payment'), q.party_display||q.party_ledger, q.amount,
+    q.deposit_ledger||'Cash', q.receipt_date||today(), '');
+}}
+async function postReceipt(){{
+  if(!CF)return;
+  const amt = parseFloat(document.getElementById('cfamt').value);
+  const dep = document.getElementById('cfdep').value;
+  const dt = document.getElementById('cfdate').value || today();
+  if(!(amt>0)){{document.getElementById('cfmsg').textContent='Enter a valid amount.';return;}}
+  document.getElementById('cfpost').disabled=true;
+  document.getElementById('cfmsg').textContent='Sending to Tally...';
+  let ok=false;
+  try{{
+    if(CF.mode==='promise'){{
+      const r=await fetch('/admin/promises/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+        body:JSON.stringify({{token:TOKEN,client_id:CF.client_id,action:'enqueue',amount:amt,deposit_ledger:dep,receipt_date:dt}})}});
+      ok=r.ok;
+    }}else{{
+      const r=await fetch('/admin/pending/confirm',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+        body:JSON.stringify({{token:TOKEN,id:CF.id,amount:amt,deposit_ledger:dep,receipt_date:dt}})}});
+      ok=r.ok;
+    }}
+  }}catch(e){{ok=false;}}
+  document.getElementById('cfpost').disabled=false;
+  if(ok){{closeCf();load();}}
+  else document.getElementById('cfmsg').textContent='Could not send. Try again.';
+}}
+async function chase(clientId){{
+  await fetch('/admin/promises/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,client_id:clientId,action:'chase'}})}});
+  load();
+}}
+async function cancelPending(id){{
+  await fetch('/admin/pending/cancel',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,id:id}})}});
+  load();
+}}
+load();
+setInterval(load, 15000);   // reflect posted/failed status as the agent works
+</script>"""
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<title>{title} - Payments</title>{_FAVICON}'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}{_PAYMENTS_CSS}</style>'
+        f'<div class="wrap">{_topnav(token, lang, "payments")}{body}</div>',
+        en))
+
+
+_PAYMENTS_CSS = """
+ .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:14px}
+ .colp{min-width:0}
+ .card.pad0{padding:0}
+ .prow{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid #EAEAEA}
+ .prow:last-child{border-bottom:0}
+ .pmain{flex:1;min-width:180px}
+ .cnt{display:inline-block;background:#EDF3EC;color:#346538;font-size:.72rem;font-weight:700;border-radius:9999px;padding:1px 9px;vertical-align:middle;margin-left:4px}
+ .postnote{color:#1F6C9F;font-size:.85rem;margin:2px 0 8px}
+ .flash{max-height:0;overflow:hidden;opacity:0;transition:all .25s ease;background:#EDF3EC;color:#346538;border-radius:10px;font-weight:600;padding:0 14px}
+ .flash.on{max-height:60px;opacity:1;padding:11px 14px;margin-top:12px}
+ .pmain b{font-weight:600}
+ .said{color:#5a6b60;font-size:.86rem;margin-top:4px;line-height:1.45}
+ .meta{color:#787774;font-size:.82rem;margin-top:4px;font-variant-numeric:tabular-nums}
+ .pacts{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+ .mini{padding:7px 12px;font-size:.82rem;border-radius:7px}
+ button.ghost{background:#fff;color:#2F3437;border:1px solid #EAEAEA}
+ button.ghost:hover{background:#f4f4f1}
+ .empty{color:#787774;padding:24px 16px;text-align:center;line-height:1.5}
+ .chip{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:9999px;letter-spacing:.03em;vertical-align:middle}
+ .chip.wait{background:#E1F3FE;color:#1F6C9F}
+ .chip.bad{background:#FDEBEC;color:#9F2F2D}
+ .cfback{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;align-items:center;justify-content:center}
+ .cfbox{background:#fff;border-radius:14px;padding:22px 24px;max-width:420px;width:92%;max-height:90vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+ .cfbox h3{margin:0 0 6px;font-size:1.1rem}
+ .cfbox select,.cfbox input[type=date]{font:inherit;padding:10px 12px;border:1px solid #EAEAEA;border-radius:8px;background:#fff;width:100%;box-sizing:border-box}
+ .cfparty{background:#F7F6F3;border:1px solid #EAEAEA;border-radius:8px;padding:8px 12px;font-weight:600;font-size:.92rem;margin-bottom:6px}
+ .cfparty:empty{display:none}
+"""
+
+
+@router.get("/admin/payments/data")
+async def admin_payments_data(token: str = Query(...)):
+    """JSON feed for the Payments tab: open promises (AI-read), the receipt queue,
+    and the shop's deposit accounts."""
+    from app.services import promises as promises_svc, receipts_queue as rq
+    biz = _biz_by_token(token)
+    db = require_db()
+    bid = biz["id"]
+    en = _is_en(biz.get("owner_language") or "english")
+
+    prs = promises_svc.open_for_business(db, bid)
+    # Names + outstanding for each promised party.
+    cids = list({p["client_id"] for p in prs})
+    cname = {}
+    if cids:
+        cr = (db.table("clients").select("id, name").in_("id", cids).execute()).data or []
+        cname = {c["id"]: c.get("name") for c in cr}
+    owed: dict = {}
+    if cids:
+        ob = (db.table("bills").select("client_id, outstanding")
+              .eq("business_id", bid).in_("client_id", cids)
+              .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+        for b in ob:
+            owed[b["client_id"]] = owed.get(b["client_id"], Decimal(0)) + Decimal(str(b.get("outstanding") or 0))
+
+    promises_out = []
+    for p in prs:
+        cid = p["client_id"]
+        nm = names.clean_display(cname.get(cid) or "") or "A customer"
+        out = owed.get(cid, Decimal(0))
+        promises_out.append({
+            "client_id": cid,
+            "name": nm,
+            "head": _promise_head(p, nm, en),
+            "said": p.get("raw_text") or "",
+            "outstanding": float(out),
+            "outstanding_line": (f"Outstanding {_inr(out)}" if en else f"Baaki {_inr(out)}") if out > 0 else "",
+        })
+
+    pending = rq.list_for_owner(db, bid)
+    pending_out = [{
+        "id": r["id"], "party_ledger": r["party_ledger"],
+        "party_display": r.get("party_display"), "amount": float(r["amount"]),
+        "deposit_ledger": r.get("deposit_ledger") or "Cash", "status": r.get("status"),
+        "receipt_date": str(r.get("receipt_date") or "")[:10], "error": r.get("error"),
+    } for r in pending]
+
+    return {
+        "promises": promises_out,
+        "pending": pending_out,
+        "deposit_ledgers": rq.get_deposit_ledgers(db, bid),
+    }
+
+
+class PromiseActionPayload(BaseModel):
+    token: str
+    client_id: str
+    action: str                      # "chase" | "enqueue"
+    amount: Optional[float] = None
+    deposit_ledger: Optional[str] = None
+    receipt_date: Optional[str] = None
+
+
+@router.post("/admin/promises/action")
+async def admin_promise_action(payload: PromiseActionPayload):
+    """Owner acts on an AI-read promise: 'chase' resumes reminders now; 'enqueue'
+    queues a receipt (already confirmed) for the agent to post into Tally."""
+    from app.services import promises as promises_svc, receipts_queue as rq
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    bid = biz["id"]
+    cr = (db.table("clients").select("id, name, tally_ledger_name")
+          .eq("id", payload.client_id).eq("business_id", bid).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    client = cr.data[0]
+
+    if payload.action == "chase":
+        promises_svc.close_for_client(db, bid, client["id"], "cancelled")
+        return {"ok": True, "resumed": True}
+
+    if payload.action == "enqueue":
+        amt = payload.amount
+        if amt is None or float(amt) <= 0:
+            ob = (db.table("bills").select("outstanding")
+                  .eq("business_id", bid).eq("client_id", client["id"])
+                  .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+            amt = float(sum(Decimal(str(b.get("outstanding") or 0)) for b in ob))
+        if not amt or amt <= 0:
+            raise HTTPException(status_code=400, detail="no amount to record")
+        try:
+            row = rq.create_pending(
+                db, bid, client_id=client["id"],
+                party_ledger=client.get("tally_ledger_name") or client["name"],
+                party_display=names.clean_display(client["name"]), amount=amt,
+                deposit_ledger=payload.deposit_ledger or "Cash",
+                receipt_date=payload.receipt_date or None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="amount must be positive")
+        if not row:
+            raise HTTPException(status_code=500, detail="could not queue")
+        # Already reviewed in the popup -> confirm straight away so the agent posts it.
+        rq.confirm(db, bid, row["id"], amount=amt,
+                   deposit_ledger=payload.deposit_ledger or "Cash",
+                   receipt_date=payload.receipt_date or None)
+        promises_svc.close_for_client(db, bid, client["id"], "kept")
+        return {"ok": True, "queued": True}
+
+    raise HTTPException(status_code=400, detail="unknown action")
+
+
+class PendingConfirmPayload(BaseModel):
+    token: str
+    id: str
+    amount: Optional[float] = None
+    deposit_ledger: Optional[str] = None
+    receipt_date: Optional[str] = None
+
+
+@router.post("/admin/pending/confirm")
+async def admin_pending_confirm(payload: PendingConfirmPayload):
+    """Owner approved a queued receipt (optionally editing amount/account/date):
+    move it to 'confirmed' so the agent writes it into Tally."""
+    from app.services import receipts_queue as rq
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    try:
+        row = rq.confirm(db, biz["id"], payload.id, amount=payload.amount,
+                         deposit_ledger=payload.deposit_ledger,
+                         receipt_date=payload.receipt_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="amount must be positive")
+    if not row:
+        raise HTTPException(status_code=404, detail="receipt not found or already handled")
+    return {"ok": True}
+
+
+class PendingCancelPayload(BaseModel):
+    token: str
+    id: str
+
+
+@router.post("/admin/pending/cancel")
+async def admin_pending_cancel(payload: PendingCancelPayload):
+    """Owner removed a queued receipt (won't post it to Tally)."""
+    from app.services import receipts_queue as rq
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    row = rq.get_by_id(db, biz["id"], payload.id)
+    if not row:
+        raise HTTPException(status_code=404, detail="receipt not found")
+    rq.mark(db, payload.id, "skipped")
+    return {"ok": True}
 
 
 @router.get("/admin/accounts", response_class=HTMLResponse)

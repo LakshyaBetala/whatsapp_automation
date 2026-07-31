@@ -109,3 +109,25 @@ def test_band_alias_stops_a_party(monkeypatch):
     out = asyncio.run(bot.handle("919444294894", "BAND Ramesh", channel="bot"))
     assert rec.updates == [{"reminders_enabled": False}]     # BAND -> STOP worked end to end
     assert "Ramesh Traders" in out
+
+
+# ── PAID <name> <amount> parsing (queues a receipt; name may end in digits) ────
+def test_split_paid_amount_pulls_trailing_amount():
+    from decimal import Decimal
+    assert bot._split_paid_amount("Ramesh Electricals 5000") == ("Ramesh Electricals", Decimal("5000"))
+    assert bot._split_paid_amount("ramesh 5,000") == ("ramesh", Decimal("5000"))
+    assert bot._split_paid_amount("ramesh rs 2500") == ("ramesh", Decimal("2500"))
+    assert bot._split_paid_amount("ramesh 1500/-") == ("ramesh", Decimal("1500"))
+
+
+def test_split_paid_amount_no_amount_keeps_full_name():
+    assert bot._split_paid_amount("Ramesh Electricals") == ("Ramesh Electricals", None)
+    # a bare number with no name is not a party -> return the whole string, no amount
+    assert bot._split_paid_amount("5000") == ("5000", None)
+
+
+def test_split_paid_amount_name_ending_in_digits_is_still_split():
+    # the digits are pulled as an amount here; _handle_paid_owner falls back to
+    # the whole string when "Shop" does not resolve (so "Shop 21" still works).
+    from decimal import Decimal
+    assert bot._split_paid_amount("Shop 21") == ("Shop", Decimal("21"))

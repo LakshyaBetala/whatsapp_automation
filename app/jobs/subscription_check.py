@@ -22,6 +22,11 @@ log = logging.getLogger(__name__)
 
 
 async def run() -> None:
+    # Free pilot: everyone is active on Pro, so there is nothing to warn about or
+    # suspend. Skip the whole pass (no renewal nagging during the pilot).
+    if subs.free_pilot_active():
+        log.info("Subscription check skipped - free pilot active")
+        return
     db = require_db()
     biz_resp = (
         db.table("businesses")

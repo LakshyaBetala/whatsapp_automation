@@ -340,6 +340,38 @@ async def renew(payload: RenewPayload):
     return {"ok": True, "renewed_until": new_expiry.isoformat(), "heartbeat": hb}
 
 
+class RenewUntilPayload(BaseModel):
+    admin_key: str
+    business_id: str
+    until: str                        # YYYY-MM-DD - the exact date access lasts to
+    plan: Optional[str] = None        # optional tier (e.g. "pro" for the free pilot)
+
+
+@router.post("/renew-until")
+async def renew_until(payload: RenewUntilPayload):
+    """OPS ONLY: set a business's access to last until an EXACT date (not a
+    +N-month cycle) - e.g. free Pro for a pilot shop until 2026-09-15. Optionally
+    moves the plan tier. Reversible with /suspend or another /renew-until."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    try:
+        until = _dt.date.fromisoformat(payload.until[:10])
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="until must be YYYY-MM-DD")
+    update: dict = {"plan_expires_on": until.isoformat()}
+    if payload.plan:
+        try:
+            update["plan"] = Plan(payload.plan).value
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail="Unknown plan. Use starter/growth/pro/max.")
+    r = db.table("businesses").update(update).eq("id", payload.business_id).execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    log.info("Set %s access until %s (plan %s)", payload.business_id, until, update.get("plan", "unchanged"))
+    return {"ok": True, "until": until.isoformat(), "plan": update.get("plan")}
+
+
 class SetPlanPayload(BaseModel):
     admin_key: str
     business_id: str
