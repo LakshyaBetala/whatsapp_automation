@@ -349,7 +349,11 @@ async function party(id){
   let bills=d.open_bills.map(b=>'<div class="bill"><div>'+esc(b.invoice)+
     (b.overdue_days>0?(' <span class="od">'+b.overdue_days+'d</span>'):'')+
     '</div><div>&#8377;'+esc(b.amount)+'</div></div>').join('')||'<div style="color:#9fb7a6">No open bills.</div>';
-  const tel=(d.whatsapp||'').replace(/[^0-9+]/g,'');
+  // Calling: dial the LOCAL 10-digit number (strip the 91 country code) so the
+  // dialer does not mangle it. WhatsApp messaging keeps the 91 elsewhere.
+  let tel=(d.whatsapp||'').replace(/[^0-9]/g,'');
+  if(tel.length===12 && tel.slice(0,2)==='91') tel=tel.slice(2);
+  else if(tel.length===13 && tel.slice(0,3)==='091') tel=tel.slice(3);
   const call=tel?('<a class="callbtn" href="tel:'+esc(tel)+'">&#128222; Call '+esc(d.name)+'</a>'):'';
   let recent='';
   if(d.recent&&d.recent.length){
