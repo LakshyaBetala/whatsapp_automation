@@ -81,6 +81,39 @@ def test_build_health_counts_and_jobs():
     assert beta["wa_ready"] is False and beta["queued"] == 2
 
 
+def test_sending_today_overrides_stale_wa_down():
+    """A shop that sent messages today is provably connected - a stale
+    wa_ready=False must NOT show as WhatsApp down."""
+    today = _dt.date.today(); now = _now_iso()
+    exp = (today + _dt.timedelta(days=20)).isoformat()
+    db = _DB({
+        "businesses": [{"id": "r", "business_name": "Rishab", "plan": "pro",
+                        "plan_expires_on": exp, "last_seen": now,
+                        "wa_ready": False, "wa_checked_at": now}],
+        "messages": [{"business_id": "r", "delivery_status": "sent", "created_at": now}
+                     for _ in range(32)],
+    })
+    h = monitoring.build_health(db)
+    assert h["totals"].get("wa_down", 0) == 0          # not counted as down
+    row = h["businesses"][0]
+    assert row["wa_ready"] is True and row["sent_today"] == 32
+    # and evaluate() raises no wa_down problem for it
+    assert not any(p["kind"] == "wa_down" for p in monitoring.evaluate(h))
+
+
+def test_never_connected_shop_is_not_an_offline_incident():
+    today = _dt.date.today()
+    exp = (today + _dt.timedelta(days=20)).isoformat()
+    db = _DB({"businesses": [{"id": "n", "business_name": "New", "plan": "pro",
+                              "plan_expires_on": exp, "last_seen": None,
+                              "wa_ready": None, "wa_checked_at": None}]})
+    h = monitoring.build_health(db)
+    row = h["businesses"][0]
+    assert row["never_seen"] is True
+    # no "agent offline 1000000000 min" noise for a shop that never connected
+    assert not any(p["kind"] == "shop_offline" for p in monitoring.evaluate(h))
+
+
 def test_evaluate_flags_problems():
     health = {
         "system": {"bot_wa": {"ok": False}},

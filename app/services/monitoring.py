@@ -142,23 +142,32 @@ def build_health(db) -> dict:
     for b in bizes:
         bid = b["id"]
         status = subs.effective_status(b.get("plan_expires_on"), today_ist)
-        online_min = _mins_since(_parse_ts(b.get("last_seen")), now)
+        last_seen = _parse_ts(b.get("last_seen"))
+        never_seen = last_seen is None
+        online_min = _mins_since(last_seen, now)
         online = online_min <= settings.offline_alert_min
         wa_min = _mins_since(_parse_ts(b.get("wa_checked_at")), now)
+        sent_today = sent_t.get(bid, 0)
         wa_ready = b.get("wa_ready")
+        # A shop that has sent messages today is PROVABLY connected - you cannot
+        # send without WhatsApp. So a stale wa_ready=False flag (e.g. after a brief
+        # reconnect that never re-reported) must not raise a false "WhatsApp down".
+        if sent_today > 0 and wa_ready is False:
+            wa_ready = True
         rows.append({
             "id": bid, "name": b.get("business_name") or "(unnamed)",
             "status": status, "online": online, "last_seen_min": online_min,
+            "never_seen": never_seen,
             "version": b.get("agent_version") or "-",
             "wa_ready": wa_ready, "wa_stale": wa_min > (settings.wa_down_alert_min * 4),
-            "sent_today": sent_t.get(bid, 0), "failed_today": drop_t.get(bid, 0),
+            "sent_today": sent_today, "failed_today": drop_t.get(bid, 0),
             "blocked_today": block_t.get(bid, 0),
             "queued": q_count.get(bid, 0), "queue_oldest_min": q_oldest.get(bid, 0),
         })
         tot["businesses"] += 1
         tot["online"] += 1 if online else 0
         tot[status] += 1
-        tot["sent_today"] += sent_t.get(bid, 0)
+        tot["sent_today"] += sent_today
         tot["failed_today"] += drop_t.get(bid, 0)
         tot["blocked_today"] += block_t.get(bid, 0)
         tot["queued_now"] += q_count.get(bid, 0)
@@ -201,11 +210,18 @@ def evaluate(health: dict) -> list[dict]:
         name = r["name"]
         if r["status"] == "suspended":
             continue                                   # expected, not an incident
+        if r.get("never_seen"):
+            # Onboarded but the laptop has never connected yet - that is a setup
+            # step in progress, not an outage. Don't raise a scary offline alert
+            # (and never the "1000000000 min" nonsense).
+            continue
         if not r["online"]:
+            hrs = r["last_seen_min"] // 60
+            ago = f"{hrs} hours" if hrs >= 1 else f"{r['last_seen_min']} min"
             problems.append({"kind": "shop_offline", "business_id": r["id"], "severity": "warn",
                              "title": f"{name}: agent offline",
-                             "body": f"No contact for {r['last_seen_min']} min. Tally push and "
-                                     f"queued sends are paused until the shop laptop is back on."})
+                             "body": f"No contact for {ago}. Tally push and queued sends are "
+                                     f"paused until the shop laptop is back on."})
         if r.get("wa_ready") is False:
             problems.append({"kind": "wa_down", "business_id": r["id"], "severity": "critical",
                              "title": f"{name}: WhatsApp disconnected",
