@@ -434,7 +434,8 @@ def _nav(active: str) -> str:
 def _footer() -> str:
     return f"""<footer class="ft"><div class="wrap"><div class="cols">
   <div class="brand"><div class="logo"><span class="mark">A</span>ASVA</div>
-    <p>The recovery agent for Indian distributors on TallyPrime. {TAGLINE}</p></div>
+    <p>The recovery agent for Indian distributors on TallyPrime. {TAGLINE}</p>
+    <p style="margin-top:8px;color:var(--faint);font-size:.85rem">An Almmatix product.</p></div>
   <div class="col"><div class="h">Product</div>
     <a href="/how-it-works">How it works</a><a href="/features">Features</a>
     <a href="/use-cases">Use cases</a></div>
@@ -442,7 +443,7 @@ def _footer() -> str:
     <a href="/download">Download for Windows</a><a href="{WA_TRY}">Talk to us on WhatsApp</a>
     <a href="mailto:{CONTACT_EMAIL}">Email us</a></div>
 </div>
-<div class="base"><span>&copy; 2026 {SITE_NAME}. {TAGLINE}</span>
+<div class="base"><span>&copy; 2026 Almmatix. {SITE_NAME} is an Almmatix product.</span>
   <span><a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></span></div>
 </div></footer>"""
 
@@ -462,6 +463,7 @@ def page_shell(*, path: str, title: str, description: str, body: str,
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light"><meta name="theme-color" content="#16a34a">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/favicon.png">
 <title>{title}</title>
@@ -1050,10 +1052,15 @@ def _download() -> str:
     where you run TallyPrime. It reads your Tally and sends bills and payment reminders on WhatsApp from your
     own number. You need Windows 10 or 11, TallyPrime, and the short setup code we give you. Nothing else to install.</p>
   <div class="cta-row">
-    <a class="btn btn-p" href="{DOWNLOAD_FILE}" download>Download ASVA {DOWNLOAD_VERSION}</a>
-    <a class="btn btn-s" href="{WA_TRY}">Talk to us on WhatsApp</a>
+    <a class="btn btn-p" href="{WA_TRY}">Message us for your free code</a>
+    <a class="btn btn-s" href="{DOWNLOAD_FILE}" download>Download ASVA {DOWNLOAD_VERSION}</a>
   </div>
-  <div class="undernote">You are downloading ASVA version {DOWNLOAD_VERSION}. Already have ASVA? Running this installs the update on top of it. No setup code yet? Message us.</div>
+  <div class="panel" style="margin-top:22px;max-width:640px">
+    <b>The app needs a one-time setup code to activate.</b> During the pilot we set up each shop
+    personally, so the code is given on WhatsApp, free. Message us, we send your code and walk you
+    through the 5-minute setup. The download itself is free and safe to install now.
+  </div>
+  <div class="undernote">Already have ASVA? Running the installer updates it on top, your data and WhatsApp stay connected.</div>
  </section>
  <section>
   <div class="sechead"><span class="eyebrow">Setup</span><h2>Three steps, about five minutes</h2></div>
@@ -1297,14 +1304,15 @@ def export_static(dest_dir: str, *, base: str = "https://tryasva.com",
             written.append("og.png")
         # Favicon (square, built from the logo). Ship it so the browser tab shows
         # the ASVA mark instead of a blank default.
-        for cand in ("app/static/favicon.png", "favicon.png"):
-            if os.path.exists(cand):
-                try:
-                    shutil.copyfile(cand, os.path.join(dest_dir, "favicon.png"))
-                    written.append("favicon.png")
-                    break
-                except Exception:
-                    pass
+        for fn in ("favicon.png", "favicon.svg"):
+            for cand in (os.path.join("app/static", fn), fn):
+                if os.path.exists(cand):
+                    try:
+                        shutil.copyfile(cand, os.path.join(dest_dir, fn))
+                        written.append(fn)
+                        break
+                    except Exception:
+                        pass
         return written
     finally:
         _BASE_OVERRIDE = None
@@ -1418,6 +1426,14 @@ def favicon():
     for p in ("app/static/favicon.png", "favicon.png"):
         if os.path.exists(p):
             return FileResponse(p, media_type="image/png")
+    raise HTTPException(status_code=404, detail="no favicon")
+
+
+@router.get("/favicon.svg")
+def favicon_svg():
+    for p in ("app/static/favicon.svg", "favicon.svg"):
+        if os.path.exists(p):
+            return FileResponse(p, media_type="image/svg+xml")
     raise HTTPException(status_code=404, detail="no favicon")
 
 
