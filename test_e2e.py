@@ -103,16 +103,17 @@ def _patch(monkeypatch, tables):
     return fake
 
 
-def test_bot_channel_is_owner_only_for_strangers(monkeypatch):
-    """A non-owner on the BOT number gets the owner-only line, never customer
-    self-service."""
+def test_bot_channel_invites_strangers_as_leads(monkeypatch):
+    """A non-owner on the BOT number is a PROSPECT off the marketing poster, not a
+    stranger to bounce. Every message gets an invite (never customer self-service,
+    never the old owner-only bounce), and a YES routes to human follow-up."""
     _patch(monkeypatch, {"businesses": [], "clients": []})
     from app.services import bot
-    reply = _run(bot.handle("910000000000", "HI", channel="bot"))
-    assert "registered" in reply.lower()          # "registered owners only"
-    # and stays silent on non-greetings
-    reply2 = _run(bot.handle("910000000000", "random text", channel="bot"))
-    assert reply2 == ""
+    invite = _run(bot.handle("910000000000", "kya hai ye", channel="bot"))
+    assert "ASVA" in invite and "YES" in invite and "free" in invite.lower()
+    assert "registered" not in invite.lower()      # never the old bounce
+    yes = _run(bot.handle("910000000000", "YES", channel="bot"))
+    assert "team" in yes.lower() and "free" in yes.lower()   # routed to follow-up
 
 
 def test_owner_gets_menu_on_bot_channel(monkeypatch):

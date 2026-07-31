@@ -92,7 +92,11 @@ def extract_indian_mobile(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
     cleaned = re.sub(r'[\s\-\(\)\.\/]', '', text)
-    m = re.search(r'(?:\+?91|0)?([6-9]\d{9})(?!\d)', cleaned)
+    # Leftmost match = the FIRST number in reading order. We deliberately do NOT
+    # require a non-digit boundary after it: when two numbers are typed back to
+    # back (e.g. "9876543210/9123456789") that boundary rule would skip to the
+    # LAST one - we want the first.
+    m = re.search(r'(?:\+?91|0)?([6-9]\d{9})', cleaned)
     if not m:
         return None
     return '91' + m.group(1)
@@ -109,19 +113,43 @@ def parse_credit_days(raw: Optional[str]) -> Optional[int]:
     return days if 0 < days <= 365 else None
 
 
+def _alias_texts(ledger: ET.Element):
+    """Alias / mailing-name strings for a ledger. A ledger's aliases are the
+    extra <NAME> entries under <LANGUAGENAME.LIST> (the first NAME is the primary
+    name). Many shops type the customer's mobile as the alias instead of in the
+    contact field, so we must look here too. Also covers MAILINGNAME and any
+    tag literally containing 'ALIAS'."""
+    for lang in ledger.iter('LANGUAGENAME.LIST'):
+        for nm in lang.iter('NAME'):
+            if nm.text:
+                yield nm.text
+    for el in ledger.iter('MAILINGNAME'):
+        if el.text:
+            yield el.text
+    for el in ledger.iter():
+        if 'ALIAS' in el.tag.upper() and el.text:
+            yield el.text
+
+
 def _phone_from_ledger(ledger: ET.Element) -> Optional[str]:
-    """Best mobile for a LEDGER element: dedicated fields first, then
-    address lines (many shops type the mobile into the address)."""
-    candidates = [
-        ledger.findtext('LEDGERMOBILE', ''),
-        ledger.findtext('LEDGERPHONE', ''),
-        ledger.findtext('LEDGERCONTACT', ''),
-    ]
+    """Best mobile for a LEDGER element, in priority order:
+      1. the dedicated contact fields (Mobile / Phone / Contact),
+      2. the ledger ALIAS / mailing name (some shops store the number there),
+      3. the address lines (first number wins).
+    Covers every place a shop might have typed the customer's number."""
+    # 1. dedicated contact fields
+    for tag in ('LEDGERMOBILE', 'LEDGERPHONE', 'LEDGERCONTACT'):
+        phone = extract_indian_mobile(ledger.findtext(tag, ''))
+        if phone:
+            return phone
+    # 2. alias / mailing name
+    for txt in _alias_texts(ledger):
+        phone = extract_indian_mobile(txt)
+        if phone:
+            return phone
+    # 3. address lines - first number in reading order
     for addr in ledger.iter('ADDRESS'):
-        if addr.text:
-            candidates.append(addr.text)
-    for candidate in candidates:
-        phone = extract_indian_mobile(candidate)
+        phone = extract_indian_mobile(addr.text or '')
         if phone:
             return phone
     return None
@@ -208,6 +236,242 @@ def build_voucher_register_query(company: str, from_date: str, to_date: str) -> 
       </DESC>
     </BODY>
   </ENVELOPE>'''
+
+
+# ── Receipt WRITE (payment entry) - Import Data ───────────────────────
+# Verified against RISHAB TRADING COMPANY's own receipts: the party ledger is
+# CREDITED (ISDEEMEDPOSITIVE=No, positive amount) with BILLALLOCATIONS of
+# BILLTYPE="Agst Ref" against specific bill numbers, and a Cash/Bank ledger is
+# DEBITED (ISDEEMEDPOSITIVE=Yes, negative amount). This builder produces exactly
+# that shape - one receipt for one party, allocated across its open bills.
+
+def allocate_fifo(open_bills: List[Dict[str, Any]], amount) -> tuple:
+    """Split `amount` across `open_bills` (oldest first), filling each up to its
+    outstanding before moving on. Mirrors the backend's allocator exactly so the
+    popup preview and the posted voucher agree.
+
+    open_bills: [{"ref", "outstanding"}, ...] oldest first. Returns
+    (allocations, on_account) where allocations = [(ref, Decimal amount)] and
+    on_account = leftover (an advance) when the payment exceeds total owed.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    def _money(x):
+        try:
+            return Decimal(str(x if x is not None else 0)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except Exception:
+            return Decimal("0.00")
+    remaining = _money(amount)
+    allocs = []
+    for b in open_bills:
+        if remaining <= 0:
+            break
+        out = _money(b.get("outstanding"))
+        if out <= 0:
+            continue
+        take = min(remaining, out)
+        if take <= 0:
+            continue
+        allocs.append((str(b.get("ref") or ""), take))
+        remaining -= take
+    return allocs, remaining
+
+
+def parse_import_voucher_id(response_text: str) -> Optional[str]:
+    """The created voucher's id from a Tally import RESPONSE (LASTVCHID), so a
+    wrong entry can be located and reverted. None when Tally didn't return one."""
+    m = re.search(r'<LASTVCHID>\s*(\d+)\s*</LASTVCHID>', response_text or "", re.IGNORECASE)
+    return m.group(1) if m and m.group(1) != "0" else None
+
+
+def build_receipt_import(company: str, party_ledger: str, deposit_ledger: str,
+                         date_yyyymmdd: str, allocations: List[tuple],
+                         narration: str = "Payment received (entered by ASVA)",
+                         on_account=0) -> str:
+    """Build a Tally 'Import Data' envelope that CREATES a Receipt voucher.
+
+    allocations: list of (bill_ref, amount) - the open bills this payment clears,
+    oldest first (FIFO). Amounts in rupees. Non-positive lines are dropped. The
+    voucher credits `party_ledger` against those bills (and, when the payment
+    exceeds the open bills, an 'On Acc' advance line for the surplus) and debits
+    `deposit_ledger` (CASH or a bank) for the full total. Returns the XML string;
+    POSTing it is the caller's job (so a dry-run can inspect it without touching
+    Tally). A pure advance (no open bills) posts a single On Acc line.
+    """
+    from decimal import Decimal
+    allocs = [(str(ref), Decimal(str(amt))) for ref, amt in allocations
+              if Decimal(str(amt)) > 0]
+    adv = Decimal(str(on_account or 0))
+    if not allocs and adv <= 0:
+        raise ValueError("receipt needs at least one positive allocation or advance")
+    total = sum((a for _, a in allocs), Decimal(0)) + (adv if adv > 0 else Decimal(0))
+    party_bills = ''.join(
+        f'<BILLALLOCATIONS.LIST>'
+        f'<NAME>{escape(ref)}</NAME>'
+        f'<BILLTYPE>Agst Ref</BILLTYPE>'
+        f'<AMOUNT>{a:.2f}</AMOUNT>'
+        f'</BILLALLOCATIONS.LIST>'
+        for ref, a in allocs)
+    if adv > 0:
+        # Surplus over the open bills: book it as an on-account advance so the
+        # receipt total always equals the money actually received.
+        party_bills += (
+            f'<BILLALLOCATIONS.LIST>'
+            f'<NAME>Advance</NAME>'
+            f'<BILLTYPE>On Acc</BILLTYPE>'
+            f'<AMOUNT>{adv:.2f}</AMOUNT>'
+            f'</BILLALLOCATIONS.LIST>')
+    sv_company = f'<SVCURRENTCOMPANY>{escape(company)}</SVCURRENTCOMPANY>' if company else ''
+    return f'''<ENVELOPE>
+  <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
+  <BODY>
+    <IMPORTDATA>
+      <REQUESTDESC>
+        <REPORTNAME>Vouchers</REPORTNAME>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+          {sv_company}
+        </STATICVARIABLES>
+      </REQUESTDESC>
+      <REQUESTDATA>
+        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+          <VOUCHER VCHTYPE="Receipt" ACTION="Create" OBJVIEW="Accounting Voucher View">
+            <DATE>{date_yyyymmdd}</DATE>
+            <EFFECTIVEDATE>{date_yyyymmdd}</EFFECTIVEDATE>
+            <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
+            <PARTYLEDGERNAME>{escape(party_ledger)}</PARTYLEDGERNAME>
+            <NARRATION>{escape(narration)}</NARRATION>
+            <ALLLEDGERENTRIES.LIST>
+              <LEDGERNAME>{escape(party_ledger)}</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+              <AMOUNT>{total:.2f}</AMOUNT>
+              {party_bills}
+            </ALLLEDGERENTRIES.LIST>
+            <ALLLEDGERENTRIES.LIST>
+              <LEDGERNAME>{escape(deposit_ledger)}</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+              <AMOUNT>-{total:.2f}</AMOUNT>
+            </ALLLEDGERENTRIES.LIST>
+          </VOUCHER>
+        </TALLYMESSAGE>
+      </REQUESTDATA>
+    </IMPORTDATA>
+  </BODY>
+</ENVELOPE>'''
+
+
+def build_bills_query(company: str = "") -> str:
+    """All outstanding bills (bill-wise). Each BILL carries NAME (the Agst Ref),
+    PARENT (the party ledger), BILLDATE, and CLOSINGBALANCE (NEGATIVE = still
+    owed) - verified live against RISHAB's books."""
+    return _collection_query('Bills', ['Name', 'BillDate', 'ClosingBalance', 'Parent'], company)
+
+
+def parse_party_open_bills(bills_xml: str, party_ledger: str) -> List[Dict[str, Any]]:
+    """A party's OPEN bills (still owed), oldest first, from a Bills response.
+
+    A bill belongs to a party via <PARENT>; it is open when CLOSINGBALANCE < 0
+    (negative = owed, same sign convention as ledgers). Returns
+    [{"ref", "date" (YYYY-MM-DD), "outstanding" (positive float)}] so a receipt
+    can be allocated FIFO with the exact Agst Ref names Tally expects.
+    """
+    try:
+        root = ET.fromstring(bills_xml)
+    except ET.ParseError:
+        return []
+    target = (party_ledger or '').strip()
+    out = []
+    for b in root.iter('BILL'):
+        if (b.findtext('PARENT') or '').strip() != target:
+            continue
+        closing = _to_float(b.findtext('CLOSINGBALANCE'))
+        if closing >= 0:                      # 0 or positive = settled / advance
+            continue
+        raw_date = (b.findtext('BILLDATE') or '').strip()
+        out.append({
+            'ref': (b.get('NAME') or b.findtext('NAME') or '').strip(),
+            'date': parse_tally_date(raw_date) or raw_date,
+            'outstanding': round(-closing, 2),   # flip sign: owed -> positive
+        })
+    out.sort(key=lambda x: x['date'] or '')      # oldest first (FIFO)
+    return out
+
+
+def build_bills_query(company: str = "") -> str:
+    """Outstanding bills (Bills Receivable) with party + date + balance. Gives the
+    EXACT Agst Ref bill numbers Tally expects, so a receipt allocates against real
+    references (not ASVA's guess). A bill's ClosingBalance is negative when the
+    customer still owes it."""
+    return _collection_query('Bills', ['BillDate', 'ClosingBalance', 'Parent'], company)
+
+
+def parse_party_open_bills(bills_xml: str, party_ledger: str) -> List[Dict[str, Any]]:
+    """From a Bills collection response, the OPEN (still-owed) bills of one party,
+    oldest first. Only negative-closing bills (customer owes) of the exact party
+    are returned, with the sign flipped to a positive 'outstanding'. Used to drive
+    FIFO receipt allocation against Tally's own bill references."""
+    try:
+        root = ET.fromstring(bills_xml)
+    except ET.ParseError:
+        return []
+    target = (party_ledger or '').strip().upper()
+    out: List[Dict[str, Any]] = []
+    for bill in root.iter('BILL'):
+        if (bill.findtext('PARENT') or '').strip().upper() != target:
+            continue
+        closing = _to_float(bill.findtext('CLOSINGBALANCE'))
+        if closing >= 0:                       # >=0 means nothing owed on this bill
+            continue
+        ref = (bill.get('NAME') or bill.findtext('NAME') or '').strip()
+        if not ref:
+            continue
+        out.append({
+            'ref': ref,
+            'date': parse_tally_date((bill.findtext('BILLDATE') or '').strip()),
+            'outstanding': abs(closing),
+        })
+    out.sort(key=lambda b: b['date'] or '')     # oldest first (FIFO)
+    return out
+
+
+def parse_cash_bank_ledgers(masters_xml: str) -> List[str]:
+    """From a masters (Ledger collection) response, the deposit accounts a
+    receipt may debit: every ledger under Cash-in-Hand or Bank Accounts. CASH-type
+    first, then banks alphabetically. This is per-shop (never hardcoded), so each
+    owner's popup shows their own accounts."""
+    try:
+        root = ET.fromstring(masters_xml)
+    except ET.ParseError:
+        return []
+    cash, banks = [], []
+    for led in root.iter('LEDGER'):
+        name = (led.get('NAME') or led.findtext('NAME') or '').strip()
+        parent = (led.findtext('PARENT') or '').upper()
+        if not name:
+            continue
+        if 'CASH' in parent:
+            cash.append(name)
+        elif 'BANK' in parent:
+            banks.append(name)
+    # de-dup keeping order, CASH group first then sorted banks
+    seen = set()
+    out = []
+    for n in cash + sorted(banks):
+        if n not in seen:
+            seen.add(n); out.append(n)
+    return out
+
+
+def import_succeeded(response_text: str) -> bool:
+    """Did a Tally Import response report success? Tally returns a
+    <RESPONSE> with <CREATED>/<ALTERED> counts and <EXCEPTIONS>/<ERRORS>.
+    Success = at least one created/altered and zero errors/exceptions."""
+    def _num(tag: str) -> int:
+        m = re.search(rf'<{tag}>\s*(\d+)\s*</{tag}>', response_text, re.IGNORECASE)
+        return int(m.group(1)) if m else 0
+    created = _num('CREATED') + _num('ALTERED')
+    errors = _num('ERRORS') + _num('EXCEPTIONS') + _num('LINEERROR')
+    return created >= 1 and errors == 0
 
 
 def build_company_list_query() -> str:

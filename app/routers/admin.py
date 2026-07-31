@@ -31,8 +31,9 @@ def _biz_by_token(token: str) -> dict:
     db = require_db()
     resp = (db.table("businesses")
             .select("id, business_name, weekly_off_day, blackout_dates, "
-                    "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
+                    "reminder_style, reminder_custom_line, reminder_hour, msg_language, owner_language, "
                     "discount_pct, plan, upi_vpa, upi_vpa_2, upi_vpa_3, whatsapp_number, reminder_cadence, "
+                    "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
                     "overdue_repeat_days, overdue_max_repeats, reminder_batches, plan_expires_on, "
                     "catchup_date, catchup_action")
             .eq("agent_token", token).limit(1).execute())
@@ -418,8 +419,10 @@ _NAV_CSS = """
  .topnav .sp{flex:1}
  .topnav a.lang{border:1px solid #EAEAEA;color:#1f6c9f;font-size:.85rem}
  .topnav .ver{color:#b5b5b0;font-size:.72rem;padding:0 4px;align-self:center}
- /* Inside the desktop app the sidebar already navigates + switches language */
- .in-app .topnav a.pg,.in-app .topnav a.lang:not(.keep),.in-app .topnav .brand{display:none}
+ /* Inside the desktop app the sidebar navigates and the app's own top bar
+    carries Tally status + reload + language, so the whole in-page nav is
+    hidden - no redundant strip on top of every page. */
+ .in-app .topnav{display:none}
  .upbanner{background:#e1f3fe;border:1px solid #bfe2f7;color:#1f6c9f;border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:.92rem}
  :focus-visible{outline:2px solid #0a7d33;outline-offset:2px}
 """
@@ -427,6 +430,7 @@ _NAV_CSS = """
 _NAV_PAGES = [
     ("dashboard", "Dashboard", "/admin"),
     ("reminders", "Reminders", "/admin/reminders"),
+    ("payments", "Payments", "/admin/payments"),
     ("analytics", "Analytics", "/admin/analytics"),
     ("accounts", "Accounts", "/admin/accounts"),
 ]
@@ -453,7 +457,9 @@ def _update_banner(db) -> str:
         note = f' - {latest["notes"]}' if latest.get("notes") else ""
         strong = " <b>(zaroori update)</b>" if latest.get("mandatory") else ""
         return (f'<div class="upbanner">&#11014; Naya ASVA version <b>{latest["version"]}</b> '
-                f'aa gaya hai{note}.{strong} Naya zip laga lein.</div>')
+                f'aa gaya hai{note}.{strong} '
+                f'<a href="/download" style="color:#0a7d33;font-weight:800;text-decoration:underline">'
+                f'Update download karein &rarr;</a></div>')
     except Exception:
         return ""
 
@@ -518,7 +524,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     start = 0
     while True:
         resp = (db.table("clients")
-                .select("id, name, whatsapp_number, reminders_enabled, tally_ledger_name, "
+                .select("id, name, whatsapp_number, reminders_enabled, excluded, tally_ledger_name, "
                         "credit_days, reminder_batch, reminder_anchor, created_at")
                 .eq("business_id", biz["id"])
                 .order("name")
@@ -596,8 +602,13 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
         phone = c.get("whatsapp_number") or '<span class="nono">number nahi</span>'
         rem_on = c.get("reminders_enabled", True)
         checked = "checked" if rem_on else ""
-        # Source: Tally-synced (has a ledger name) vs OCR/manual (non-Tally).
-        src = "tally" if (c.get("tally_ledger_name") or "").strip() else "nontally"
+        # Source tab: excluded parties live in their own Do-not-chase tab; the
+        # rest split into Tally-synced (has a ledger name) vs OCR/manual (non-Tally).
+        is_excl = bool(c.get("excluded"))
+        if is_excl:
+            src = "exclude"
+        else:
+            src = "tally" if (c.get("tally_ledger_name") or "").strip() else "nontally"
         cname = (c["name"] or "").replace("&", "&amp;").replace("<", "&lt;")
         nm_attr = cname.replace('"', "&quot;")
         # Non-Tally parties get manual controls: "₹ Pay" records a payment and
@@ -625,6 +636,16 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
             cur_batch = 0
         batch_cell = (f'<select class="bsel" data-cid="{c["id"]}">{_batch_opts(cur_batch)}</select>'
                       if multi_batch else f'<span class="rbadge none">{cur_batch + 1}</span>')
+        _xs = "border-radius:5px;padding:4px 9px;font-size:.85em;cursor:pointer"
+        if is_excl:
+            actions = (f'<button class="exclbtn" data-cid="{c["id"]}" data-party="{nm_attr}" '
+                       f'data-exclude="0" style="background:#eaf7ee;color:#0a7d33;border:1px solid #a9d8b8;{_xs}">'
+                       f'Bring back</button>')
+        else:
+            actions = (f'<button class="sendbtn" data-party="{nm_attr}">Send now</button> {pay_btn} '
+                       f'<button class="exclbtn" data-cid="{c["id"]}" data-party="{nm_attr}" '
+                       f'data-exclude="1" title="Move to the do-not-chase list" '
+                       f'style="background:#fbf3db;color:#8a6100;border:1px solid #e2c46a;{_xs}">Exclude</button>')
         rows.append(
             f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}">'
             f'<td><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
@@ -635,7 +656,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
             f'<td>{batch_cell}</td>'
             f'<td><button class="termbtn" data-cid="{c["id"]}" data-party="{nm_attr}" data-cd="{cd_val}">{cd_label}</button></td>'
             f'<td class="ph">{phone}</td>'
-            f'<td><button class="sendbtn" data-party="{nm_attr}">Send now</button> {pay_btn}</td></tr>'
+            f'<td>{actions}</td></tr>'
         )
 
     # Reminder style only drives the per-party schedule preview here; the
@@ -672,8 +693,16 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
           .eq("business_id", biz["id"]).eq("period_month", period).limit(1).execute())
     used = int(_u.data[0]["message_count"]) if _u.data else 0
 
-    tally_n = sum(1 for c in clients if (c.get("tally_ledger_name") or "").strip())
-    nontally_n = len(clients) - tally_n
+    exclude_n = sum(1 for c in clients if c.get("excluded"))
+    _active = [c for c in clients if not c.get("excluded")]
+    tally_n = sum(1 for c in _active if (c.get("tally_ledger_name") or "").strip())
+    nontally_n = len(_active) - tally_n
+
+    # A plain, at-a-glance count line (no plan upsell): how many parties ASVA is
+    # tracking, how many owe money right now, and the total outstanding.
+    parties_n = len(_active)
+    owing_n = sum(1 for c in _active if totals.get(c["id"], Decimal(0)) > 0)
+    total_out = sum((totals.get(c["id"], Decimal(0)) for c in _active), Decimal(0))
 
     # Plan meter + ASVA's recommendation.
     if over_cap:
@@ -724,6 +753,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
  .urec.warn{{color:#9f2f2d;font-weight:600}}
  .urec.ok{{color:#346538}}
  .umsg{{margin-top:4px;font-size:.8em;color:#b5b5b0}}
+ .count{{margin:10px 0 2px;font-size:1.02em;color:#2F3437}} .count b{{color:#0a7d33;font-variant-numeric:tabular-nums}}
  .subtabs{{display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;background:#fff;margin:14px 0 6px}}
  .subtabs button{{border:0;border-radius:0;background:#fff;padding:9px 18px;font-weight:600;color:#787774}}
  .subtabs button+button{{border-left:1px solid #EAEAEA}}
@@ -759,17 +789,12 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
 <div class="sub">Tick = us party ko reminder ON. Batch, timing aur holidays: <b>Reminders</b> tab.</div>
 {_subscription_line(biz)}
 
-<div class="usage">
-  <div><b>{plan_label} plan</b> (₹{plan_price:,}/month) -
-  <b>{active_debtors:,}</b> / {debtor_cap:,} active customers is month</div>
-  <div class="ubar"><div class="ufill" style="width:{pct_used}%;background:{bar_color}"></div></div>
-  {rec_line}
-  <div class="umsg">{used:,} messages is month</div>
-</div>
+<div class="count"><b>{parties_n:,}</b> parties &middot; <b>{owing_n:,}</b> owe money now &middot; <b>&#8377;{total_out:,.0f}</b> outstanding</div>
 
 <div class="subtabs">
  <button class="on" data-sub="tally">Tally bills ({tally_n:,})</button>
  <button data-sub="nontally">Non-Tally bills ({nontally_n:,})</button>
+ <button data-sub="exclude">Do-not-chase ({exclude_n:,})</button>
 </div>
 
 <div class="bar">
@@ -811,6 +836,20 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     <div style="margin-top:12px;text-align:right">
       <button onclick="document.getElementById('termmodal').classList.remove('show')">Close</button>
       <button id="termsave" onclick="saveTerms()" style="background:#0a7d33;color:#fff;border:0">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="paymodal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modalbox">
+    <h3>Record payment</h3>
+    <div id="payparty" style="font-weight:700;margin-bottom:10px"></div>
+    <label style="font-weight:600;display:block;margin-bottom:5px">Amount received (Rs)</label>
+    <input id="payamt" type="text" inputmode="numeric" placeholder="10000"
+      style="width:100%;padding:11px 12px;font-size:1em;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box">
+    <div style="margin-top:18px;text-align:right">
+      <button onclick="document.getElementById('paymodal').classList.remove('show')">Cancel</button>
+      <button id="paysave" style="background:#0a7d33;color:#fff;border:0">Save</button>
     </div>
   </div>
 </div>
@@ -879,6 +918,24 @@ document.querySelectorAll('.subtabs button').forEach(b => b.onclick = () => {{
 }});
 applyFilter();   // apply the default Tally filter on load
 
+// Exclude / bring back: flip the party's do-not-chase flag, then reload so it
+// moves between the tabs (out of Tally/Non-Tally, into Do-not-chase, or back).
+async function toggleExclude(btn) {{
+  const cid = btn.dataset.cid, exclude = btn.dataset.exclude === '1', party = btn.dataset.party;
+  const ask = exclude
+    ? party + ' ko do-not-chase list me daalein? Reminders band ho jayenge.'
+    : party + ' ko wapas laayein? Woh phir se chase list me aa jayega.';
+  if (!confirm(ask)) return;
+  btn.disabled = true; btn.textContent = '...';
+  try {{
+    const r = await fetch('/admin/set-excluded', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: cid, excluded: exclude}})}});
+    if (r.ok) {{ location.reload(); return; }}
+  }} catch (e) {{}}
+  btn.disabled = false; btn.textContent = exclude ? 'Exclude' : 'Bring back';
+}}
+document.querySelectorAll('.exclbtn').forEach(b => b.onclick = () => toggleExclude(b));
+
 async function sendNow(btn) {{
   const party = btn.dataset.party;
   if (!confirm('Abhi ' + party + ' ko reminder bhejein?')) return;
@@ -893,26 +950,29 @@ async function sendNow(btn) {{
 }}
 document.querySelectorAll('.sendbtn').forEach(b => b.onclick = () => sendNow(b));
 
-async function recordPayment(btn) {{
-  const amt = prompt('Kitna payment mila? (Rs me)');
-  if (amt === null) return;
-  const n = parseFloat(amt);
-  if (!(n > 0)) {{ alert('Sahi amount likhein.'); return; }}
-  btn.disabled = true; btn.textContent = '...';
+// Record payment via an in-page modal (prompt() does not work in the app).
+let PAY_CID = null;
+function recordPayment(btn) {{
+  PAY_CID = btn.dataset.cid;
+  document.getElementById('payparty').textContent = btn.dataset.party || '';
+  document.getElementById('payamt').value = '';
+  document.getElementById('paymodal').classList.add('show');
+  setTimeout(() => document.getElementById('payamt').focus(), 40);
+}}
+async function savePayment() {{
+  const n = parseFloat(String(document.getElementById('payamt').value).replace(/[,₹\\s]/g, ''));
+  if (!(n > 0)) {{ alert('Enter a valid amount, e.g. 10000'); return; }}
+  const btn = document.getElementById('paysave'); btn.disabled = true; btn.textContent = '...';
   try {{
     const r = await fetch('/admin/record-payment', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify({{token: TOKEN, client_id: btn.dataset.cid, amount: n}})}});
+      body: JSON.stringify({{token: TOKEN, client_id: PAY_CID, amount: n}})}});
     const d = await r.json();
-    if (r.ok && d.applied > 0) {{
-      btn.textContent = '✓ ₹' + d.applied;
-      setTimeout(() => location.reload(), 1200);
-    }} else {{
-      btn.textContent = '✗'; btn.disabled = false;
-      alert(d.detail || 'Kuch apply nahi hua.');
-      setTimeout(() => {{ btn.textContent = '₹ Pay'; }}, 2000);
-    }}
-  }} catch (e) {{ btn.textContent = '✗'; btn.disabled = false; }}
+    if (r.ok && d.applied > 0) {{ location.reload(); return; }}
+    btn.disabled = false; btn.textContent = 'Save';
+    alert(d.detail || 'Nothing was applied.');
+  }} catch (e) {{ btn.disabled = false; btn.textContent = 'Save'; alert('Could not save. Please try again.'); }}
 }}
+document.getElementById('paysave').onclick = savePayment;
 document.querySelectorAll('.paybtn').forEach(b => b.onclick = () => recordPayment(b));
 
 // ── "Who gets a reminder today" dry run (nothing is sent) ──────────────
@@ -1053,9 +1113,14 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("english"))
     upi_vpa = biz.get("upi_vpa") or ""
     upi_vpa_2 = biz.get("upi_vpa_2") or ""
     upi_vpa_3 = biz.get("upi_vpa_3") or ""
+    _bank_no = (biz.get("bank_account_no") or "").strip()
+    bank_set_js = "true" if _bank_no else "false"
+    _bank_nm = (biz.get("bank_name") or "").strip()
+    bank_label = ("Bank: " + _bank_nm) if _bank_nm else ("Bank transfer (A/c " + _bank_no[-4:] + ")" if _bank_no else "Bank transfer")
 
-    from app.services.batches import get_batches
+    from app.services.batches import get_batches, BANK_SENTINEL
     batches_json = json.dumps(get_batches(biz))
+    bank_sentinel_js = json.dumps(BANK_SENTINEL)
     # Batch editor JS kept as a plain string (single braces) and interpolated, so
     # it needs no f-string brace-doubling.
     batch_js = r"""
@@ -1064,15 +1129,17 @@ function besc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,
 function bopts(list,val){return list.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('');}
 function hourOpts(val){var v=(val==null?11:Number(val));var s='';for(var h=0;h<24;h++){var hh=(h<10?'0':'')+h;s+='<option value="'+h+'"'+(h===v?' selected':'')+'>'+hh+':00</option>';}return s;}
 function upiOpts(val) {
-  var opts = [['', 'Shop Default']];
+  var opts = [['', 'Shop Default (UPI)']];
   if (typeof UPI_1 !== 'undefined' && UPI_1) opts.push([UPI_1, 'UPI 1: ' + UPI_1]);
   if (typeof UPI_2 !== 'undefined' && UPI_2) opts.push([UPI_2, 'UPI 2: ' + UPI_2]);
   if (typeof UPI_3 !== 'undefined' && UPI_3) opts.push([UPI_3, 'UPI 3: ' + UPI_3]);
+  if (typeof BANK_SET !== 'undefined' && BANK_SET) opts.push([BANK_VAL, BANK_LABEL]);
   if (val && !opts.some(function(o){ return o[0] === val; })) {
-    opts.push([val, 'Custom: ' + val]);
+    // A saved bank/custom value whose account is not (yet) configured.
+    opts.push([val, val === BANK_VAL ? 'Bank transfer' : ('Custom: ' + val)]);
   }
   return opts.map(function(o){
-    return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';
+    return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+besc(o[1])+'</option>';
   }).join('');
 }
 function renderBatches(){
@@ -1081,7 +1148,7 @@ function renderBatches(){
     +'<div class="hcol-num">#</div>'
     +'<div class="hcol-name">Batch Name</div>'
     +'<div class="hcol-lang">Language</div>'
-    +'<div class="hcol-upi">UPI Account</div>'
+    +'<div class="hcol-upi">Payment Account</div>'
     +'<div class="hcol-time">Send Time</div>'
     +'<div class="hcol-disc">Discount</div>'
     +'<div class="hcol-acts"></div>'
@@ -1091,7 +1158,7 @@ function renderBatches(){
     return '<div class="brow"><span class="bnum">'+(i+1)+'</span>'
       +'<input class="bname" value="'+besc(b.name)+'" placeholder="Name">'
       +'<select class="blang" title="Language">'+bopts(LANGS,b.lang)+'</select>'
-      +'<select class="bupi" title="UPI Account">'+upiOpts(b.upi||'')+'</select>'
+      +'<select class="bupi" title="Payment Account">'+upiOpts(b.upi||'')+'</select>'
       +'<select class="btime" title="Send time">'+hourOpts(b.hour)+'</select>'
       +'<div class="bdisc-wrap"><input class="bdisc" type="number" min="0" max="50" step="0.5" value="'+(b.disc||0)+'" title="Optional early-pay discount %"><span class="pct">%</span></div>'
       +'<div class="bacts">'
@@ -1279,6 +1346,9 @@ Ek party = EK message: saare bills jodkar, total + QR ke saath.</details>
  const UPI_1 = {upi_vpa!r};
  const UPI_2 = {upi_vpa_2!r};
  const UPI_3 = {upi_vpa_3!r};
+ const BANK_SET = {bank_set_js};
+ const BANK_LABEL = {bank_label!r};
+ const BANK_VAL = {bank_sentinel_js};
  let FEST = {festivals_json};
  let BATCHES = {batches_json};
  let calY, calM;
@@ -1817,9 +1887,12 @@ async def admin_preview(
         style_v = "standard"
 
     # Sample figures for a realistic preview.
+    from app.services.batches import BANK_SENTINEL, bank_details
     sample_amt = Decimal("12500")
     biz_name = biz.get("business_name", "")
-    vpa = (upi or "").strip() or biz.get("upi_vpa") or "shopupi@bank"
+    sel = (upi or "").strip()
+    bank_primary = sel == BANK_SENTINEL
+    vpa = ("" if bank_primary else sel) or biz.get("upi_vpa") or "shopupi@bank"
     pay_amount, discount_line = apply_discount(sample_amt, discount_pct, lang)
 
     template_key = "reminder"
@@ -1836,6 +1909,20 @@ async def admin_preview(
         invoice_number="2526RTC0203", outstanding=inr(sample_amt),
         days_overdue="5", upi_link=pay_link,
     )
+    # Bank/NEFT block - ONLY when this batch's account is set to Bank transfer.
+    bank = bank_details(biz)
+    if bank and bank_primary:
+        en = lang == "english"
+        blk = [("For bank transfer (NEFT/IMPS/RTGS):"
+                if en else "Bank transfer (NEFT/IMPS) ke liye:")]
+        if bank["name"]:
+            blk.append((f"Name: {bank['name']}" if en else f"Naam: {bank['name']}"))
+        blk.append(f"A/c No: {bank['no']}")
+        if bank["ifsc"]:
+            blk.append(f"IFSC: {bank['ifsc']}")
+        if bank["bank"]:
+            blk.append(f"Bank: {bank['bank']}")
+        body = "\n".join(blk) + f"\n\n{body}"
     if discount_line:
         body = f"{body}\n\n{discount_line}"
     cl = (custom_line or "").strip()[:120]
@@ -1864,6 +1951,12 @@ async def admin_send_now(payload: SendNowPayload):
         "plan": biz.get("plan", "starter"),
         "whatsapp_number": biz.get("whatsapp_number"),
         "upi_vpa": biz.get("upi_vpa"),
+        "upi_vpa_2": biz.get("upi_vpa_2"),
+        "upi_vpa_3": biz.get("upi_vpa_3"),
+        "bank_account_name": biz.get("bank_account_name"),
+        "bank_account_no": biz.get("bank_account_no"),
+        "bank_ifsc": biz.get("bank_ifsc"),
+        "bank_name": biz.get("bank_name"),
         "discount_pct": biz.get("discount_pct"),
         "msg_language": biz.get("msg_language"),
         "reminder_style": biz.get("reminder_style"),
@@ -2261,6 +2354,28 @@ async def admin_set_reminder(payload: SetReminderPayload):
     return {"ok": True, "enabled": bool(payload.enabled)}
 
 
+class SetExcludedPayload(BaseModel):
+    token: str
+    client_id: str
+    excluded: bool
+
+
+@router.post("/admin/set-excluded")
+async def admin_set_excluded(payload: SetExcludedPayload):
+    """Move ONE party on/off the do-not-chase (excluded) list. Excluded parties
+    get no reminders and no morning-checkpoint mention, and show only in the
+    Do-not-chase tab (out of Tally/Non-Tally). Reversible."""
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    cr = (db.table("clients").select("id, name")
+          .eq("id", payload.client_id).eq("business_id", biz["id"]).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    db.table("clients").update({"excluded": bool(payload.excluded)}).eq(
+        "id", payload.client_id).execute()
+    return {"ok": True, "excluded": bool(payload.excluded)}
+
+
 @router.get("/admin/party", response_class=HTMLResponse)
 async def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str = Query("english")):
     """Per-party page: bills, payments received, and the exact reminder schedule
@@ -2270,7 +2385,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     today = _dt.date.today()
 
     cr = (db.table("clients")
-          .select("id, name, whatsapp_number, credit_days, reminders_enabled, "
+          .select("id, name, whatsapp_number, credit_days, reminders_enabled, excluded, "
                   "tally_ledger_name, language, reminder_batch, reminder_anchor, created_at")
           .eq("id", client_id).eq("business_id", biz["id"]).limit(1).execute())
     if not cr.data:
@@ -2411,6 +2526,43 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     else:
         next_label, next_color = "Sab ho gaye", "#999"
 
+    # ── Promise-to-Pay: why the next reminder may be later than usual ──
+    # If the customer replied with a promise (or a paid claim), reminders are
+    # paused. Show that plainly here AND override the "next reminder" card, so
+    # the owner sees exactly why nothing is going out and can read what the
+    # customer actually said.
+    promise_html = ""
+    try:
+        from app.services import promises as _promises
+        _pr = _promises.find_open(db, biz["id"], client_id)
+    except Exception:
+        _pr = None
+    if _pr:
+        _said = esc(_pr.get("raw_text") or "")
+        _when = str(_pr.get("created_at") or "")[:10]
+        _pdate = _pr.get("promise_date")
+        _hold = str(_pr.get("hold_until") or "")[:10]
+        _resume = str(_pdate) if _pdate else _hold
+        if _pr.get("kind") == "paid_claim":
+            _head = "Customer says they have already paid"
+            _sub = f"Reminders are paused until {_hold}. Please confirm the payment in Tally."
+        elif _pr.get("kind") == "promise" and _pdate:
+            _head = f"Reminders paused until {_pdate}"
+            _sub = "The customer promised to pay by then. ASVA resumes on its own if it stays unpaid."
+        else:
+            _head = f"Reminders paused until {_hold}"
+            _sub = "ASVA resumes on its own if the bill stays unpaid."
+        # The pause is the real answer to "when is the next reminder".
+        if rem_on:
+            next_label, next_color = (f"Paused &middot; {_resume}", "#7d5a0a")
+        _saidline = (f'<div style="margin-top:8px">Customer said: '
+                     f'<b>&ldquo;{_said}&rdquo;</b>{(" &middot; " + _when) if _when else ""}</div>') if _said else ""
+        promise_html = (
+            f'<div class="card" style="margin-bottom:18px;border-left:4px solid #7d5a0a;background:#fbf3db">'
+            f'<div style="font-weight:700;color:#7d5a0a">&#9208;&nbsp; {_head}</div>'
+            f'<div class="hint" style="color:#8a6a2a;margin-top:2px">{_sub}</div>'
+            f'{_saidline}</div>')
+
     # Compact forward schedule (only when ON). Shows the TIME too - the owner
     # must always know exactly when the next message goes.
     sched_section = ""
@@ -2450,6 +2602,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
     phone = c.get("whatsapp_number")
     phone_html = esc(phone) if phone else '<span style="color:#c0392b">number nahi hai</span>'
+    is_excl = bool(c.get("excluded"))
     toggle_label = "Reminder OFF karein" if rem_on else "Reminder ON karein"
     toggle_cls = "danger" if rem_on else "primary"
     src_tag = "Tally" if is_tally else "Non-Tally"
@@ -2483,6 +2636,8 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
   <div class="card kpi"><div class="n" style="font-size:1rem;color:{next_color}">{next_label}</div><div class="l">Agla reminder</div></div>
 </div>
 
+{promise_html}
+
 <div class="card" style="margin-bottom:18px">
   <div class="remrow">
     <div>WhatsApp: <b>{phone_html}</b> &nbsp;&middot;&nbsp; Reminder:
@@ -2490,6 +2645,11 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     <button id="remtoggle" class="{toggle_cls}" onclick="toggleRem()">{toggle_label}</button>
   </div>
   <div class="hint" id="remhint">{rem_hint}</div>
+  <div class="remrow" style="margin-top:12px;padding-top:12px;border-top:1px solid #eee">
+    <div>Do-not-chase list: <b style="color:{'#8a6100' if is_excl else '#6b7770'}">{'YES - never chased' if is_excl else 'no'}</b>
+      <div class="hint">{'This party is excluded: no reminders, and not shown in your chase list.' if is_excl else 'If this party will never pay, exclude them so they stop appearing in your chase list.'}</div></div>
+    <button id="excltoggle" class="{'primary' if is_excl else 'danger'}" onclick="toggleExcl()">{'Bring back' if is_excl else 'Exclude'}</button>
+  </div>
   {batch_html}
 </div>
 
@@ -2502,11 +2662,71 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 <h2>Payments received (Tally)</h2>
 <div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>{pay_rows}</table></div>
 
+<div class="modal" id="billmodal" onclick="if(event.target===this)closeM('billmodal')">
+  <div class="modalbox">
+    <h3 id="bm_title">Add bill</h3>
+    <label>Amount (Rs)</label>
+    <input id="bm_amt" type="text" inputmode="numeric" placeholder="12500">
+    <label>Bill number (leave empty = automatic)</label>
+    <input id="bm_inv" type="text" placeholder="e.g. INV-105">
+    <div class="mbtns">
+      <button class="ntbtn" onclick="closeM('billmodal')">Cancel</button>
+      <button id="bm_save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="partymodal" onclick="if(event.target===this)closeM('partymodal')">
+  <div class="modalbox">
+    <h3>Edit party</h3>
+    <label>Party name</label>
+    <input id="pm_name" type="text" maxlength="120" placeholder="Ramesh Traders">
+    <label>WhatsApp number (10 digits, leave empty = none)</label>
+    <input id="pm_phone" type="text" inputmode="numeric" placeholder="9876543210">
+    <div class="mbtns">
+      <button class="ntbtn" onclick="closeM('partymodal')">Cancel</button>
+      <button id="pm_save">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const TOKEN = {token!r};
 const CID = {client_id!r};
+const LANG = {lang!r};
 const PNAME = {json.dumps(c["name"] or "")};
+const PPHONE = {json.dumps(pphone_display)};
 let REM_ON = {str(bool(rem_on)).lower()};
+let EXCL = {str(bool(is_excl)).lower()};
+async function toggleExcl() {{
+  const want = !EXCL;
+  const msg = want ? PNAME + ' ko do-not-chase list me daalein? Reminders band ho jayenge.'
+                   : PNAME + ' ko wapas chase list me laayein?';
+  if (!confirm(msg)) return;
+  const btn = document.getElementById('excltoggle'); btn.disabled = true;
+  try {{
+    const r = await fetch('/admin/set-excluded', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID, excluded: want}})}});
+    if (r.ok) {{ location.reload(); return; }}
+  }} catch (e) {{}}
+  btn.disabled = false;
+}}
+function openM(id) {{ document.getElementById(id).classList.add('show'); }}
+function closeM(id) {{ document.getElementById(id).classList.remove('show'); }}
+function ntNum(s) {{
+  const a = parseFloat(String(s).replace(/[,₹\\s]/g, ''));
+  return (a > 0) ? a : null;
+}}
+// POST helper: reload on success, show the server's real reason on failure.
+async function ntPost(url, body) {{
+  try {{
+    const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify(body)}});
+    if (r.ok) {{ location.reload(); return; }}
+    const d = await r.json().catch(() => ({{}}));
+    alert(d.detail || 'Could not save. Please try again.');
+  }} catch (e) {{ alert('Could not save. Please try again.'); }}
+}}
 async function assignBatch() {{
   const sel = document.getElementById('pbatch'); if (!sel) return;
   sel.disabled = true;
@@ -2529,35 +2749,62 @@ async function toggleRem() {{
   }} catch (e) {{ alert('Nahi ho paya.'); }}
   btn.disabled = false; btn.textContent = REM_ON ? 'Reminder OFF karein' : 'Reminder ON karein';
 }}
-// ── Non-Tally bill add / edit / delete (Tally bills stay Tally's) ──
-function ntNum(s) {{
-  const a = parseFloat(String(s).replace(/[,₹\\s]/g, ''));
-  return (a > 0) ? a : null;
+// ── Non-Tally bill add / edit (in-page modal - prompt() is unusable in the app) ──
+let BM_MODE = 'add', BM_ID = null;
+function ntAdd() {{
+  BM_MODE = 'add'; BM_ID = null;
+  document.getElementById('bm_title').textContent = 'Add bill (non Tally)';
+  document.getElementById('bm_amt').value = '';
+  document.getElementById('bm_inv').value = '';
+  openM('billmodal');
+  setTimeout(() => document.getElementById('bm_amt').focus(), 40);
 }}
-async function ntPost(url, body) {{
-  try {{
-    const r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify(body)}});
-    if (r.ok) {{ location.reload(); return; }}
-    const d = await r.json().catch(() => ({{}}));
-    alert(d.detail || 'Nahi ho paya. Phir se try karein.');
-  }} catch (e) {{ alert('Nahi ho paya. Phir se try karein.'); }}
+function ntEdit(btn) {{
+  BM_MODE = 'edit'; BM_ID = btn.dataset.id;
+  document.getElementById('bm_title').textContent = 'Edit bill';
+  document.getElementById('bm_amt').value = btn.dataset.amt;
+  document.getElementById('bm_inv').value = btn.dataset.inv;
+  openM('billmodal');
+  setTimeout(() => document.getElementById('bm_amt').focus(), 40);
 }}
-async function ntAdd() {{
-  const amt = prompt('Naya bill - amount (Rs):', ''); if (amt === null) return;
-  const a = ntNum(amt); if (!a) {{ alert('Sirf number likhein, jaise 12500'); return; }}
-  const inv = prompt('Bill number (khaali chhodo to auto):', ''); if (inv === null) return;
-  await ntPost('/admin/nt-bill/add', {{token: TOKEN, client_id: CID, amount: a, invoice_number: inv || ''}});
+async function saveBill() {{
+  const a = ntNum(document.getElementById('bm_amt').value);
+  if (!a) {{ alert('Enter numbers only, e.g. 12500'); return; }}
+  const inv = document.getElementById('bm_inv').value.trim();
+  if (BM_MODE === 'add') {{
+    await ntPost('/admin/nt-bill/add', {{token: TOKEN, client_id: CID, amount: a, invoice_number: inv}});
+  }} else {{
+    await ntPost('/admin/nt-bill/edit', {{token: TOKEN, bill_id: BM_ID, amount: a, invoice_number: inv}});
+  }}
 }}
-async function ntEdit(btn) {{
-  const amt = prompt('Bill amount (Rs):', btn.dataset.amt); if (amt === null) return;
-  const a = ntNum(amt); if (!a) {{ alert('Sirf number likhein, jaise 12500'); return; }}
-  const inv = prompt('Bill number:', btn.dataset.inv); if (inv === null) return;
-  await ntPost('/admin/nt-bill/edit', {{token: TOKEN, bill_id: btn.dataset.id, amount: a, invoice_number: inv}});
-}}
+document.getElementById('bm_save').onclick = saveBill;
 async function ntDel(btn) {{
-  if (!confirm('Bill ' + (btn.dataset.inv || '') + ' DELETE karein? Wapas nahi aayega.')) return;
+  if (!confirm('Delete bill ' + (btn.dataset.inv || '') + '? This cannot be undone.')) return;
   await ntPost('/admin/nt-bill/delete', {{token: TOKEN, bill_id: btn.dataset.id}});
+}}
+// ── Non-Tally party edit / delete ──
+function editParty() {{
+  document.getElementById('pm_name').value = PNAME;
+  document.getElementById('pm_phone').value = PPHONE;
+  openM('partymodal');
+  setTimeout(() => document.getElementById('pm_name').focus(), 40);
+}}
+async function saveParty() {{
+  const name = document.getElementById('pm_name').value.trim();
+  const phone = document.getElementById('pm_phone').value.trim();
+  if (!name) {{ alert('Enter the party name.'); return; }}
+  await ntPost('/admin/party/edit', {{token: TOKEN, client_id: CID, name: name, whatsapp_number: phone}});
+}}
+const _pmSave = document.getElementById('pm_save'); if (_pmSave) _pmSave.onclick = saveParty;
+async function delParty() {{
+  if (!confirm('Delete party "' + PNAME + '" and ALL its bills? This cannot be undone.')) return;
+  try {{
+    const r = await fetch('/admin/party/delete', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID}})}});
+    if (r.ok) {{ location.href = '/admin?token=' + encodeURIComponent(TOKEN) + '&lang=' + encodeURIComponent(LANG); return; }}
+    const d = await r.json().catch(() => ({{}}));
+    alert(d.detail || 'Could not delete. Please try again.');
+  }} catch (e) {{ alert('Could not delete. Please try again.'); }}
 }}
 </script>"""
     extra = """
@@ -2569,6 +2816,15 @@ async function ntDel(btn) {{
  .ntbtn.ntdel{color:#fff;background:#c0392b;border-color:#c0392b;font-weight:600}
  .ntbtn.ntdel:hover{background:#a93226}
  .ntbtn.ntadd{margin-left:10px;font-weight:600;color:#0a7d33;vertical-align:middle}
+ .pactions{display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap}
+ .pactions .ntbtn{padding:7px 14px;font-size:.9em}
+ .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
+ .modal.show{display:flex}
+ .modalbox{background:#fff;max-width:420px;width:100%;border-radius:14px;padding:20px 22px;box-sizing:border-box}
+ .modalbox h3{margin:0 0 4px}
+ .modalbox label{display:block;font-size:.78rem;color:#787774;margin:14px 0 5px;text-transform:uppercase;letter-spacing:.04em}
+ .modalbox input{font:inherit;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;width:100%;box-sizing:border-box}
+ .mbtns{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
  .tag{font-size:.75rem;border-radius:9999px;padding:2px 9px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
  .tag.ok{background:#edf3ec;color:#346538}
  .tag.warn{background:#fbf3db;color:#956400}
@@ -2821,15 +3077,393 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("english"))
         _is_en(lang)))
 
 
+def _promise_head(pr: dict, name: str, en: bool) -> str:
+    """One human line describing what the customer said, for the Payments tab."""
+    kind = pr.get("kind")
+    amt = f" {_inr(pr['amount'])}" if pr.get("amount") else ""
+    if kind == "paid_claim":
+        return (f"{name} says they have already paid{amt}"
+                if en else f"{name} ne kaha already pay kar diya{amt}")
+    if kind == "promise" and pr.get("promise_date"):
+        return (f"{name} promised to pay by {str(pr['promise_date'])[:10]}{amt}"
+                if en else f"{name} ne {str(pr['promise_date'])[:10]} tak dene ka kaha{amt}")
+    return (f"{name} - payment update{amt}" if en else f"{name} - payment update{amt}")
+
+
+@router.get("/admin/payments", response_class=HTMLResponse)
+async def admin_payments(token: str = Query(...), lang: str = Query("english")):
+    """The Payments tab: AI-read promise/claim ledger (B6) on the left, and the
+    receipt queue awaiting confirm-and-post-to-Tally (C7) on the right."""
+    biz = _biz_by_token(token)
+    en = _is_en(lang)
+    title = biz.get("business_name") or "ASVA"
+    body = f"""<h1>Payments</h1><div class="muted">{title}</div>
+<div class="hint" style="margin:6px 0 2px">When a customer says they paid, it appears here. Check the amount and the deposit account, then post it into Tally with one tap. ASVA never posts on its own.</div>
+<div id="pmflash" class="flash"></div>
+<div id="pmwrap"><div class="card" style="margin-top:18px">Loading...</div></div>
+
+<div id="cf" class="cfback" style="display:none">
+  <div class="cfbox">
+    <h3 id="cftitle">Enter payment</h3>
+    <div class="cfparty" id="cfparty"></div>
+    <label>Amount received</label>
+    <input id="cfamt" type="number" min="1" step="0.01" inputmode="decimal">
+    <label>Deposit into (Tally account)</label>
+    <select id="cfdep"></select>
+    <label>Date of entry</label>
+    <input id="cfdate" type="date">
+    <div class="hint" id="cfalloc" style="margin-top:10px"></div>
+    <div style="margin-top:18px;display:flex;gap:10px">
+      <button onclick="postReceipt()" id="cfpost">Post to Tally</button>
+      <button class="ghost" onclick="closeCf()">Cancel</button>
+    </div>
+    <div id="cfmsg" class="okmsg" style="display:block;margin:10px 0 0"></div>
+  </div>
+</div>
+<script>
+const TOKEN = {token!r};
+const EN = {str(en).lower()};
+let DATA = {{promises:[], pending:[], deposit_ledgers:[]}};
+let CF = null;   // the receipt being confirmed
+function esc(s){{return String(s==null?'':s).replace(/[&<>]/g,m=>({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[m]));}}
+function inr(n){{try{{return Number(n).toLocaleString('en-IN');}}catch(e){{return n;}}}}
+let PREV_INFLIGHT = null;   // ids that were pending/confirmed last load
+function flash(msg){{
+  const f=document.getElementById('pmflash'); if(!f)return;
+  f.textContent=msg; f.classList.add('on');
+  setTimeout(()=>{{f.classList.remove('on');}}, 4000);
+}}
+async function load(){{
+  let prev = PREV_INFLIGHT;
+  try{{
+    const r = await fetch('/admin/payments/data?token='+encodeURIComponent(TOKEN));
+    if(!r.ok) throw new Error('http '+r.status);
+    DATA = await r.json();
+  }}catch(e){{
+    document.getElementById('pmwrap').innerHTML='<div class="card" style="margin-top:18px">Could not load. <a href="#" onclick="load();return false">Retry</a></div>';
+    return;
+  }}
+  // A receipt that was in-flight last time and is gone now (not failed) reached
+  // Tally: give the owner a clear, positive confirmation.
+  const now = new Set((DATA.pending||[]).map(q=>q.id));
+  const failedNow = new Set((DATA.pending||[]).filter(q=>q.status==='failed').map(q=>q.id));
+  if(prev){{
+    let posted=0;
+    prev.forEach(id=>{{ if(!now.has(id) && !failedNow.has(id)) posted++; }});
+    if(posted>0) flash('\\u2713 '+posted+' payment'+(posted>1?'s':'')+' posted to Tally.');
+  }}
+  PREV_INFLIGHT = new Set((DATA.pending||[]).filter(q=>q.status==='pending'||q.status==='confirmed').map(q=>q.id));
+  render();
+}}
+function statusChip(s){{
+  if(s==='confirmed') return '<span class="chip wait">Posting to Tally...</span>';
+  if(s==='failed')    return '<span class="chip bad">Failed</span>';
+  return '';
+}}
+function render(){{
+  const P = DATA.promises||[], Q = DATA.pending||[];
+  let ph = P.length ? P.map(p=>(
+    '<div class="prow"><div class="pmain"><b>'+esc(p.head)+'</b>'+
+      (p.said?'<div class="said">&ldquo;'+esc(p.said)+'&rdquo;</div>':'')+
+      '<div class="meta">'+esc(p.outstanding_line||'')+'</div></div>'+
+    '<div class="pacts">'+
+      '<button class="mini" onclick=\\'enter('+JSON.stringify(p.client_id)+')\\'>Enter payment</button>'+
+      '<button class="mini ghost" onclick=\\'chase('+JSON.stringify(p.client_id)+')\\'>Chase</button>'+
+    '</div></div>'
+  )).join('') : '<div class="empty">No open promises. When a customer says they paid or gives a date, it shows here.</div>';
+
+  let qh = Q.length ? Q.map(q=>(
+    '<div class="prow"><div class="pmain"><b>'+esc(q.party_display||q.party_ledger)+'</b> '+statusChip(q.status)+
+      '<div class="meta">&#8377;'+inr(q.amount)+' &middot; into '+esc(q.deposit_ledger||'Cash')+'</div>'+
+      (q.error?'<div class="said" style="color:#9f2f2d">'+esc(q.error)+'</div>':'')+
+    '</div><div class="pacts">'+
+      (q.status==='pending'||q.status==='failed'
+        ? '<button class="mini" onclick=\\'enterPending('+JSON.stringify(q.id)+')\\'>Review &amp; post</button>'+
+          '<button class="mini ghost" onclick=\\'cancelPending('+JSON.stringify(q.id)+')\\'>Remove</button>'
+        : '')+
+    '</div></div>'
+  )).join('') : '<div class="empty">Nothing waiting to post. Reply PAID &lt;name&gt; on WhatsApp, or press Enter payment on a promise.</div>';
+
+  const posting = Q.filter(q=>q.status==='confirmed').length;
+  const cP = P.length?(' <span class="cnt">'+P.length+'</span>'):'';
+  const cQ = Q.length?(' <span class="cnt">'+Q.length+'</span>'):'';
+  const postingNote = posting?('<div class="postnote">&#8635; Posting '+posting+' receipt'+(posting>1?'s':'')+' to Tally...</div>'):'';
+  document.getElementById('pmwrap').innerHTML =
+    '<div class="cols">'+
+      '<div class="colp"><h2>Customers who say they paid'+cP+'</h2><div class="card pad0">'+ph+'</div></div>'+
+      '<div class="colp"><h2>Ready to post to Tally'+cQ+'</h2>'+postingNote+'<div class="card pad0">'+qh+'</div></div>'+
+    '</div>';
+}}
+function depOpts(sel){{
+  const L = DATA.deposit_ledgers||['Cash'];
+  return L.map(x=>'<option value="'+esc(x)+'"'+(x===sel?' selected':'')+'>'+esc(x)+'</option>').join('');
+}}
+function today(){{ return new Date().toISOString().slice(0,10); }}
+function openCf(title, party, amount, dep, dateStr, alloc){{
+  document.getElementById('cftitle').textContent = title;
+  document.getElementById('cfparty').textContent = party ? ((EN?'Party: ':'Party: ')+party) : '';
+  document.getElementById('cfamt').value = amount||'';
+  document.getElementById('cfdep').innerHTML = depOpts(dep||'Cash');
+  document.getElementById('cfdate').value = dateStr || today();
+  document.getElementById('cfalloc').textContent = alloc||'';
+  document.getElementById('cfmsg').textContent = '';
+  document.getElementById('cf').style.display='flex';
+}}
+function closeCf(){{document.getElementById('cf').style.display='none';CF=null;}}
+function enter(clientId){{
+  const p=(DATA.promises||[]).find(x=>x.client_id===clientId); if(!p)return;
+  CF = {{mode:'promise', client_id:clientId, name:p.name}};
+  openCf((EN?'Enter payment':'Payment'), p.name, p.outstanding||'', 'Cash', today(),
+    (p.outstanding>0?((EN?'Full outstanding: ':'Poora baaki: ')+'\\u20b9'+inr(p.outstanding)):''));
+}}
+function enterPending(id){{
+  const q=(DATA.pending||[]).find(x=>x.id===id); if(!q)return;
+  CF = {{mode:'pending', id:id, name:q.party_display}};
+  openCf((EN?'Review payment':'Payment'), q.party_display||q.party_ledger, q.amount,
+    q.deposit_ledger||'Cash', q.receipt_date||today(), '');
+}}
+async function postReceipt(){{
+  if(!CF)return;
+  const amt = parseFloat(document.getElementById('cfamt').value);
+  const dep = document.getElementById('cfdep').value;
+  const dt = document.getElementById('cfdate').value || today();
+  if(!(amt>0)){{document.getElementById('cfmsg').textContent='Enter a valid amount.';return;}}
+  document.getElementById('cfpost').disabled=true;
+  document.getElementById('cfmsg').textContent='Sending to Tally...';
+  let ok=false;
+  try{{
+    if(CF.mode==='promise'){{
+      const r=await fetch('/admin/promises/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+        body:JSON.stringify({{token:TOKEN,client_id:CF.client_id,action:'enqueue',amount:amt,deposit_ledger:dep,receipt_date:dt}})}});
+      ok=r.ok;
+    }}else{{
+      const r=await fetch('/admin/pending/confirm',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+        body:JSON.stringify({{token:TOKEN,id:CF.id,amount:amt,deposit_ledger:dep,receipt_date:dt}})}});
+      ok=r.ok;
+    }}
+  }}catch(e){{ok=false;}}
+  document.getElementById('cfpost').disabled=false;
+  if(ok){{closeCf();load();}}
+  else document.getElementById('cfmsg').textContent='Could not send. Try again.';
+}}
+async function chase(clientId){{
+  await fetch('/admin/promises/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,client_id:clientId,action:'chase'}})}});
+  load();
+}}
+async function cancelPending(id){{
+  await fetch('/admin/pending/cancel',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,id:id}})}});
+  load();
+}}
+load();
+setInterval(load, 15000);   // reflect posted/failed status as the agent works
+</script>"""
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<title>{title} - Payments</title>{_FAVICON}'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}{_PAYMENTS_CSS}</style>'
+        f'<div class="wrap">{_topnav(token, lang, "payments")}{body}</div>',
+        en))
+
+
+_PAYMENTS_CSS = """
+ .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:14px}
+ .colp{min-width:0}
+ .card.pad0{padding:0}
+ .prow{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid #EAEAEA}
+ .prow:last-child{border-bottom:0}
+ .pmain{flex:1;min-width:180px}
+ .cnt{display:inline-block;background:#EDF3EC;color:#346538;font-size:.72rem;font-weight:700;border-radius:9999px;padding:1px 9px;vertical-align:middle;margin-left:4px}
+ .postnote{color:#1F6C9F;font-size:.85rem;margin:2px 0 8px}
+ .flash{max-height:0;overflow:hidden;opacity:0;transition:all .25s ease;background:#EDF3EC;color:#346538;border-radius:10px;font-weight:600;padding:0 14px}
+ .flash.on{max-height:60px;opacity:1;padding:11px 14px;margin-top:12px}
+ .pmain b{font-weight:600}
+ .said{color:#5a6b60;font-size:.86rem;margin-top:4px;line-height:1.45}
+ .meta{color:#787774;font-size:.82rem;margin-top:4px;font-variant-numeric:tabular-nums}
+ .pacts{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+ .mini{padding:7px 12px;font-size:.82rem;border-radius:7px}
+ button.ghost{background:#fff;color:#2F3437;border:1px solid #EAEAEA}
+ button.ghost:hover{background:#f4f4f1}
+ .empty{color:#787774;padding:24px 16px;text-align:center;line-height:1.5}
+ .chip{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:9999px;letter-spacing:.03em;vertical-align:middle}
+ .chip.wait{background:#E1F3FE;color:#1F6C9F}
+ .chip.bad{background:#FDEBEC;color:#9F2F2D}
+ .cfback{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;align-items:center;justify-content:center}
+ .cfbox{background:#fff;border-radius:14px;padding:22px 24px;max-width:420px;width:92%;max-height:90vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+ .cfbox h3{margin:0 0 6px;font-size:1.1rem}
+ .cfbox select,.cfbox input[type=date]{font:inherit;padding:10px 12px;border:1px solid #EAEAEA;border-radius:8px;background:#fff;width:100%;box-sizing:border-box}
+ .cfparty{background:#F7F6F3;border:1px solid #EAEAEA;border-radius:8px;padding:8px 12px;font-weight:600;font-size:.92rem;margin-bottom:6px}
+ .cfparty:empty{display:none}
+"""
+
+
+@router.get("/admin/payments/data")
+async def admin_payments_data(token: str = Query(...)):
+    """JSON feed for the Payments tab: open promises (AI-read), the receipt queue,
+    and the shop's deposit accounts."""
+    from app.services import promises as promises_svc, receipts_queue as rq
+    biz = _biz_by_token(token)
+    db = require_db()
+    bid = biz["id"]
+    en = _is_en(biz.get("owner_language") or "english")
+
+    prs = promises_svc.open_for_business(db, bid)
+    # Names + outstanding for each promised party.
+    cids = list({p["client_id"] for p in prs})
+    cname = {}
+    if cids:
+        cr = (db.table("clients").select("id, name").in_("id", cids).execute()).data or []
+        cname = {c["id"]: c.get("name") for c in cr}
+    owed: dict = {}
+    if cids:
+        ob = (db.table("bills").select("client_id, outstanding")
+              .eq("business_id", bid).in_("client_id", cids)
+              .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+        for b in ob:
+            owed[b["client_id"]] = owed.get(b["client_id"], Decimal(0)) + Decimal(str(b.get("outstanding") or 0))
+
+    promises_out = []
+    for p in prs:
+        cid = p["client_id"]
+        nm = names.clean_display(cname.get(cid) or "") or "A customer"
+        out = owed.get(cid, Decimal(0))
+        promises_out.append({
+            "client_id": cid,
+            "name": nm,
+            "head": _promise_head(p, nm, en),
+            "said": p.get("raw_text") or "",
+            "outstanding": float(out),
+            "outstanding_line": (f"Outstanding {_inr(out)}" if en else f"Baaki {_inr(out)}") if out > 0 else "",
+        })
+
+    pending = rq.list_for_owner(db, bid)
+    pending_out = [{
+        "id": r["id"], "party_ledger": r["party_ledger"],
+        "party_display": r.get("party_display"), "amount": float(r["amount"]),
+        "deposit_ledger": r.get("deposit_ledger") or "Cash", "status": r.get("status"),
+        "receipt_date": str(r.get("receipt_date") or "")[:10], "error": r.get("error"),
+    } for r in pending]
+
+    return {
+        "promises": promises_out,
+        "pending": pending_out,
+        "deposit_ledgers": rq.get_deposit_ledgers(db, bid),
+    }
+
+
+class PromiseActionPayload(BaseModel):
+    token: str
+    client_id: str
+    action: str                      # "chase" | "enqueue"
+    amount: Optional[float] = None
+    deposit_ledger: Optional[str] = None
+    receipt_date: Optional[str] = None
+
+
+@router.post("/admin/promises/action")
+async def admin_promise_action(payload: PromiseActionPayload):
+    """Owner acts on an AI-read promise: 'chase' resumes reminders now; 'enqueue'
+    queues a receipt (already confirmed) for the agent to post into Tally."""
+    from app.services import promises as promises_svc, receipts_queue as rq
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    bid = biz["id"]
+    cr = (db.table("clients").select("id, name, tally_ledger_name")
+          .eq("id", payload.client_id).eq("business_id", bid).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    client = cr.data[0]
+
+    if payload.action == "chase":
+        promises_svc.close_for_client(db, bid, client["id"], "cancelled")
+        return {"ok": True, "resumed": True}
+
+    if payload.action == "enqueue":
+        amt = payload.amount
+        if amt is None or float(amt) <= 0:
+            ob = (db.table("bills").select("outstanding")
+                  .eq("business_id", bid).eq("client_id", client["id"])
+                  .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+            amt = float(sum(Decimal(str(b.get("outstanding") or 0)) for b in ob))
+        if not amt or amt <= 0:
+            raise HTTPException(status_code=400, detail="no amount to record")
+        try:
+            row = rq.create_pending(
+                db, bid, client_id=client["id"],
+                party_ledger=client.get("tally_ledger_name") or client["name"],
+                party_display=names.clean_display(client["name"]), amount=amt,
+                deposit_ledger=payload.deposit_ledger or "Cash",
+                receipt_date=payload.receipt_date or None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="amount must be positive")
+        if not row:
+            raise HTTPException(status_code=500, detail="could not queue")
+        # Already reviewed in the popup -> confirm straight away so the agent posts it.
+        rq.confirm(db, bid, row["id"], amount=amt,
+                   deposit_ledger=payload.deposit_ledger or "Cash",
+                   receipt_date=payload.receipt_date or None)
+        promises_svc.close_for_client(db, bid, client["id"], "kept")
+        return {"ok": True, "queued": True}
+
+    raise HTTPException(status_code=400, detail="unknown action")
+
+
+class PendingConfirmPayload(BaseModel):
+    token: str
+    id: str
+    amount: Optional[float] = None
+    deposit_ledger: Optional[str] = None
+    receipt_date: Optional[str] = None
+
+
+@router.post("/admin/pending/confirm")
+async def admin_pending_confirm(payload: PendingConfirmPayload):
+    """Owner approved a queued receipt (optionally editing amount/account/date):
+    move it to 'confirmed' so the agent writes it into Tally."""
+    from app.services import receipts_queue as rq
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    try:
+        row = rq.confirm(db, biz["id"], payload.id, amount=payload.amount,
+                         deposit_ledger=payload.deposit_ledger,
+                         receipt_date=payload.receipt_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="amount must be positive")
+    if not row:
+        raise HTTPException(status_code=404, detail="receipt not found or already handled")
+    return {"ok": True}
+
+
+class PendingCancelPayload(BaseModel):
+    token: str
+    id: str
+
+
+@router.post("/admin/pending/cancel")
+async def admin_pending_cancel(payload: PendingCancelPayload):
+    """Owner removed a queued receipt (won't post it to Tally)."""
+    from app.services import receipts_queue as rq
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    row = rq.get_by_id(db, biz["id"], payload.id)
+    if not row:
+        raise HTTPException(status_code=404, detail="receipt not found")
+    rq.mark(db, payload.id, "skipped")
+    return {"ok": True}
+
+
 @router.get("/admin/accounts", response_class=HTMLResponse)
 async def admin_accounts(token: str = Query(...), lang: str = Query("english")):
     db = require_db()
     biz = (db.table("businesses")
-           .select("id, business_name, upi_vpa, upi_vpa_2, upi_vpa_3, bank_account_name, bank_account_no, bank_ifsc, bank_name")
+           .select("id, business_name, upi_vpa, upi_vpa_2, upi_vpa_3, bank_account_name, bank_account_no, bank_ifsc, bank_name, share_data")
            .eq("agent_token", token).limit(1).execute())
     if not biz.data:
         raise HTTPException(status_code=401, detail="Invalid token")
     b = biz.data[0]
+    share_on = bool(b.get("share_data", True))
 
     def val(k):
         return (b.get(k) or "").replace('"', "&quot;")
@@ -2858,8 +3492,23 @@ async def admin_accounts(token: str = Query(...), lang: str = Query("english")):
  <div class="hint">UPI na ho to reminder me ye bank details (A/C + IFSC) bheji jayengi.</div>
  <div style="margin-top:18px"><button onclick="save()">Save</button><span id="msg" class="okmsg"></span></div>
 </div>
+<div class="card" style="margin-top:16px;max-width:560px">
+ <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;font-weight:600">
+   <input type="checkbox" id="share" onchange="saveShare()" {'checked' if share_on else ''} style="width:18px;height:18px">
+   Share anonymous payment data
+ </label>
+ <div class="hint" style="margin-top:8px">On by default. ASVA uses payment patterns only, no names and no bill details, to keep improving how it helps every shop. Turn it off and your data is never shared or used for others.<span id="smsg" class="okmsg"></span></div>
+</div>
 <script>
 const TOKEN = {token!r};
+async function saveShare() {{
+  const on = document.getElementById('share').checked;
+  const r = await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{token: TOKEN, share_data: on}})}});
+  const m = document.getElementById('smsg');
+  m.textContent = r.ok ? '  Saved' : '  Failed';
+  setTimeout(() => {{ m.textContent = ''; }}, 2500);
+}}
 async function save() {{
   document.getElementById('msg').textContent = 'Saving...';
   const r = await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
@@ -2891,20 +3540,28 @@ class AccountsPayload(BaseModel):
     bank_account_no: Optional[str] = None
     bank_ifsc: Optional[str] = None
     bank_name: Optional[str] = None
+    share_data: Optional[bool] = None
 
 
 @router.post("/admin/accounts/save")
 async def admin_accounts_save(payload: AccountsPayload):
     biz = _biz_by_token(payload.token)
     db = require_db()
-    update = {
-        "upi_vpa": (payload.upi_vpa or "").strip() or None,
-        "upi_vpa_2": (payload.upi_vpa_2 or "").strip() or None,
-        "upi_vpa_3": (payload.upi_vpa_3 or "").strip() or None,
-        "bank_account_name": (payload.bank_account_name or "").strip() or None,
-        "bank_account_no": (payload.bank_account_no or "").strip() or None,
-        "bank_ifsc": (payload.bank_ifsc or "").strip().upper() or None,
-        "bank_name": (payload.bank_name or "").strip() or None,
+    # Only update the fields actually sent, so the data-sharing toggle (which
+    # posts share_data alone) never wipes the UPI/bank fields, and vice versa.
+    update: dict = {}
+    text_fields = {
+        "upi_vpa": payload.upi_vpa, "upi_vpa_2": payload.upi_vpa_2,
+        "upi_vpa_3": payload.upi_vpa_3, "bank_account_name": payload.bank_account_name,
+        "bank_account_no": payload.bank_account_no, "bank_ifsc": payload.bank_ifsc,
+        "bank_name": payload.bank_name,
     }
-    db.table("businesses").update(update).eq("id", biz["id"]).execute()
+    for k, v in text_fields.items():
+        if v is not None:
+            cleaned = v.strip().upper() if k == "bank_ifsc" else v.strip()
+            update[k] = cleaned or None
+    if payload.share_data is not None:
+        update["share_data"] = bool(payload.share_data)
+    if update:
+        db.table("businesses").update(update).eq("id", biz["id"]).execute()
     return {"ok": True}

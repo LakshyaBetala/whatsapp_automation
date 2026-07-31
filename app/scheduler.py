@@ -14,11 +14,33 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
-from app.jobs import eod_digest, keepalive, outbox_sweep, reminder_sweep, subscription_check
+from app.db import get_client
+from app.jobs import (eod_digest, keepalive, monitor, outbox_sweep,
+                      promise_followup, reminder_checkpoint, reminder_sweep,
+                      subscription_check)
+from app.services import monitoring
 
 log = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+
+
+def _tracked(name: str, fn):
+    """Wrap a scheduler job so every run stamps job_heartbeats (ok/fail). Lets
+    the health center show 'reminder sweep ran 4 min ago' and alert if a job
+    goes quiet. The job's own error handling is unchanged; we just record."""
+    async def _wrapped():
+        ok = True
+        try:
+            await fn()
+        except Exception:
+            ok = False
+            log.exception("Scheduled job %s failed", name)
+        finally:
+            db = get_client()
+            if db is not None:
+                monitoring.stamp_job(db, name, ok=ok)
+    return _wrapped
 
 
 def start() -> AsyncIOScheduler:
@@ -32,7 +54,7 @@ def start() -> AsyncIOScheduler:
     # (owner sets it from the bot with "DIGEST 9PM"); per-day dedup inside.
     if settings.enable_eod_digest:
         sched.add_job(
-            eod_digest.run,
+            _tracked("eod_digest", eod_digest.run),
             CronTrigger(minute=settings.eod_digest_minute),
             id="eod_digest",
             replace_existing=True,
@@ -47,7 +69,7 @@ def start() -> AsyncIOScheduler:
     # still catches up the next hour it is on. See jobs/reminder_sweep.py.
     if settings.enable_reminder_sweep:
         sched.add_job(
-            reminder_sweep.run,
+            _tracked("reminder_sweep", reminder_sweep.run),
             CronTrigger(minute=settings.reminder_sweep_minute),
             id="reminder_sweep",
             replace_existing=True,
@@ -56,10 +78,35 @@ def start() -> AsyncIOScheduler:
     else:
         log.info("Reminder sweep DISABLED (ENABLE_REMINDER_SWEEP=false)")
 
+    # Morning checkpoint: an hour before each business's reminder_hour, preview
+    # today's reminder list to the owner so they can HOLD anyone already paid.
+    # Hourly; each business fires once/day at its own checkpoint hour (dedup via
+    # checkpoint_date). Rides on the same deployment as the sweep.
+    if settings.enable_reminder_checkpoint and settings.enable_reminder_sweep:
+        sched.add_job(
+            _tracked("reminder_checkpoint", reminder_checkpoint.run),
+            CronTrigger(minute=settings.reminder_sweep_minute),
+            id="reminder_checkpoint",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+
+    # Promise-to-Pay follow-up: hourly, resume reminders for a promise whose day
+    # arrived unpaid (or mark it kept if the receipt cleared the bills). Rides on
+    # the same deployment as the reminder sweep.
+    if settings.enable_promise_capture and settings.enable_reminder_sweep:
+        sched.add_job(
+            _tracked("promise_followup", promise_followup.run),
+            CronTrigger(minute=settings.reminder_sweep_minute),
+            id="promise_followup",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+
     # Subscription lifecycle: warn before expiry, flip to grace/suspended.
     if settings.enable_subscription_check:
         sched.add_job(
-            subscription_check.run,
+            _tracked("subscription_check", subscription_check.run),
             CronTrigger(hour=9, minute=0),
             id="subscription_check",
             replace_existing=True,
@@ -73,7 +120,7 @@ def start() -> AsyncIOScheduler:
     # WhatsApp is offline (the queue simply waits).
     if settings.enable_outbox_send:
         sched.add_job(
-            outbox_sweep.run,
+            _tracked("outbox_sweep", outbox_sweep.run),
             IntervalTrigger(seconds=60),
             id="outbox_sweep",
             replace_existing=True,
@@ -83,6 +130,22 @@ def start() -> AsyncIOScheduler:
         )
     else:
         log.info("Outbox send DISABLED (ENABLE_OUTBOX_SEND=false)")
+
+    # Health watchdog: build the snapshot, check the bot WhatsApp, and email the
+    # operator about anything that needs attention (server/bot/shop WhatsApp
+    # down, stuck queues, high failure rate). Runs on the HOST only.
+    if settings.enable_monitor:
+        sched.add_job(
+            monitor.run,
+            IntervalTrigger(minutes=max(1, settings.monitor_interval_min)),
+            id="monitor",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
+        )
+    else:
+        log.info("Monitor watchdog DISABLED (ENABLE_MONITOR=false)")
 
     # Ping ourselves so the Supabase free project never idles into a pause.
     sched.add_job(

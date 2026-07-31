@@ -61,11 +61,20 @@ class BillListItem(BaseModel):
 
 # ── Background task: PDF + WhatsApp ───────────────────────────────────
 
-async def _generate_and_deliver(bill_id: str) -> None:
-    """Background task: generate invoice PDF, upload, then send WhatsApp.
+async def _generate_and_deliver(
+    bill_id: str,
+    pdf_base64: str | None = None,
+    pdf_filename: str | None = None,
+) -> None:
+    """Background task: deliver a bill to the customer on WhatsApp.
 
-    Runs after the API has already returned 201 to the caller.
-    Any failures are logged but never bubble up to the HTTP response.
+    If ``pdf_base64`` is given (Tally's OWN exported invoice, already in hand),
+    the exact bytes are sent DIRECTLY - no Supabase Storage upload/re-download
+    round-trip, so a storage hiccup can never drop the bill. Otherwise we reuse
+    the stored ``pdf_url`` or generate our own PDF.
+
+    Runs after the API has already returned to the caller. Any failure is
+    logged but never bubbles up.
     """
     db = require_db()
 
@@ -100,11 +109,12 @@ async def _generate_and_deliver(bill_id: str) -> None:
     )
 
     # ── 1. PDF ────────────────────────────────────────────────────────
-    # Prefer Tally's OWN exported invoice PDF if the agent already attached it
-    # (bill.pdf_url set during sync) - that is the exact GST tax-invoice, which
-    # ASVA cannot recreate (it has no line items). Otherwise generate our own.
+    # Prefer Tally's OWN exported invoice PDF (the exact GST tax-invoice, which
+    # ASVA cannot recreate). If the caller handed us the base64 bytes, we send
+    # those directly. Otherwise reuse the stored pdf_url or generate our own.
     pdf_url = bill.get("pdf_url")
-    if not pdf_url:
+    have_direct = bool(pdf_base64)
+    if not have_direct and not pdf_url:
         try:
             pdf_url = await pdf_service.generate_invoice_pdf(
                 business_name=biz.get("business_name", ""),
@@ -145,30 +155,46 @@ async def _generate_and_deliver(bill_id: str) -> None:
             amount=amount_str,
             date=date.fromisoformat(str(bill["invoice_date"])).strftime("%d-%m-%Y"),
             upi_link=biz.get("upi_vpa") or "",
-            pdf_url=pdf_url or "",
+            pdf_url="",   # never dump a storage URL into the message body
         )
 
-        await whatsapp.send_template(
-            business_id=bill["business_id"],
-            to_number=client_phone,
-            campaign_name=tpl_name,
-            template_params=[
-                client.get("name", "Customer"),
-                biz.get("business_name", ""),
-                invoice_num,
-                amount_str,
-                date.fromisoformat(str(bill["invoice_date"])).strftime("%d-%m-%Y"),
-            ],
-            business_name=biz.get("business_name", ""),
-            plan=plan,
-            message_type=MessageType.invoice,
-            client_id=client.get("id"),
-            bill_id=bill_id,
-            language=lang,
-            media_url=pdf_url,
-            media_filename=f"Invoice_{invoice_num}.pdf",
-            message_text=body,
-        )
+        if have_direct:
+            # Send the exact PDF bytes we already hold - most robust path.
+            await whatsapp.send_message(
+                business_id=bill["business_id"],
+                to_number=client_phone,
+                message_text=body,
+                plan=plan,
+                message_type=MessageType.invoice,
+                client_id=client.get("id"),
+                bill_id=bill_id,
+                language=lang,
+                pdf_base64=pdf_base64,
+                pdf_filename=pdf_filename or f"Invoice_{invoice_num}.pdf",
+                template_name=tpl_name,
+            )
+        else:
+            await whatsapp.send_template(
+                business_id=bill["business_id"],
+                to_number=client_phone,
+                campaign_name=tpl_name,
+                template_params=[
+                    client.get("name", "Customer"),
+                    biz.get("business_name", ""),
+                    invoice_num,
+                    amount_str,
+                    date.fromisoformat(str(bill["invoice_date"])).strftime("%d-%m-%Y"),
+                ],
+                business_name=biz.get("business_name", ""),
+                plan=plan,
+                message_type=MessageType.invoice,
+                client_id=client.get("id"),
+                bill_id=bill_id,
+                language=lang,
+                media_url=pdf_url,
+                media_filename=f"Invoice_{invoice_num}.pdf",
+                message_text=body,
+            )
     except Exception:
         log.exception("WhatsApp delivery failed for bill %s", bill_id)
 

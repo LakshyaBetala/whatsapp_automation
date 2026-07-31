@@ -17,6 +17,11 @@ from __future__ import annotations
 
 MAX_BATCHES = 5
 
+# A batch's "upi" field normally holds a UPI VPA (or "" = shop default). This
+# sentinel means "this batch collects by BANK TRANSFER" - the reminder then
+# leads with the shop's NEFT/IMPS bank details instead of a UPI id.
+BANK_SENTINEL = "__bank__"
+
 
 def default_batch(biz: dict) -> dict:
     """The implicit batch 0 for a business that has not configured batches."""
@@ -30,8 +35,40 @@ def default_batch(biz: dict) -> dict:
 
 
 def batch_vpa(biz: dict, batch: dict) -> str | None:
-    """The UPI VPA a batch pays into: its own, else the shop default."""
-    return (batch.get("upi") or "").strip() or (biz.get("upi_vpa") or None)
+    """The UPI VPA a batch pays into: its own, else the shop default. A batch set
+    to BANK collection still offers UPI via the shop default (so UPI payers keep
+    a one-tap option) - the bank details are added on top by batch_payment."""
+    sel = (batch.get("upi") or "").strip()
+    if sel == BANK_SENTINEL:
+        return (biz.get("upi_vpa") or None)
+    return sel or (biz.get("upi_vpa") or None)
+
+
+def bank_details(biz: dict) -> dict | None:
+    """The shop's NEFT/IMPS bank details for the reminder, or None if not set.
+    Account number is the minimum required field."""
+    no = (biz.get("bank_account_no") or "").strip()
+    if not no:
+        return None
+    return {
+        "name": (biz.get("bank_account_name") or "").strip(),
+        "no": no,
+        "ifsc": (biz.get("bank_ifsc") or "").strip(),
+        "bank": (biz.get("bank_name") or "").strip(),
+    }
+
+
+def batch_payment(biz: dict, batch: dict) -> dict:
+    """How a batch's reminder should present payment. Returns
+    {"primary": "upi"|"bank", "vpa": <str|None>, "bank": <dict|None>}.
+
+    The batch's account selection decides what the reminder carries: a UPI batch
+    sends UPI only; a "Bank transfer" batch leads with the bank/NEFT details (and
+    still offers the shop's default UPI). Bank details are NEVER added to a UPI
+    batch - the owner opts in per batch by choosing Bank transfer.
+    """
+    primary = "bank" if (batch.get("upi") or "").strip() == BANK_SENTINEL else "upi"
+    return {"primary": primary, "vpa": batch_vpa(biz, batch), "bank": bank_details(biz)}
 
 
 def batch_hour(biz: dict, batch: dict) -> int:

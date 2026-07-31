@@ -122,6 +122,66 @@ async def pending_refresh(business_id: uuid.UUID, agent_token: str):
     return {"requested": req}
 
 
+# ── Payment-entry pipeline (PAID -> queue -> confirm -> Tally) ────────────────
+class DepositLedgersPayload(BaseModel):
+    business_id: uuid.UUID
+    agent_token: str
+    ledgers: List[str] = []
+
+
+@router.post("/deposit-ledgers")
+async def push_deposit_ledgers(payload: DepositLedgersPayload):
+    """The agent reports the shop's Cash/Bank ledger names (read from Tally) so
+    the confirm popup can offer the owner their own deposit accounts."""
+    db = _verify_token(payload.business_id, payload.agent_token)
+    from app.services import receipts_queue as rq
+    rq.set_deposit_ledgers(db, str(payload.business_id), payload.ledgers)
+    return {"stored": len(payload.ledgers or [])}
+
+
+@router.get("/receipts/confirmed")
+async def receipts_confirmed(business_id: uuid.UUID, agent_token: str):
+    """Owner-approved receipts the agent must write into Tally, oldest first.
+    The agent does the exact FIFO bill allocation against Tally's own open bills
+    at post time, so the backend only needs to hand over party + amount + deposit."""
+    db = _verify_token(business_id, agent_token)
+    from app.services import receipts_queue as rq
+    rows = rq.list_confirmed(db, str(business_id))
+    return {"receipts": [{
+        "id": r["id"],
+        "party_ledger": r["party_ledger"],
+        "party_display": r.get("party_display"),
+        "amount": float(r["amount"]),
+        "deposit_ledger": r.get("deposit_ledger") or "Cash",
+        "receipt_date": str(r.get("receipt_date") or "")[:10],
+    } for r in rows]}
+
+
+class ReceiptReportPayload(BaseModel):
+    business_id: uuid.UUID
+    agent_token: str
+    id: str
+    ok: bool
+    voucher_id: Optional[str] = None
+    error: Optional[str] = None
+    allocation: Optional[list] = None
+
+
+@router.post("/receipts/report")
+async def receipts_report(payload: ReceiptReportPayload):
+    """The agent reports the outcome of writing a confirmed receipt into Tally.
+    Success -> 'posted' (keeps the voucher id + allocation for revert/audit);
+    failure -> 'failed' (with the error surfaced to the owner in the app)."""
+    db = _verify_token(payload.business_id, payload.agent_token)
+    from app.services import receipts_queue as rq
+    if payload.ok:
+        rq.mark(db, payload.id, "posted", voucher_id=payload.voucher_id,
+                allocation=payload.allocation)
+    else:
+        rq.mark(db, payload.id, "failed", error=payload.error or "Tally rejected the entry")
+    return {"recorded": True}
+
+
 class RegisterCompanyPayload(BaseModel):
     account_token: str      # agent_token of the customer's PRIMARY company
     company_name: str       # the Tally company to add
@@ -253,9 +313,11 @@ async def import_outstanding(payload: TallyImportPayload):
                     phones_added += 1
             else:
                 updates = {}
-                # Backfill phone if Tally has one and we don't (never
-                # overwrite a manually-set number)
-                if phone and not existing.get("whatsapp_number"):
+                # Tally is the source of truth for the customer's number: set it
+                # if we have none, OR if it changed in Tally (the shop corrected
+                # or updated the mobile). Only overwrite when Tally actually has a
+                # number, so a blank Tally field never wipes an existing one.
+                if phone and phone != existing.get("whatsapp_number"):
                     updates["whatsapp_number"] = phone
                     phones_added += 1
                 # Adopt Tally credit terms only while the client still has
@@ -327,6 +389,9 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
     _sync_company_name(db, biz, payload.company_name)
+    # Liveness for the ops health monitor: the watcher posts here every ~60s.
+    from app.services import license as _lic
+    _lic.stamp_last_seen(db, biz)
 
     sales_processed = 0
     new_bills = 0
@@ -411,19 +476,29 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                 # Deliver if the bill is recent. 10-day window (was 3) so a bill
                 # exported while the watcher was down/offline still goes out when
                 # it recovers - but old FY invoices at first onboarding don't.
+                # pdf_url doubles as the "already delivered" marker.
                 already_sent = bool(bill_row.get("pdf_url"))
                 fresh = invoice_date >= date.today() - timedelta(days=10)
                 if v.pdf_base64 and not already_sent and fresh and client.get("whatsapp_number"):
+                    # Upload to Storage for the dashboard link (best-effort), but
+                    # DELIVER using the base64 we already hold - so a storage
+                    # hiccup can never stop the send. Mark delivered BEFORE the
+                    # background send so a slow send can't double-fire next tick.
+                    url = None
                     try:
                         from app.services import pdf as pdf_service
                         url = await pdf_service.upload_pdf_base64(
                             bill_row["id"], v.voucher_number, v.pdf_base64)
-                        db.table("bills").update({"pdf_url": url}).eq("id", bill_row["id"]).execute()
-                        bill_row["pdf_url"] = url
-                        background_tasks.add_task(_generate_and_deliver, bill_row["id"])
-                        delivered.append(v.voucher_number)
                     except Exception as e:
-                        log.warning("Tally PDF upload/deliver failed for %s: %s", v.voucher_number, e)
+                        log.warning("Tally PDF storage upload failed for %s (delivering anyway): %s",
+                                    v.voucher_number, e)
+                    marker = url or "sent"
+                    db.table("bills").update({"pdf_url": marker}).eq("id", bill_row["id"]).execute()
+                    bill_row["pdf_url"] = marker
+                    background_tasks.add_task(
+                        _generate_and_deliver, bill_row["id"], v.pdf_base64,
+                        f"Invoice_{v.voucher_number}.pdf")
+                    delivered.append(v.voucher_number)
 
             elif v.voucher_type.lower() == "receipt":
                 # Idempotency: every sync sends the full FY (Tally ignores
@@ -504,42 +579,46 @@ class TallyOpenBill(BaseModel):
     amount: float                     # Tally's NET outstanding for this bill
 
 
+class TallyContact(BaseModel):
+    name: str                              # tally ledger name
+    whatsapp_number: Optional[str] = None  # agent-extracted number (field/alias/address)
+
+
+def _sync_contacts(db, biz: str, contacts: list, clients_by_ledger: dict) -> int:
+    """Keep customer WhatsApp numbers in step with Tally (the source of truth).
+    Runs every refresh but is cheap: only the few clients whose number actually
+    changed get written. Update-only - never creates clients here."""
+    updated = 0
+    for ct in contacts or []:
+        phone = _normalize_phone(ct.whatsapp_number)
+        if not phone:
+            continue
+        c = clients_by_ledger.get(ct.name)
+        if c and phone != c.get("whatsapp_number"):
+            try:
+                db.table("clients").update({"whatsapp_number": phone}).eq("id", c["id"]).execute()
+                c["whatsapp_number"] = phone
+                updated += 1
+            except Exception:
+                log.exception("contact number sync failed for %s", ct.name)
+    if updated:
+        log.info("Synced %d customer WhatsApp number(s) from Tally", updated)
+    return updated
+
+
 class TallyOutstandingsPayload(BaseModel):
     business_id: uuid.UUID
     agent_token: str
     company_name: str
     bills: list[TallyOpenBill]
     all_parties: list[str] = []       # every debtor ledger (to clear fully-paid ones)
+    contacts: list[TallyContact] = [] # {name, whatsapp_number} - keeps numbers current
     # Ledger ClosingBalance per party (Tally's authoritative "what they owe
     # today" total). This is the source of truth for the amount; the bill-wise
     # list above only breaks it into aged bills WHEN it reconciles. Sending
     # this fixes parties whose ledgers don't 'maintain balances bill-by-bill'
     # (they return zero bills, so without this they'd wrongly show as cleared).
     ledger_balances: dict[str, float] = {}
-
-
-async def _send_payment_confirmation(business_id, plan_name, client, delta, remaining):
-    """Background: tell a customer 'received Rs X, Rs Y remaining' when Tally
-    shows their balance dropped (i.e. a payment was recorded)."""
-    from app.services import whatsapp
-    from app.services.templates import render, inr
-    from app.models import Lang, MessageType, Plan
-    try:
-        lang = Lang(client.get("language") or "hi")
-    except Exception:
-        lang = Lang.hi
-    try:
-        _, body = render(
-            "payment_confirmation", lang,
-            client=client.get("name", "Customer"),
-            paid_amount=inr(delta), outstanding=inr(remaining))
-        await whatsapp.send_message(
-            business_id=business_id, to_number=client["whatsapp_number"],
-            message_text=body, plan=Plan(plan_name),
-            message_type=MessageType.payment_confirmation,
-            client_id=client["id"], language=lang, channel="shop")
-    except Exception:
-        log.exception("payment confirmation send failed for %s", client.get("name"))
 
 
 @router.post("/outstandings")
@@ -569,6 +648,9 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
         if c.get("tally_ledger_name")
     }
     clients_by_id = {c["id"]: c for c in clients_by_ledger.values()}
+
+    # Refresh customer numbers from Tally before anything else (cheap, targeted).
+    _sync_contacts(db, biz, payload.contacts, clients_by_ledger)
 
     incoming = defaultdict(list)
     for b in payload.bills:
@@ -682,13 +764,12 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
         except Exception as e:
             errors.append(f"mark-paid {len(idchunk)} failed: {e}")
 
-    # Customer payment confirmations (bounded, only if they have a number).
+    # Payments detected via Tally update the ledger SILENTLY. We deliberately do
+    # NOT message the customer "received Rs X" - that fired on every refresh a
+    # balance moved and felt like spam ("paid Rs 500" to everyone, repeatedly).
+    # The owner records the receipt in Tally; the dashboard reflects it. The only
+    # payment-related customer message is the "Thank you" reply when THEY send PAID.
     confirmations = 0
-    for cid, delta, remaining in payments[:30]:
-        cl = clients_by_id.get(cid)
-        if cl and cl.get("whatsapp_number"):
-            background_tasks.add_task(_send_payment_confirmation, biz, plan_name, cl, delta, remaining)
-            confirmations += 1
 
     # Stamp the sync so the dashboard's "last synced" is fresh every cycle (the
     # /sync endpoint only logs when there are vouchers; this runs every refresh).

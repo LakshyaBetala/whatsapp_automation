@@ -1,0 +1,416 @@
+"""License / heartbeat API - the server's authoritative subscription answer.
+
+The client (Tally agent + desktop app) calls POST /license/heartbeat every
+~30 min with its agent_token (and, optionally, its machine id + build version).
+The server records that it is alive, then returns the one true subscription
+state the client must obey. Enforcement of paid actions still happens
+server-side on every send; this endpoint powers the client's UI + update
+nudges + the ops health monitor.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import logging
+import secrets
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel
+
+from app.config import settings
+from app.db import require_db
+from app.models import Plan
+from app.services import i18n
+from app.services import license as lic
+from app.services import outbox
+from app.services import pairing
+
+log = logging.getLogger(__name__)
+router = APIRouter(prefix="/license", tags=["license"])
+
+
+def _require_admin(admin_key: Optional[str]) -> None:
+    """Gate ops actions behind ADMIN_API_KEY. While the key is unset the
+    endpoint refuses outright (safe default - no accidental open renewals)."""
+    configured = (settings.admin_api_key or "").strip()
+    if not configured:
+        raise HTTPException(status_code=503,
+                            detail="Renewal is disabled: set ADMIN_API_KEY in the server .env first.")
+    if not admin_key or not secrets.compare_digest(admin_key, configured):
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+
+
+async def _send_welcome(business_id: str, owner_name: str | None, code_display: str) -> None:
+    """Best-effort: greet a newly onboarded owner on WhatsApp (from the bot
+    number) and hand them their setup code + download link, so onboarding starts
+    the instant they are added. Never fails the create-business request."""
+    from app.services import whatsapp
+    name = (owner_name or "").strip()
+    body = (
+        f"Namaste{', ' + name if name else ''}. I am ASVA, your new collections assistant.\n\n"
+        "From today I will read your TallyPrime and send your bills and payment reminders "
+        "on WhatsApp from your own number, so you get paid faster without chasing anyone. "
+        "Each evening I will send you a short summary, and you can ask me anything right here.\n\n"
+        "Let's get you set up. Your setup code is:\n"
+        f"{code_display}\n"
+        "(valid 24 hours, one use)\n\n"
+        "On your Tally computer:\n"
+        "1. Open tryasva.com/download and install ASVA.\n"
+        "2. Type this code when it asks.\n"
+        "3. Pick your company and scan your WhatsApp.\n\n"
+        "That is all, about five minutes. Reply HELP any time to see what I can do."
+    )
+    try:
+        await whatsapp.notify_owner(business_id, body)
+        log.info("Sent welcome + setup code to owner of business %s", business_id)
+    except Exception:
+        log.exception("welcome message failed (business %s)", business_id)
+
+
+class HeartbeatPayload(BaseModel):
+    agent_token: str
+    machine_id: Optional[str] = None
+    agent_version: Optional[str] = None
+    wa_ready: Optional[bool] = None       # shop's own WhatsApp connected? (health)
+    outbox_pending: Optional[int] = None  # queued sends the shop still owes
+
+
+_BIZ_COLS = ("id, business_name, plan, plan_expires_on, license_key, "
+             "machine_id, agent_version, owner_language")
+
+
+def _biz_by_token(db, token: str) -> dict:
+    r = (db.table("businesses").select(_BIZ_COLS)
+         .eq("agent_token", token).order("created_at").limit(1).execute())
+    if not r.data:
+        raise HTTPException(status_code=401, detail="Invalid agent token")
+    return r.data[0]
+
+
+@router.post("/heartbeat")
+async def heartbeat(payload: HeartbeatPayload):
+    """Record the client as alive and return the authoritative subscription
+    state (plan, expiry, remaining messages, debtor cap, feature flags, update
+    info). Safe to call often; it is cheap and idempotent."""
+    db = require_db()
+    biz = _biz_by_token(db, payload.agent_token)
+
+    # Record liveness for the health monitor (best-effort - never fail the
+    # heartbeat over a bookkeeping write). machine_id is set once and only
+    # changed if it was empty, so a copied install shows a different id later.
+    now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    update: dict = {"last_seen": now_iso}
+    if payload.agent_version:
+        update["agent_version"] = payload.agent_version[:40]
+    if payload.machine_id and not (biz.get("machine_id") or "").strip():
+        update["machine_id"] = payload.machine_id[:120]
+    if payload.wa_ready is not None:
+        update["wa_ready"] = bool(payload.wa_ready)
+        update["wa_checked_at"] = now_iso
+    if payload.outbox_pending is not None:
+        update["outbox_pending"] = max(0, int(payload.outbox_pending))
+    try:
+        db.table("businesses").update(update).eq("id", biz["id"]).execute()
+    except Exception:
+        log.exception("heartbeat liveness write failed (continuing)")
+
+    # Reflect what this ping just reported (version especially) so the returned
+    # state - e.g. below_min - is about THIS build, not the previously stored one.
+    biz.update(update)
+    return lic.build_heartbeat(db, biz)
+
+
+class SetLanguagePayload(BaseModel):
+    agent_token: str
+    language: str
+
+
+@router.post("/set-language")
+async def set_language(payload: SetLanguagePayload):
+    """The app saves the owner's chosen language (english | hinglish) here, so the
+    WhatsApp assistant answers the owner in the SAME language as the app. Scoped
+    to the one business by its agent_token; unknown values normalise to English."""
+    db = require_db()
+    biz = _biz_by_token(db, payload.agent_token)
+    lang = i18n.norm_lang(payload.language)
+    try:
+        db.table("businesses").update({"owner_language": lang}).eq("id", biz["id"]).execute()
+    except Exception:
+        log.exception("set-language write failed (business %s)", biz["id"])
+        raise HTTPException(status_code=500, detail="Could not save language")
+    return {"ok": True, "owner_language": lang}
+
+
+@router.get("/status")
+async def status(token: str):
+    """Read-only status for a dashboard/browser (no liveness write). Same body
+    as the heartbeat, keyed by the agent token as a query param."""
+    db = require_db()
+    biz = _biz_by_token(db, token)
+    return lic.build_heartbeat(db, biz)
+
+
+class CreateBizPayload(BaseModel):
+    admin_key: str
+    owner_name: str
+    whatsapp_number: str
+    business_name: Optional[str] = None
+    plan: str = "starter"
+    months: float = 1                 # first paid cycle length (30-day cycles)
+
+
+@router.post("/create-business")
+async def create_business(payload: CreateBizPayload, background_tasks: BackgroundTasks):
+    """OPS ONLY: onboard a new shop. Creates the business row and mints its
+    agent_token + licence key + first paid cycle, and returns them so the
+    operator can drop the token into the new shop's config. The agent_token is
+    a SECRET shown once here - it is never exposed by any read endpoint."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    try:
+        biz = lic.create_business(
+            db, owner_name=payload.owner_name, whatsapp_number=payload.whatsapp_number,
+            business_name=payload.business_name, plan=payload.plan, months=payload.months)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        log.exception("create_business failed")
+        raise HTTPException(status_code=409,
+                            detail="Could not create - is that WhatsApp number already used?")
+    # Mint a one-time pairing code so the operator can onboard the shop by
+    # reading a short code aloud - the shop never types the agent_token.
+    code = None
+    try:
+        code = pairing.mint(db, biz["id"], note="new-business")
+    except Exception:
+        log.exception("pairing code mint failed (continuing; token still returned)")
+    # Greet the new owner on WhatsApp and hand them the setup code, in the
+    # background so the operator's Create response stays instant.
+    if code:
+        background_tasks.add_task(_send_welcome, biz["id"],
+                                  biz.get("owner_name"), code["code_display"])
+    log.info("Onboarded business %s (%s)", biz.get("id"), biz.get("business_name"))
+    return {
+        "ok": True,
+        "business_id": biz["id"],
+        "business_name": biz.get("business_name") or "",
+        "owner_name": biz.get("owner_name") or "",
+        "whatsapp_number": biz.get("whatsapp_number") or "",
+        "agent_token": biz["agent_token"],       # secret, shown once
+        "license_key": biz["license_key"],
+        "plan": biz["plan"],
+        "plan_expires_on": str(biz.get("plan_expires_on"))[:10],
+        "pairing_code": code["code"] if code else None,
+        "pairing_code_display": code["code_display"] if code else None,
+        "pairing_expires_on": code["expires_at"] if code else None,
+    }
+
+
+class PairPayload(BaseModel):
+    code: str
+
+
+@router.post("/pair")
+async def pair(payload: PairPayload):
+    """PUBLIC: a fresh install redeems a one-time pairing code (minted by the
+    operator) to receive its business identity + agent_token. The code IS the
+    bearer credential - single use, short-lived - so there is deliberately no
+    admin key here. Nothing secret ships in the installer; this is how it learns
+    which shop it belongs to."""
+    db = require_db()
+    try:
+        out = pairing.redeem(db, payload.code)
+    except pairing.PairingError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    log.info("Paired an install to business %s", out["business_id"])
+    return {"ok": True, **out}
+
+
+class OutboxPullPayload(BaseModel):
+    agent_token: str
+    limit: int = 15
+
+
+@router.post("/outbox/pull")
+async def outbox_pull(payload: OutboxPullPayload):
+    """THIN CLIENT: a keyless shop pulls its own queued customer sends to deliver
+    from its WhatsApp. The agent_token scopes this to that one business; the
+    server withholds everything outside the shop's send window."""
+    db = require_db()
+    biz = _biz_by_token(db, payload.agent_token)
+    return {"ok": True, "items": outbox.pull(db, biz["id"], limit=payload.limit)}
+
+
+class OutboxAckPayload(BaseModel):
+    agent_token: str
+    id: str
+    status: str
+    attempts: int = 1
+    error: Optional[str] = None
+
+
+@router.post("/outbox/ack")
+async def outbox_ack(payload: OutboxAckPayload):
+    """THIN CLIENT: report the outcome of a delivery the shop attempted. On a
+    confirmed send the server mirrors the audit row and drops the stored PDF."""
+    db = require_db()
+    biz = _biz_by_token(db, payload.agent_token)
+    ok = outbox.ack(db, biz["id"], payload.id, payload.status,
+                    payload.attempts, payload.error)
+    return {"ok": ok}
+
+
+class MintCodePayload(BaseModel):
+    admin_key: str
+    business_id: str
+    ttl_hours: int = 24
+    note: Optional[str] = None
+
+
+@router.post("/mint-code")
+async def mint_code(payload: MintCodePayload):
+    """OPS ONLY: mint a pairing code for an EXISTING business - e.g. re-pair a
+    shop onto a fresh install (its DB-stored reminders carry over untouched)."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    r = (db.table("businesses").select("id, business_name")
+         .eq("id", payload.business_id).limit(1).execute()).data
+    if not r:
+        raise HTTPException(status_code=404, detail="Business not found")
+    # Idempotent: reuse the business's current live code if it still has one, so
+    # pressing "Get code" repeatedly shows the SAME code instead of a new pile.
+    out = pairing.active_code(db, payload.business_id) or pairing.mint(
+        db, payload.business_id, ttl_hours=payload.ttl_hours, note=payload.note or "re-pair")
+    return {"ok": True, "business_id": payload.business_id,
+            "business_name": r[0].get("business_name") or "", **out}
+
+
+class RenewPayload(BaseModel):
+    admin_key: str
+    # Identify the business by ONE of these (agent_token is easiest from config).
+    agent_token: Optional[str] = None
+    license_key: Optional[str] = None
+    business_id: Optional[str] = None
+    months: float = 1                 # 30-day cycles to add (fractions ok)
+    plan: Optional[str] = None        # optionally move the plan tier
+
+
+@router.post("/renew")
+async def renew(payload: RenewPayload):
+    """OPS ONLY: mark a business paid - extend its 30-day cycle (and optionally
+    set its plan). The client can NEVER call this; it needs ADMIN_API_KEY.
+
+    Renewing on time stacks onto the remaining days; renewing late starts from
+    today. Returns the fresh authoritative state."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+
+    sel = "id, business_name, plan, plan_expires_on, license_key, machine_id, agent_version"
+    q = db.table("businesses").select(sel)
+    if payload.agent_token:
+        q = q.eq("agent_token", payload.agent_token)
+    elif payload.license_key:
+        q = q.eq("license_key", payload.license_key)
+    elif payload.business_id:
+        q = q.eq("id", payload.business_id)
+    else:
+        raise HTTPException(status_code=400, detail="Give agent_token, license_key or business_id")
+    r = q.order("created_at").limit(1).execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    biz = r.data[0]
+
+    if payload.months <= 0 or payload.months > 60:
+        raise HTTPException(status_code=400, detail="months must be between 0 and 60")
+
+    update: dict = {}
+    if payload.plan:
+        try:
+            update["plan"] = Plan(payload.plan).value
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail=f"Unknown plan '{payload.plan}'. Use starter/growth/pro/max.")
+    new_expiry = lic.renew_expiry(biz.get("plan_expires_on"), payload.months)
+    update["plan_expires_on"] = new_expiry.isoformat()
+    db.table("businesses").update(update).eq("id", biz["id"]).execute()
+
+    biz.update(update)
+    hb = lic.build_heartbeat(db, biz)
+    log.info("Renewed %s -> expires %s (plan %s)", biz["id"], new_expiry, hb["plan"])
+    return {"ok": True, "renewed_until": new_expiry.isoformat(), "heartbeat": hb}
+
+
+class RenewUntilPayload(BaseModel):
+    admin_key: str
+    business_id: str
+    until: str                        # YYYY-MM-DD - the exact date access lasts to
+    plan: Optional[str] = None        # optional tier (e.g. "pro" for the free pilot)
+
+
+@router.post("/renew-until")
+async def renew_until(payload: RenewUntilPayload):
+    """OPS ONLY: set a business's access to last until an EXACT date (not a
+    +N-month cycle) - e.g. free Pro for a pilot shop until 2026-09-15. Optionally
+    moves the plan tier. Reversible with /suspend or another /renew-until."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    try:
+        until = _dt.date.fromisoformat(payload.until[:10])
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="until must be YYYY-MM-DD")
+    update: dict = {"plan_expires_on": until.isoformat()}
+    if payload.plan:
+        try:
+            update["plan"] = Plan(payload.plan).value
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail="Unknown plan. Use starter/growth/pro/max.")
+    r = db.table("businesses").update(update).eq("id", payload.business_id).execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    log.info("Set %s access until %s (plan %s)", payload.business_id, until, update.get("plan", "unchanged"))
+    return {"ok": True, "until": until.isoformat(), "plan": update.get("plan")}
+
+
+class SetPlanPayload(BaseModel):
+    admin_key: str
+    business_id: str
+    plan: str
+
+
+@router.post("/set-plan")
+async def set_plan(payload: SetPlanPayload):
+    """OPS ONLY: change a business's plan tier WITHOUT touching its expiry."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    try:
+        plan = Plan(payload.plan).value
+    except ValueError:
+        raise HTTPException(status_code=400,
+                            detail="Unknown plan. Use starter/growth/pro/max.")
+    r = db.table("businesses").update({"plan": plan}).eq("id", payload.business_id).execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    return {"ok": True, "plan": plan}
+
+
+class SuspendPayload(BaseModel):
+    admin_key: str
+    business_id: str
+
+
+@router.post("/suspend")
+async def suspend(payload: SuspendPayload):
+    """OPS ONLY: cut a business off now (non-payment) by expiring it past the
+    grace window. Sends stop immediately (server-side). Reversible with /renew."""
+    _require_admin(payload.admin_key)
+    db = require_db()
+    r = (db.table("businesses").select("id, plan, plan_expires_on")
+         .eq("id", payload.business_id).limit(1).execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    # Backdate past the grace window so effective_status = suspended right away.
+    past = (_dt.date.today() - _dt.timedelta(days=lic.subs.GRACE_DAYS + 1)).isoformat()
+    db.table("businesses").update({"plan_expires_on": past}).eq("id", payload.business_id).execute()
+    log.info("Suspended %s (expiry set to %s)", payload.business_id, past)
+    return {"ok": True, "suspended": True, "expiry": past}

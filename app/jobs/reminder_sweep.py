@@ -28,7 +28,7 @@ from decimal import Decimal
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
-from app.services import whatsapp
+from app.services import checkpoint, promises, whatsapp
 from app.services.templates import inr
 
 log = logging.getLogger(__name__)
@@ -271,6 +271,7 @@ async def run() -> None:
             "id, business_name, whatsapp_number, plan, blackout_dates, "
             "reminders_enabled, upi_vpa, reminder_cadence, weekly_off_day, "
             "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
+            "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
             "discount_pct, overdue_repeat_days, overdue_max_repeats, plan_expires_on, "
             "reminder_batches, catchup_date, catchup_action"
         )
@@ -287,11 +288,21 @@ async def run() -> None:
     # holidays (blackout_dates) pause a day (handled per-bill below).
     businesses = {
         b["id"]: b for b in (biz_resp.data or [])
-        if subs.effective_status(b.get("plan_expires_on")) != "suspended"
+        if subs.live_status(b.get("plan_expires_on")) != "suspended"
     }
     if not businesses:
         log.info("Reminder sweep - nothing to do (no active businesses)")
         return
+
+    # Parties the owner HELD in this morning's checkpoint (already paid). One
+    # query, tolerant of a missing migration 027 -> {} (checkpoint off).
+    held = checkpoint.held_sets(db, list(businesses.keys()))
+    # Parties on a live Promise-to-Pay hold (a customer claimed payment or
+    # promised a date). One query, tolerant of a missing migration 028 -> {}.
+    # A live promise beats the cadence; the hold auto-expires and the follow-up
+    # job resumes the single latest reminder if it goes unpaid.
+    promised = (promises.held_now(db, list(businesses.keys()))
+                if settings.enable_promise_capture else {})
 
     # ── Fetch ALL open bills with client data in one query ────────────
     bills_resp = (
@@ -299,7 +310,7 @@ async def run() -> None:
         .select(
             "id, invoice_number, amount, outstanding, status, due_date, "
             "invoice_date, business_id, client_id, "
-            "clients(id, name, whatsapp_number, language, reminders_enabled, credit_days, "
+            "clients(id, name, whatsapp_number, language, reminders_enabled, excluded, credit_days, "
             "reminder_batch, reminder_anchor, created_at)"
         )
         .in_("status", ["pending", "partial", "overdue"])
@@ -340,10 +351,22 @@ async def run() -> None:
     for (biz_id, client_id), p in parties.items():
         try:
             biz, client = p["biz"], p["client"]
+            # Owner held this party in this morning's checkpoint (already paid).
+            if client_id in held.get(biz_id, set()):
+                skipped += 1
+                continue
+            # Party is on a live Promise-to-Pay hold (claimed paid / promised a day).
+            if client_id in promised.get(biz_id, set()):
+                skipped += 1
+                continue
             if cap > 0 and sent_per_biz.get(biz_id, 0) >= cap:
                 skipped += 1
                 continue
             if not client.get("reminders_enabled", True):
+                skipped += 1
+                continue
+            # Owner put this party on the do-not-chase (excluded) list.
+            if client.get("excluded"):
                 skipped += 1
                 continue
             # Holiday (calendar-marked) pauses the day; catch-up next working day.

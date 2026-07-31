@@ -11,9 +11,8 @@ from decimal import Decimal
 from typing import Optional
 
 from app.db import require_db
-from app.models import Lang, MessageType, Plan
 from app.services import whatsapp
-from app.services.templates import inr, render
+from app.services.templates import inr
 
 log = logging.getLogger(__name__)
 
@@ -104,72 +103,18 @@ async def apply_payment(
             new_status,
         )
 
-    # ── Send payment confirmation to customer ─────────────────────────
+    # We do NOT send the customer a "received Rs X" confirmation - it felt like
+    # spam. The payment just updates the ledger. Notify the OWNER so they have a
+    # quiet record that it landed (this path is the owner's own PAID command).
     client_resp = (
-        db.table("clients")
-        .select("name, whatsapp_number, language")
-        .eq("id", client_id)
-        .single()
-        .execute()
+        db.table("clients").select("name").eq("id", client_id).single().execute()
     )
-    biz_resp = (
-        db.table("businesses")
-        .select("business_name, whatsapp_number, plan")
-        .eq("id", business_id)
-        .single()
-        .execute()
+    cname = (client_resp.data or {}).get("name", "Customer")
+    await whatsapp.notify_owner(
+        business_id,
+        f"{cname}: payment of {inr(amount)} recorded ({source}). "
+        f"{len(bills_affected)} bill(s) updated.",
     )
-    client = client_resp.data
-    biz = biz_resp.data
-
-    if client and biz and client.get("whatsapp_number"):
-        lang = Lang(client.get("language") or "hi")
-        plan = Plan(biz["plan"])
-
-        # Total remaining outstanding for this client
-        remaining_resp = (
-            db.table("bills")
-            .select("outstanding")
-            .eq("business_id", business_id)
-            .eq("client_id", client_id)
-            .in_("status", ["pending", "partial", "overdue"])
-            .execute()
-        )
-        total_remaining = sum(
-            Decimal(str(r["outstanding"])) for r in (remaining_resp.data or [])
-        )
-
-        tpl_name, body = render(
-            "payment_confirmation", lang,
-            client=client["name"],
-            paid_amount=inr(amount),
-            outstanding=inr(total_remaining),
-        )
-
-        await whatsapp.send_template(
-            business_id=business_id,
-            to_number=client["whatsapp_number"],
-            campaign_name=tpl_name,
-            template_params=[
-                client["name"],
-                inr(amount),
-                inr(total_remaining),
-            ],
-            business_name=biz.get("business_name", ""),
-            plan=plan,
-            message_type=MessageType.payment_confirmation,
-            client_id=client_id,
-            language=lang,
-            message_text=body,
-        )
-
-    # ── Notify owner ──────────────────────────────────────────────────
-    if biz and client:
-        alert = (
-            f"{client['name']} ne {inr(amount)} payment kiya "
-            f"({source}). {len(bills_affected)} bill(s) updated."
-        )
-        await whatsapp.notify_owner(business_id, alert)
 
     return {
         "applied": True,

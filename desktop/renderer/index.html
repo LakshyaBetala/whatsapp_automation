@@ -27,6 +27,32 @@
   #topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; background: #fff; border-bottom: 1px solid #EAEAEA; font-size: .84rem; color: #787774; flex-shrink: 0; }
   #topbar .tstat { display: flex; align-items: center; gap: 8px; min-width: 0; }
   #topbar .tstat b { color: #2F3437; font-weight: 600; }
+  #pagereload { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
+  #pagereload:hover { background: #eef3ef; }
+  #pagereload:active { transform: scale(.97); }
+  #phonebtn, #updchk { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
+  #phonebtn:hover, #updchk:hover { background: #eef3ef; }
+  #phonebtn:active, #updchk:active { transform: scale(.97); }
+  body.dark #updchk { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+  #phonemodal { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45); align-items: center; justify-content: center; }
+  #phonemodal .pcard { background: #fff; border-radius: 14px; padding: 24px; max-width: 340px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
+  #phonemodal h3 { margin: 0 0 8px; font-size: 1.15rem; color: #14201a; }
+  #phonemodal p { margin: 0 0 16px; font-size: .86rem; color: #6b7d72; line-height: 1.5; }
+  #phonemodal img { width: 220px; height: 220px; border: 1px solid #EAEAEA; border-radius: 10px; }
+  #phonemodal .plink { margin: 12px 0; font-size: .72rem; color: #9aa; word-break: break-all; }
+  #phonemodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
+  body.dark #phonebtn { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+  body.dark #phonemodal .pcard { background: #17211b; }
+  body.dark #phonemodal h3 { color: #eef3ef; }
+  #whatsnewmodal { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45); align-items: center; justify-content: center; }
+  #whatsnewmodal .wncard { background: #fff; border-radius: 14px; padding: 24px 26px; max-width: 400px; text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
+  #whatsnewmodal h3 { margin: 0 0 14px; font-size: 1.15rem; color: #14201a; }
+  #whatsnewmodal ul { margin: 0 0 18px; padding-left: 20px; }
+  #whatsnewmodal li { font-size: .88rem; color: #3a4a41; line-height: 1.55; margin-bottom: 8px; }
+  #whatsnewmodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
+  body.dark #whatsnewmodal .wncard { background: #17211b; }
+  body.dark #whatsnewmodal h3 { color: #eef3ef; }
+  body.dark #whatsnewmodal li { color: #ccd8d0; }
   .langtoggle { display: inline-flex; flex-shrink: 0; }
   .langtoggle button { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; cursor: pointer; font-size: .78rem; font-weight: 600; }
   .langtoggle button:first-child { border-radius: 6px 0 0 6px; }
@@ -38,6 +64,14 @@
   .col { position: absolute; inset: 0; display: flex; flex-direction: column; }
   .grow { flex: 1; position: relative; }
   webview { width: 100%; height: 100%; border: 0; }
+  #updatebar { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; background: #294d38; color: #eef6ef; font-size: .9rem; flex-shrink: 0; }
+  #updatebar .whatsnew { margin-top: 5px; font-size: .8rem; font-weight: 400; line-height: 1.45; color: #cfe6d8; }
+  #updatebar b { color: #fff; }
+  #updatebar.must { background: #5a1e1a; color: #ffe6e2; }
+  #updatebar.must b { color: #fff; }
+  #updatebtn { border: 0; background: #46d67e; color: #10321f; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: .84rem; flex-shrink: 0; }
+  #updatebtn:hover { background: #5fe38f; }
+  #updatebtn:active { transform: scale(.97); }
   .banner { padding: 10px 16px; font-size: .92rem; display: none; }
   .banner.warn { display: block; background: #FBF3DB; color: #956400; border-bottom: 1px solid #efdfa8; }
   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #F7F6F3; color: #787774; font-size: 1.05rem; text-align: center; padding: 24px; }
@@ -67,6 +101,66 @@
   label.auto { display: inline-flex; align-items: center; gap: 8px; margin: 14px 0; font-size: .92rem; }
   #log { background: #14231b; color: #b6f5c8; font-family: 'SF Mono',Consolas,monospace; font-size: 11.5px; padding: 12px; height: 200px; overflow: auto; white-space: pre-wrap; border-radius: 8px; }
   .toprow { display: flex; justify-content: space-between; align-items: center; }
+
+  /* Sync progress bar (thin, under the top bar) */
+  #syncbar { height: 3px; background: transparent; overflow: hidden; flex-shrink: 0; }
+  #syncbar.on { background: #e2eae5; }
+  #syncbar .fill { height: 100%; width: 30%; background: #46d67e; display: none; }
+  #syncbar.on .fill { display: block; animation: syncmove 1.15s ease-in-out infinite; }
+  /* Determinate mode: real % from the Tally reader drives the width, no animation. */
+  #syncbar.det .fill { animation: none; margin-left: 0; width: 0; transition: width .4s ease; }
+  @keyframes syncmove { 0% { margin-left: -32%; } 100% { margin-left: 102%; } }
+  #synclabel { display: none; padding: 4px 16px; font-size: .8rem; color: #2f7d4a; background: #eef6ef; flex-shrink: 0; }
+  #synclabel.on { display: block; }
+  body.dark #synclabel { background: #16221b; color: #8fdca9; }
+
+  /* Change-company picker (in the Status panel) */
+  #cocbtn { background: #1f6c9f; }
+  #cocbtn:hover { background: #2b80b8; }
+  .cocitem { display: block; width: 100%; text-align: left; margin-top: 6px; padding: 9px 12px; border: 1px solid #EAEAEA; border-radius: 8px; background: #fff; cursor: pointer; font: inherit; font-size: .9rem; }
+  .cocitem:hover:not(:disabled) { background: #eef3ef; }
+  .cocitem:disabled { opacity: .55; cursor: default; }
+  body.dark .cocitem { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+
+  /* Theme toggle */
+  #themebtn { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; border-radius: 6px; cursor: pointer; font-size: .82rem; font-weight: 600; flex-shrink: 0; }
+  #themebtn:hover { background: #eef3ef; }
+
+  /* Diagnostics (inside the Status panel) */
+  .diagbtn { font: inherit; background: #294d38; color: #fff; border: 0; border-radius: 6px; padding: 9px 16px; cursor: pointer; font-weight: 700; }
+  .diagbtn:hover { background: #346b49; } .diagbtn:active { transform: scale(.98); }
+  .diagbtn:disabled { opacity: .6; cursor: default; }
+  #diagresults { margin: 12px 0 2px; }
+  .diagrow { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid #EAEAEA; font-size: .9rem; }
+  .diagrow .ic { font-weight: 800; flex-shrink: 0; width: 16px; text-align: center; }
+  .diagrow.ok .ic { color: #2f9e54; } .diagrow.bad .ic { color: #d9463b; } .diagrow.info .ic { color: #8a8a86; }
+  .diagrow .dt b { display: block; color: #2F3437; }
+  .diagrow .dt span { color: #787774; }
+  .logtoggle { font: inherit; background: none; border: 0; color: #787774; cursor: pointer; text-decoration: underline; padding: 8px 0 0; font-size: .85rem; }
+
+  /* Dark mode (app frame; the dashboard pages inside stay light for now).
+     Base flip first so NOTHING inherits dark text on a dark surface, then every
+     light surface gets an explicit dark background. This is what prevents the
+     "black text I can't read" problem. */
+  body.dark { color: #dfe8e2; }
+  body.dark #main { background: #0f1512; }
+  body.dark #topbar { background: #14201a; color: #9fb7a6; border-bottom-color: #24332b; }
+  body.dark #topbar .tstat b { color: #eef3ef; }
+  body.dark #pagereload, body.dark .langtoggle button, body.dark #themebtn { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+  body.dark .langtoggle button.on { background: #294d38; color: #fff; border-color: #294d38; }
+  body.dark .overlay { background: #0f1512; color: #9fb7a6; }
+  body.dark #syncbar.on { background: #24332b; }
+  body.dark .statuscard { background: #16221b; color: #dfe8e2; }
+  body.dark .statuscard h2 { color: #fff; }
+  body.dark .srow, body.dark .diagrow { border-bottom-color: #24332b; }
+  body.dark .srow .sname, body.dark .diagrow .dt b { color: #eef3ef; }
+  body.dark .srow .stext, body.dark .diagrow .dt span, body.dark .logtoggle { color: #9fb7a6; }
+  body.dark .srow button, body.dark .closebtn { background: #1e2c23; color: #cfe0d5; border-color: #2c4536; }
+  /* WhatsApp Setup tab (a white surface) - must go dark too or its text vanishes. */
+  body.dark .setupcol { background: #16221b; border-right-color: #24332b; }
+  body.dark .qrwait { color: #9fb7a6; }
+  body.dark .qrimg { border-color: #2c4536; background: #fff; }  /* QR needs white quiet-zone to scan */
+  body.dark .banner.warn { background: #3a3320; color: #f0d68a; border-bottom-color: #4a411f; }
 </style>
 </head>
 <body>
@@ -76,6 +170,7 @@
     <select id="cosel" title="Switch company" style="display:none;margin:0 12px 12px;padding:8px;border-radius:6px;background:#123524;color:#dfe9e2;border:1px solid #2c5c42;width:calc(100% - 24px);font-size:.9rem"></select>
     <button class="nav on" data-v="dash">Dashboard<small>Parties, dues and bills</small></button>
     <button class="nav" data-v="reminders">Reminders<small>Batches, time and holidays</small></button>
+    <button class="nav" data-v="payments">Payments<small>Who paid, confirm to Tally</small></button>
     <button class="nav" data-v="analytics">Analytics<small>Your business numbers</small></button>
     <button class="nav" data-v="accounts">Accounts<small>UPI and bank details</small></button>
     <button class="nav" data-v="setup">WhatsApp Setup<small>Connect your number</small></button>
@@ -93,10 +188,38 @@
   <div id="main">
     <div id="topbar">
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
-      <div class="langtoggle">
-        <button id="lang-en" onclick="setLang('english')">EN</button>
-        <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="pagereload" onclick="reloadActive()" title="Refresh this page">&#8635; Reload</button>
+        <button id="updchk" onclick="checkForUpdate()" title="Check for a new ASVA version">&#8681; Check update</button>
+        <button id="phonebtn" onclick="openPhoneApp()" title="Open ASVA on your phone">&#128241; Phone app</button>
+        <div class="langtoggle">
+          <button id="lang-en" onclick="setLang('english')">EN</button>
+          <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
+        </div>
+        <button id="themebtn" onclick="toggleTheme()" title="Switch dark / light">Dark</button>
       </div>
+    </div>
+    <div id="phonemodal" onclick="if(event.target===this)this.style.display='none'">
+      <div class="pcard">
+        <h3>ASVA on your phone</h3>
+        <p>Scan this with your phone camera, then tap <b>Add to Home Screen</b>. It shows your live dues and who to chase, read-only, linked to this shop.</p>
+        <img id="phoneqr" alt="Scan to open ASVA on your phone">
+        <div class="plink"><span id="phonelink"></span></div>
+        <button class="pclose" onclick="document.getElementById('phonemodal').style.display='none'">Close</button>
+      </div>
+    </div>
+    <div id="whatsnewmodal" onclick="if(event.target===this)this.style.display='none'">
+      <div class="pcard wncard">
+        <h3 id="wntitle">What's new</h3>
+        <ul id="wnlist"></ul>
+        <button class="pclose" onclick="document.getElementById('whatsnewmodal').style.display='none'">Got it</button>
+      </div>
+    </div>
+    <div id="syncbar"><div class="fill"></div></div>
+    <div id="synclabel"></div>
+    <div id="updatebar">
+      <span id="updatemsg">A new version of ASVA is ready.</span>
+      <button id="updatebtn" onclick="applyUpdate()">Restart to update</button>
     </div>
     <div id="maincontent">
     <div class="view on" id="v-dash">
@@ -112,6 +235,12 @@
     <div class="view" id="v-reminders">
       <div class="grow" style="position:absolute;inset:0">
         <webview id="wv-reminders" src="about:blank"></webview>
+      </div>
+    </div>
+
+    <div class="view" id="v-payments">
+      <div class="grow" style="position:absolute;inset:0">
+        <webview id="wv-payments" src="about:blank"></webview>
       </div>
     </div>
 
@@ -140,11 +269,16 @@
     <div id="statuspanel" onclick="if(event.target.id==='statuspanel')toggleStatus()">
       <div class="statuscard">
         <div class="toprow"><h2>Services</h2><button class="closebtn" onclick="toggleStatus()">Close</button></div>
-        <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">Backend (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="restart('backend')">Restart</button></div>
+        <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">ASVA server (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="runDiag()">Check</button></div>
         <div class="srow"><span class="dot" id="s-whatsapp"></span><div class="mid"><div class="sname">Shop WhatsApp</div><div class="stext" id="st-whatsapp">checking...</div></div><button onclick="restart('whatsapp')">Restart</button></div>
         <div class="srow"><span class="dot ok"></span><div class="mid"><div class="sname">Tally watcher</div><div class="stext">Running - new Tally bills reach WhatsApp in ~2 min.</div></div><button onclick="restart('watcher')">Restart</button></div>
         <label class="auto"><input type="checkbox" id="autostart"> Windows chalu hote hi ASVA apne aap khul jaye</label>
-        <div id="log"></div>
+        <div style="margin-top:6px"><button class="diagbtn" id="diagbtn" onclick="runDiag()">Check connection and find the problem</button></div>
+        <div id="diagresults"></div>
+        <div style="margin-top:14px"><button class="diagbtn" id="cocbtn" onclick="openCompanyPicker()">Change Tally company</button></div>
+        <div id="cocpicker"></div>
+        <button class="logtoggle" id="logtoggle" onclick="toggleLog()">Show technical logs</button>
+        <div id="log" style="display:none"></div>
       </div>
     </div>
     </div><!-- /#maincontent -->
@@ -152,7 +286,109 @@
 </div>
 
 <script>
-let CONFIG = null, loaded = {};
+let CONFIG = null, loaded = {}, lastRenderedSync = null;
+function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+
+// ── Dark / light theme (persisted on this laptop) ─────────────────────────
+function applyTheme() {
+  const dark = localStorage.getItem('asva_theme') === 'dark';
+  document.body.classList.toggle('dark', dark);
+  const b = document.getElementById('themebtn');
+  if (b) b.textContent = dark ? 'Light' : 'Dark';
+}
+function toggleTheme() {
+  localStorage.setItem('asva_theme', localStorage.getItem('asva_theme') === 'dark' ? 'light' : 'dark');
+  applyTheme();
+}
+
+// ── Show technical logs (hidden by default) ───────────────────────────────
+// The box only receives lines that arrive AFTER the window opened, so on first
+// open we pull the full recent history from main - otherwise it looks empty.
+async function toggleLog() {
+  const l = document.getElementById('log'), b = document.getElementById('logtoggle');
+  const showing = l.style.display !== 'none';
+  if (showing) {
+    l.style.display = 'none';
+    if (b) b.textContent = 'Show technical logs';
+    return;
+  }
+  try {
+    if (window.asva.getLogs) {
+      const backlog = await window.asva.getLogs();
+      if (backlog && backlog.trim()) l.textContent = backlog;
+    }
+  } catch (e) {}
+  if (!l.textContent || !l.textContent.trim()) {
+    l.textContent = 'No recent activity yet. If something looks wrong, press "Check connection and find the problem" above.';
+  }
+  l.style.display = 'block';
+  l.scrollTop = l.scrollHeight;
+  if (b) b.textContent = 'Hide technical logs';
+}
+
+// ── Change the Tally company mid-run (Status panel) ───────────────────────
+async function openCompanyPicker() {
+  const box = document.getElementById('cocpicker');
+  box.innerHTML = '<div class="diagrow info"><span class="ic">&#8230;</span><div class="dt"><b>Reading companies open in Tally...</b><span>A few seconds.</span></div></div>';
+  let r = {};
+  try { r = await window.asva.pairCompanies(); } catch (e) { r = { ok: false }; }
+  if (!r || !r.ok || !(r.companies || []).length) {
+    box.innerHTML = '<div class="diagrow bad"><span class="ic">&#10007;</span><div class="dt"><b>Could not read companies from Tally.</b><span>' +
+      esc((r && r.error) || 'Open TallyPrime, then press Change Tally company again.') + '</span></div></div>';
+    return;
+  }
+  const cur = (CONFIG && CONFIG.companies && CONFIG.companies[0] && CONFIG.companies[0].name) || '';
+  box.innerHTML = '<div style="margin:10px 0 2px;font-size:.88rem;color:#787774">Pick the Tally company ASVA should read and sync. This changes which company\'s data ASVA works on.</div>';
+  (r.companies || []).forEach((name) => {
+    const btn = document.createElement('button');
+    btn.className = 'cocitem';
+    btn.textContent = name + (name === cur ? '   (current)' : '');
+    btn.disabled = (name === cur);
+    btn.onclick = () => pickCompany(name);
+    box.appendChild(btn);
+  });
+}
+async function pickCompany(name) {
+  const box = document.getElementById('cocpicker');
+  box.innerHTML = '<div class="diagrow info"><span class="ic">&#8230;</span><div class="dt"><b>Switching to ' + esc(name) + '...</b><span>Restarting the Tally reader and starting a fresh sync.</span></div></div>';
+  let r = {};
+  try { r = await window.asva.changeCompany(name); } catch (e) { r = { ok: false }; }
+  if (!r || !r.ok) {
+    box.innerHTML = '<div class="diagrow bad"><span class="ic">&#10007;</span><div class="dt"><b>Could not switch company.</b><span>' +
+      esc((r && r.error) || 'Please try again.') + '</span></div></div>';
+    return;
+  }
+  box.innerHTML = '<div class="diagrow ok"><span class="ic">&#10003;</span><div class="dt"><b>Now reading ' + esc(name) + '.</b><span>Syncing fresh data - the dashboard updates on its own. Watch the progress bar at the top.</span></div></div>';
+  // Force an immediate sync and show the progress bar.
+  try { await window.asva.tallyReload(); } catch (e) {}
+  awaitingSync = true; syncBaseline = lastSyncedAtSeen;
+  const sb = document.getElementById('syncbar'); if (sb) sb.classList.add('on');
+}
+
+// ── Connection doctor: turns "it doesn't work" into a plain reason ─────────
+async function runDiag() {
+  const box = document.getElementById('diagresults');
+  const btn = document.getElementById('diagbtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+  box.innerHTML = '<div class="diagrow info"><span class="ic">&#8230;</span><div class="dt"><b>Checking your connection...</b><span>This takes a few seconds.</span></div></div>';
+  let r = {};
+  try { r = await window.asva.diagnose(); } catch (e) { r = { ok: false, checks: [] }; }
+  let html = '';
+  (r.checks || []).forEach((c) => {
+    html += '<div class="diagrow ' + (c.ok ? 'ok' : 'bad') + '"><span class="ic">' +
+      (c.ok ? '&#10003;' : '&#10007;') + '</span><div class="dt"><b>' + esc(c.name) + '</b>' +
+      (c.detail ? '<span>' + esc(c.detail) + '</span>' : '') + '</div></div>';
+  });
+  if (!html) {
+    html = '<div class="diagrow bad"><span class="ic">&#10007;</span><div class="dt"><b>Could not run the check.</b>' +
+      '<span>Open Status, press Restart on each service, then try again.</span></div></div>';
+  }
+  const backend = (CONFIG && CONFIG.backendUrl) || '(not set)';
+  html += '<div class="diagrow info"><span class="ic">i</span><div class="dt"><span>ASVA server: ' + esc(backend) + '</span></div></div>';
+  box.innerHTML = html;
+  if (btn) { btn.disabled = false; btn.textContent = 'Check connection and find the problem'; }
+}
+
 function show(v) {
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   document.querySelectorAll('.view').forEach(el => el.classList.remove('on'));
@@ -164,7 +400,7 @@ function setDot(id, ok) { const el = document.getElementById(id); if (el) { el.c
 function restart(name) { window.asva.restartService(name); }
 
 // ── UI language (persisted on this laptop) ────────────────────────────
-const WV = { 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
+const WV = { 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-payments': 'paymentsUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
 function currentLang() { return localStorage.getItem('asva_lang') || 'english'; }
 function urlWithLang(url) { if (!url) return url; return url + (url.includes('?') ? '&' : '?') + 'lang=' + encodeURIComponent(currentLang()); }
 function applyLangButtons() {
@@ -173,24 +409,91 @@ function applyLangButtons() {
   if (hi) hi.classList.toggle('on', !en);
   if (e) e.classList.toggle('on', en);
 }
+// Show the QR + link that opens this shop's read-only phone app. The token in
+// the URL links the phone to the SAME live data as this desktop app.
+function openPhoneApp() {
+  const backend = (CONFIG && CONFIG.backendUrl) || '';
+  const token = (CONFIG && CONFIG.token) || '';
+  if (!backend || !token) { alert('Pair ASVA first, then open the phone app.'); return; }
+  const link = backend + '/m?token=' + encodeURIComponent(token);
+  const img = document.getElementById('phoneqr');
+  if (img) img.src = backend + '/m/qr?token=' + encodeURIComponent(token) + '&t=' + Date.now();
+  const lk = document.getElementById('phonelink');
+  if (lk) lk.textContent = link;
+  const m = document.getElementById('phonemodal');
+  if (m) m.style.display = 'flex';
+}
+
 function setLang(l) {
   localStorage.setItem('asva_lang', l);
   applyLangButtons();
+  // Save it on the SERVER too, so the WhatsApp assistant answers the owner in the
+  // same language as the app ("chosen in the app, reflected in chat"). Fire and
+  // forget - the local UI already switched.
+  try { if (window.asva.setLanguage) window.asva.setLanguage(l); } catch (e) {}
   // reload every webview in the new language
   Object.entries(WV).forEach(([id, key]) => {
     const w = document.getElementById(id), url = CONFIG && CONFIG[key];
     if (w && url) { loaded[id] = true; w.src = urlWithLang(url); }
   });
 }
+// The heartbeat tells us the server's saved language; on a fresh/re-paired laptop
+// adopt it so the app + chat stay in step without the owner re-choosing.
+if (window.asva.onLang) window.asva.onLang((d) => {
+  const l = d && d.language;
+  if ((l === 'english' || l === 'hinglish') && l !== currentLang()) setLang(l);
+});
+
+// ── Webview auto-recovery ─────────────────────────────────────────────────
+// A webview whose render process dies (low RAM, driver hiccup) shows a BLANK
+// pane with no recovery. Wire every webview so it reloads itself when its
+// process crashes, and retries a failed load a few seconds later. This is what
+// makes "the tab went blank" self-heal instead of needing an app restart.
+const _failTries = {};
+function hardenWebview(w) {
+  if (!w || w._hardened) return;
+  w._hardened = true;
+  const recover = () => { try { if (w.src && w.src !== 'about:blank') w.reload(); } catch (e) {} };
+  w.addEventListener('crashed', recover);
+  w.addEventListener('render-process-gone', recover);
+  w.addEventListener('unresponsive', recover);
+  w.addEventListener('did-fail-load', (e) => {
+    if (e.errorCode === -3) return;              // aborted (normal on reload)
+    const n = (_failTries[w.id] = (_failTries[w.id] || 0) + 1);
+    if (n > 8) return;                            // give up after ~40s of failures
+    setTimeout(recover, 5000);                    // backend probably still booting
+  });
+  w.addEventListener('did-finish-load', () => { _failTries[w.id] = 0; });
+}
+function hardenAllWebviews() {
+  document.querySelectorAll('webview').forEach(hardenWebview);
+}
 
 function loadPage(id, url) {
-  if (url && !loaded[id]) { loaded[id] = true; document.getElementById(id).src = urlWithLang(url); }
+  if (url && !loaded[id]) { loaded[id] = true; const w = document.getElementById(id); hardenWebview(w); w.src = urlWithLang(url); }
 }
 function reloadAll() {
-  ['wv-dash', 'wv-reminders', 'wv-analytics', 'wv-accounts'].forEach(id => {
+  ['wv-dash', 'wv-reminders', 'wv-payments', 'wv-analytics', 'wv-accounts'].forEach(id => {
     const w = document.getElementById(id);
     try { if (w && w.reload && loaded[id]) w.reload(); } catch (e) {}
   });
+}
+// Top-bar Reload: re-render only the page the user is looking at (the app's
+// single reload button - the in-page one is hidden inside the app).
+function reloadActive() {
+  const view = document.querySelector('.view.on');
+  const w = view && view.querySelector('webview');
+  if (!w) return;
+  try {
+    // Bypass the cache so it truly re-fetches (a plain reload can re-render the
+    // same cached page and look like "nothing refreshed"). If the view was never
+    // loaded (still about:blank), load it fresh instead.
+    if (w.src && w.src !== 'about:blank' && w.reloadIgnoringCache) {
+      w.reloadIgnoringCache();
+    } else if (w.reload) {
+      w.reload();
+    }
+  } catch (e) {}
 }
 // Top-bar / sidebar "Reload data": force an immediate Tally refresh, then reload
 // the webviews once the sync lands (so the dashboard re-renders with fresh data).
@@ -201,6 +504,13 @@ function setReloadLabel(html) {
   if (b) b.innerHTML = html;
 }
 async function reloadData() {
+  // A full Tally refresh re-reads every party + bill; on a big shop this takes
+  // a couple of minutes. Confirm first so it is never triggered by accident.
+  const en = currentLang() === 'english';
+  const ask = en
+    ? 'A full Tally refresh reads every party and every bill again. This can take about 2 minutes to finish. Your reminders and sending keep working while it runs.\n\nRefresh everything now?'
+    : 'Poora Tally refresh sabhi party aur sabhi bill dobara padhta hai. Ismein takreeban 2 minute lag sakte hain. Iske dauraan reminder aur sending chalte rehte hain.\n\nAbhi sab kuch refresh karein?';
+  if (!confirm(ask)) return;
   let res = {};
   try { res = await window.asva.tallyReload(); } catch (e) {}
   if (res && res.ok === false && res.cooldown) {
@@ -246,6 +556,7 @@ function waText(ready, reachable) {
 }
 
 applyLangButtons();
+applyTheme();
 // ── Multi-company: each Tally company has its own token/data; switching
 // simply points every page at that company's URLs. ──
 function applyCompany(i) {
@@ -253,6 +564,7 @@ function applyCompany(i) {
   if (!co) return;
   CONFIG.dashboardUrl = co.dashboardUrl;
   CONFIG.remindersUrl = co.remindersUrl;
+  CONFIG.paymentsUrl = co.paymentsUrl;
   CONFIG.analyticsUrl = co.analyticsUrl;
   CONFIG.accountsUrl = co.accountsUrl;
   Object.entries(WV).forEach(([id, key]) => {
@@ -261,6 +573,7 @@ function applyCompany(i) {
   });
 }
 
+hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 (async () => {
   CONFIG = await window.asva.getConfig();
   if (!CONFIG.dashboardUrl) document.getElementById('dashov').textContent = 'agent_token missing in config.json.';
@@ -274,7 +587,42 @@ function applyCompany(i) {
   const cb = document.getElementById('autostart');
   cb.checked = await window.asva.getAutostart();
   cb.onchange = async () => { cb.checked = await window.asva.setAutostart(cb.checked); };
+  showWhatsNewIfUpdated();          // one-time "what's new" after an update
 })();
+
+// After an update installs and the new version launches, show a one-time
+// "What's new" so the owner sees what changed (the update BAR shows it before
+// restart; this shows it AFTER, when they are on the new build).
+const WHATS_NEW = {
+  '1.8.6': [
+    'Phone app now shows each party’s promise-to-pay and recent replies, with a tap-to-call button.',
+    'The who-to-chase list has search, sort and pages.',
+    'Enter a customer’s payment straight into Tally from a confirm popup.',
+    'Clearer language handling and a clickable renew link.',
+    'One-tap "Check for updates" and a "what’s new" note on every update.',
+  ],
+  '1.8.5': [
+    'Replies in your language (English or Hinglish), in the app and on WhatsApp.',
+    'Finds the right party even from a short name or a small typo.',
+    'RECOVERED shows how much money came back this month.',
+    'Scan a QR to open ASVA on your phone (view only).',
+  ],
+};
+function showWhatsNewIfUpdated() {
+  try {
+    const v = (CONFIG && CONFIG.appVersion) || '';
+    if (!v) return;
+    const seen = localStorage.getItem('asva_seen_version') || '';
+    localStorage.setItem('asva_seen_version', v);
+    if (!seen || seen === v) return;             // first run ever, or no change
+    const notes = WHATS_NEW[v];
+    if (!notes || !notes.length) return;
+    const list = notes.map(n => '<li>' + esc(n) + '</li>').join('');
+    document.getElementById('wnlist').innerHTML = list;
+    document.getElementById('wntitle').textContent = 'What’s new in ASVA ' + v;
+    document.getElementById('whatsnewmodal').style.display = 'flex';
+  } catch (e) {}
+}
 
 window.asva.onStatus((s) => {
   // ── Top bar: Tally sync freshness + reload-watch ──
@@ -293,15 +641,30 @@ window.asva.onStatus((s) => {
     }
     tsync.textContent = stat + (lbl ? ' · ' + lbl : '');
   }
+  // Sync progress bar: on while the backend reports a sync in progress, or in
+  // the window just after the owner pressed Tally refresh.
+  const syncing = /sync ho raha|syncing/i.test(s.tallyLabel || '');
+  const sb = document.getElementById('syncbar');
+  // Don't fight the determinate (real %) bar while it's driving itself.
+  if (sb && !sb.classList.contains('det')) sb.classList.toggle('on', syncing || awaitingSync);
+
+  // Manual "Tally refresh" completion: stop the wait + re-render when it lands.
   if (awaitingSync && s.lastSyncedAt && s.lastSyncedAt !== syncBaseline) {
     awaitingSync = false;
     setReloadLabel(RELOAD_LABEL);
     reloadAll();
   }
+  // Dynamic data loading: whenever a NEWER sync lands (from any source), re-
+  // render the pages on their own so fresh dues/bills appear without pressing
+  // anything. Skip the very first value so the initial load isn't double-fetched.
+  if (s.lastSyncedAt && s.lastSyncedAt !== lastRenderedSync) {
+    if (lastRenderedSync !== null && loaded['wv-dash']) reloadAll();
+    lastRenderedSync = s.lastSyncedAt;
+  }
 
   setDot('d-backend', !!s.backend); setDot('s-backend', !!s.backend);
   setDot('d-whatsapp', !!s.whatsapp); setDot('s-whatsapp', !!s.whatsapp);
-  document.getElementById('st-backend').textContent = s.backend ? 'Running.' : 'Starting. Still red after 1 min? Press Restart.';
+  document.getElementById('st-backend').textContent = s.backend ? 'Connected.' : 'Cannot reach the server. Press Check to see why (usually the internet).';
   document.getElementById('st-whatsapp').textContent = waText(s.whatsapp, s.whatsappReachable);
   renderQr('qr-shop', s.whatsapp, s.whatsappReachable, s.whatsappQr, 'shop');
 
@@ -311,12 +674,145 @@ window.asva.onStatus((s) => {
     banner.innerHTML = 'Shop WhatsApp is not connected - reminders cannot go. Scan the QR in "WhatsApp Setup".';
   } else { banner.className = 'banner'; }
 
+  const ov = document.getElementById('dashov');
   if (s.backend) {
+    window._backendDownSince = 0;
     loadPage('wv-dash', CONFIG.dashboardUrl);
     loadPage('wv-reminders', CONFIG.remindersUrl);
+    loadPage('wv-payments', CONFIG.paymentsUrl);
     loadPage('wv-analytics', CONFIG.analyticsUrl);
     loadPage('wv-accounts', CONFIG.accountsUrl);
-    if (loaded['wv-dash']) document.getElementById('dashov').classList.add('hide');
+    if (loaded['wv-dash']) ov.classList.add('hide');
+    else if (ov) ov.textContent = 'Starting ASVA... one moment.';   // clear any old error text
+  } else if (ov && !ov.classList.contains('hide')) {
+    // Backend not reachable. Don't leave the hopeful "15 seconds" message up
+    // forever - after a short wait, tell the owner exactly how to find out why.
+    if (!window._backendDownSince) window._backendDownSince = Date.now();
+    if (Date.now() - window._backendDownSince > 25000) {
+      // NOTE: .overlay is a flex container, so the message MUST be a single
+      // child element - otherwise each <b>/<br>/text node becomes its own flex
+      // item and the words scatter across the row. Wrap it all in one <div>.
+      ov.innerHTML = (currentLang() === 'english'
+        ? '<div style="max-width:460px;line-height:1.6">ASVA cannot reach the server yet.<br><br>Open <b>Status</b> at the bottom-left and press <b>Check connection and find the problem</b> to see why. It is usually the internet on this computer.</div>'
+        : '<div style="max-width:460px;line-height:1.6">ASVA server tak nahi pahunch pa raha.<br><br>Neeche baayein <b>Status</b> kholein aur <b>Check connection</b> dabaayein - wajah dikh jayegi. Aksar is computer ka internet hota hai.</div>');
+    }
+  }
+});
+
+// ── Update notice (auto-update runs in the background; this is just the bar) ──
+let _manualCheck = false;       // true while an owner-clicked "Check update" is in flight
+let _mustReinstall = false;     // set when the build is too old to self-update
+let _reinstallUrl = '';         // where the Download button should send the owner
+function applyUpdate() {
+  // In "reinstall" mode the button opens the download page; otherwise it applies
+  // a downloaded auto-update and restarts.
+  if (_mustReinstall) { try { window.asva.openExternal(_reinstallUrl); } catch (e) {} return; }
+  const btn = document.getElementById('updatebtn');
+  if (btn) { btn.textContent = 'Restarting...'; btn.disabled = true; }
+  try { window.asva.installUpdate(); } catch (e) {}
+}
+if (window.asva.onUpdate) window.asva.onUpdate((u) => {
+  const bar = document.getElementById('updatebar');
+  const msg = document.getElementById('updatemsg');
+  const btn = document.getElementById('updatebtn');
+  if (!bar || !msg || !btn) return;
+  const en = currentLang() === 'english';
+  if (u.state === 'required') {
+    // Too old to update itself. A blocking, non-dismissable bar - the only fix is
+    // to reinstall the latest build. Sticky: later auto-update states can't hide it.
+    _mustReinstall = true;
+    _reinstallUrl = u.url || '';
+    const v = u.version ? ' (' + u.version + ')' : '';
+    msg.innerHTML = en
+      ? '<b>This copy of ASVA is too old to update itself.</b> Please install the latest version' + v + '. Your data and reminders are safe on the server.'
+      : '<b>ASVA ka yeh version bahut purana hai, khud update nahi ho sakta.</b> Kripya naya version' + v + ' install karein. Aapka data aur reminder server par surakshit hai.';
+    btn.style.display = 'inline-block';
+    btn.textContent = en ? 'Download the latest ASVA' : 'Naya ASVA download karein';
+    btn.disabled = false;
+    bar.classList.add('must');
+    bar.style.display = 'flex';
+    return;
+  }
+  if (_mustReinstall) return;   // reinstall bar wins over ordinary update states
+  if (u.state === 'ready') {
+    const v = u.version ? ' (' + u.version + ')' : '';
+    const notes = (u.notes || '').trim();
+    const nhtml = notes
+      ? '<div class="whatsnew">' + (en ? 'What’s new:' : 'Is version mein naya:') + '<br>'
+        + notes.split('\n').map(l => l.trim()).filter(Boolean).map(l => '• ' + esc(l)).join('<br>')
+        + '</div>'
+      : '';
+    msg.innerHTML = (en
+      ? '<b>A new version of ASVA' + v + ' is ready.</b> Your data and WhatsApp stay connected.'
+      : '<b>ASVA ka naya version' + v + ' taiyaar hai.</b> Aapka data aur WhatsApp juda rehta hai.') + nhtml;
+    btn.style.display = 'inline-block';
+    btn.textContent = en ? 'Restart to update' : 'Update ke liye restart karein';
+    bar.style.display = 'flex';
+  } else if (u.state === 'downloading') {
+    const pct = u.percent ? ' (' + u.percent + '%)' : '';
+    msg.textContent = (en ? 'Downloading the latest ASVA update' : 'ASVA ka naya update aa raha hai') + pct + '...';
+    btn.style.display = 'none';
+    bar.style.display = 'flex';
+    _manualCheck = false;
+  } else if (u.state === 'checking') {
+    msg.textContent = en ? 'Checking for a new version...' : 'Naya version check kar rahe hain...';
+    btn.style.display = 'none';
+    bar.style.display = 'flex';
+  } else if (u.state === 'current') {
+    // "You are up to date" - only worth showing when the owner clicked Check.
+    if (_manualCheck) {
+      msg.textContent = en ? 'You are on the latest version of ASVA.' : 'Aap ASVA ke latest version par hain.';
+      btn.style.display = 'none'; bar.style.display = 'flex';
+      setTimeout(() => { bar.style.display = 'none'; }, 4000);
+      _manualCheck = false;
+    } else { bar.style.display = 'none'; }
+  } else if (u.state === 'error') {
+    if (_manualCheck) {
+      msg.textContent = en ? 'Could not check right now. Try again in a bit.' : 'Abhi check nahi ho paya. Thodi der baad try karein.';
+      btn.style.display = 'none'; bar.style.display = 'flex';
+      setTimeout(() => { bar.style.display = 'none'; }, 4000);
+      _manualCheck = false;
+    } else { bar.style.display = 'none'; }
+  } else {
+    bar.style.display = 'none';
+  }
+});
+
+// Owner-triggered "Check for updates" (top bar). Shows checking -> ready / up to date.
+function checkForUpdate() {
+  _manualCheck = true;
+  try { window.asva.checkUpdate(); }
+  catch (e) {
+    const bar = document.getElementById('updatebar'), msg = document.getElementById('updatemsg');
+    if (bar && msg) { msg.textContent = 'Update check is only available in the installed app.'; bar.style.display = 'flex'; setTimeout(() => { bar.style.display = 'none'; }, 4000); }
+    _manualCheck = false;
+  }
+}
+
+// ── Real sync progress (from the Tally reader's stage markers) ─────────────
+let _syncDoneTimer = null;
+if (window.asva.onSyncProgress) window.asva.onSyncProgress((p) => {
+  const total = p.total || 1;
+  const pct = Math.max(0, Math.min(100, Math.round((p.done || 0) * 100 / total)));
+  const bar = document.getElementById('syncbar');
+  const fill = bar && bar.querySelector('.fill');
+  const lab = document.getElementById('synclabel');
+  if (bar) { bar.classList.add('det'); bar.classList.add('on'); }
+  if (fill) fill.style.width = pct + '%';
+  if (lab) {
+    lab.classList.add('on');
+    const head = currentLang() === 'english' ? 'Syncing Tally' : 'Tally sync ho raha hai';
+    lab.textContent = head + ': ' + esc(p.label || '') + ' (' + pct + '%)';
+  }
+  clearTimeout(_syncDoneTimer);
+  if (pct >= 100) {
+    // Finished a pass: fill to 100, then clear the bar shortly after and let the
+    // dashboard auto-refresh show the fresh data.
+    _syncDoneTimer = setTimeout(() => {
+      if (bar) { bar.classList.remove('on'); bar.classList.remove('det'); }
+      if (fill) fill.style.width = '';
+      if (lab) lab.classList.remove('on');
+    }, 2500);
   }
 });
 

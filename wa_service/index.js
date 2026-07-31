@@ -13,15 +13,36 @@
 //   GET  /qr             -> human QR page
 //   POST /api/wa/send    -> { phone, message, pdf_base64?, media_base64?, ... }
 //   inbound messages     -> POST {BACKEND_URL}/webhooks/aisensy, reply on chat
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    makeCacheableSignalKeyStore,
-    fetchLatestBaileysVersion,
-    fetchLatestWaWebVersion,
-    downloadMediaMessage,
-    DisconnectReason,
-} = require('@whiskeysockets/baileys');
+// Baileys v6.7+ is published as an ES module, which a CommonJS require() cannot
+// load (ERR_REQUIRE_ESM - the crash that left WhatsApp stuck on "starting").
+// A dynamic import() loads BOTH an ESM and a CJS build from CommonJS, so this is
+// future-proof against the next packaging change. The symbols are filled in by
+// loadBaileys() before the first socket is created (top of start()).
+let makeWASocket, useMultiFileAuthState, makeCacheableSignalKeyStore,
+    fetchLatestBaileysVersion, fetchLatestWaWebVersion, downloadMediaMessage,
+    DisconnectReason;
+let _baileysReady = false;
+async function loadBaileys() {
+    if (_baileysReady) return;
+    const b = await import('@whiskeysockets/baileys');
+    // ESM build: default export is makeWASocket, named exports on the namespace.
+    // CJS-via-import(): the whole module.exports sits on b.default instead.
+    const cjs = (b.default && typeof b.default === 'object' && b.default.useMultiFileAuthState)
+        ? b.default : null;
+    const src = cjs || b;
+    makeWASocket = cjs ? (cjs.default || cjs.makeWASocket) : (b.default || b.makeWASocket);
+    useMultiFileAuthState = src.useMultiFileAuthState;
+    makeCacheableSignalKeyStore = src.makeCacheableSignalKeyStore;
+    fetchLatestBaileysVersion = src.fetchLatestBaileysVersion;
+    fetchLatestWaWebVersion = src.fetchLatestWaWebVersion;
+    downloadMediaMessage = src.downloadMediaMessage;
+    DisconnectReason = src.DisconnectReason;
+    if (typeof makeWASocket !== 'function') {
+        throw new Error('Baileys loaded but makeWASocket is not a function');
+    }
+    _baileysReady = true;
+    console.log('Baileys loaded via dynamic import.');
+}
 const qrcode = require('qrcode');
 const express = require('express');
 const cors = require('cors');
@@ -40,7 +61,12 @@ const PORT = process.env.PORT || 3001;
 const SESSION_ID = process.env.SESSION_ID || 'default';
 // "shop" = customer-facing number; "bot" = owner-only ASVA assistant number.
 const WA_CHANNEL = process.env.WA_CHANNEL || 'shop';
-const AUTH_DIR = path.join(__dirname, '.baileys_auth', `session-${SESSION_ID}`);
+// WA_AUTH_DIR wins when set: the desktop app points it at Electron's userData
+// folder so the shop's WhatsApp login survives a reinstall/auto-update (the
+// install folder is replaced on every update). With no override we keep the
+// login next to this file, so the i3 bot service is unchanged.
+const AUTH_ROOT = process.env.WA_AUTH_DIR || __dirname;
+const AUTH_DIR = path.join(AUTH_ROOT, '.baileys_auth', `session-${SESSION_ID}`);
 
 // Silent pino-compatible logger (Baileys requires one; we don't want its noise).
 function mkLogger() {
@@ -247,6 +273,7 @@ async function start() {
     starting = true;
     const myGen = ++gen;   // this socket's generation; stale events are dropped
     try {
+        await loadBaileys();   // dynamic ESM import; idempotent, safe every start()
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
         registered = !!(state.creds && state.creds.registered);
         const version = await waWebVersion();

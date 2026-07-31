@@ -32,14 +32,54 @@ class Settings(BaseSettings):
 
     # --- App ---
     app_env: str = "development"
-    # Release version of THIS build. Bump on every shipped zip. The dashboard
-    # compares it against the newest row in app_releases (Supabase) and shows
-    # an update banner when a newer version exists - Tally-style update notice.
-    app_version: str = "1.2.0"
+    # Release version of THIS build. The desktop app now updates itself through
+    # the /updates feed (electron-updater), so the shop app's ONLY update notice
+    # is the in-app "Restart to update" bar. Keep this in step with the shipped
+    # app version so the older app_releases dashboard banner stays quiet (it
+    # fires only when app_releases > this) and shops never see two notices.
+    app_version: str = "1.8.6"
+    # The oldest desktop build the fleet still supports. A build below this is too
+    # old to update itself (it predates the electron-updater), so the heartbeat
+    # flags it `below_min` and the app shows a blocking "download the latest"
+    # bar - the only way to recover a stranded old build. Keep this at or below
+    # the first version that shipped the self-updater; raising it above a healthy
+    # in-field build would nag those shops for no reason (the bar is a nudge, never
+    # a brick). 1.8.0 = the first userData/auto-update build; anything older
+    # (e.g. the pre-updater 1.4.x) must be reinstalled once.
+    app_min_version: str = "1.8.0"
     timezone: str = "Asia/Kolkata"
     tally_agent_token: str = "change-me"
     webhook_verify_token: str = "change-me"          # Meta webhook GET handshake
     public_base_url: str = "http://localhost:8000"
+    # The public marketing site can be hosted separately (free static host) while
+    # this app runs the API/dashboard/downloads. On the i3 app set
+    # SERVE_MARKETING=false so the app domain (app.tryasva.com) redirects
+    # marketing paths to the static site and is not indexed (no duplicate SEO).
+    serve_marketing: bool = True
+    marketing_url: str = "https://tryasva.com"   # where the static website lives
+    # Ops secret for subscription/renewal actions (POST /license/renew). The
+    # CLIENT never renews itself - only you, the operator, with this key. Set
+    # ADMIN_API_KEY in .env; while it stays empty, all ops endpoints refuse.
+    admin_api_key: str = ""
+    # 30-day billing cycle: one paid "month" = this many days.
+    subscription_cycle_days: int = 30
+    # Folder the website serves the downloadable shop app from (put ASVA_shop.zip
+    # here on the host). Relative to where the backend runs (C:\ASVA).
+    downloads_dir: str = "downloads"
+    # Days AFTER expiry that sends still go (owner is warned) before the account
+    # is suspended. Like a paid app: pay -> access continues; lapse -> a short
+    # grace, then cut off. Max 3.
+    subscription_grace_days: int = 3
+    # Free pilot: while today <= this date (YYYY-MM-DD), EVERY business is treated
+    # as active on the Pro tier - no suspension, no plan-limit block, no renewal
+    # nagging. Matches the public "free pilot till 15 Sep 2026" promise. Set to ""
+    # to switch billing back on. This is the single global free switch.
+    free_pilot_until: str = "2026-09-15"
+    # Direct-UPI billing: where shops pay you. When set, renewal notices carry
+    # the amount + this UPI id + a tap-to-pay upi:// link, so "pay directly"
+    # feels hands-off. You confirm payment and click Renew in the Command Center.
+    operator_upi_id: str = ""            # e.g. yourname@okhdfc
+    operator_upi_name: str = "ASVA"      # payee name shown in the UPI app
 
     # --- Sending safety ---
     # Max customer reminders per business per day. Backlog drips out over
@@ -73,6 +113,56 @@ class Settings(BaseSettings):
     # alerts, bot replies) stay direct on the bot number.
     send_via_outbox: bool = False       # true ONLY on the bot laptop
     enable_outbox_send: bool = True     # false ONLY on the bot laptop
+
+    # --- Send window (quiet hours) for CUSTOMER-facing queued sends ---
+    # The queue waits while the shop laptop is off, so without a window a laptop
+    # switched on at 11pm would deliver a whole day's reminders at midnight:
+    # rude to the customer and a textbook WhatsApp ban signal. Queued sends only
+    # leave between these hours (shop-local, settings.timezone); outside them the
+    # queue simply waits. Owner-facing sends (digest/alerts) are NOT affected -
+    # they go from the bot number and keep their own schedule.
+    enforce_send_window: bool = True
+    send_window_start_hour: int = 9      # inclusive
+    send_window_end_hour: int = 19       # exclusive (last send before 7pm)
+
+    # --- Morning pre-reminder checkpoint (Option A: hold + nudge, never mark paid) ---
+    # Before the sweep sends, ASVA messages the owner today's reminder list so they
+    # can HOLD anyone who already paid (reply PAID <n|name>). Fires this many hours
+    # before each business's reminder_hour, giving the owner a window to reply.
+    enable_reminder_checkpoint: bool = True
+    checkpoint_lead_hours: int = 1
+
+    # --- Promise-to-Pay + reply capture (v1: text-first) ---
+    # When a customer replies to a reminder, ASVA reads it. A payment claim or a
+    # promised date HOLDS that party's reminders (grace / until the date), then
+    # auto-resumes if unpaid, so a false claim never buys permanent silence. The
+    # owner is nudged to record real payments in Tally; ASVA never writes Tally.
+    enable_promise_capture: bool = True
+    promise_grace_days: int = 3            # hold length for a bare "paid" (no date)
+    promise_max_hold_days: int = 30        # cap: no promise silences reminders longer
+    # Below this classifier confidence (or for dispute/unclear), do NOT auto-hold;
+    # forward the reply to the owner instead. Keeps a misread from silencing a debt.
+    promise_confidence_threshold: float = 0.6
+
+    # --- Monitoring + email alerts (operator health center) ---
+    # The watchdog job builds a health snapshot every few minutes and emails the
+    # operator when something needs attention (server/bot/shop WhatsApp down,
+    # sends failing, queue backing up). Empty SMTP = alerts are still recorded +
+    # shown in /ops, just not emailed. Gmail: host smtp.gmail.com, port 587, and
+    # an APP PASSWORD (not the account password).
+    enable_monitor: bool = True
+    monitor_interval_min: int = 5          # how often the watchdog runs
+    alert_email_to: str = ""               # where alerts are mailed (you)
+    alert_email_from: str = ""             # usually the same gmail address
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""                    # Gmail APP password
+    # Thresholds for what counts as "needs attention".
+    offline_alert_min: int = 20            # shop agent silent this long = offline
+    wa_down_alert_min: int = 15            # a WhatsApp session down this long
+    outbox_backlog_alert: int = 25         # this many queued+aging = stuck
+    fail_rate_alert_pct: int = 40          # today's failed/attempted above this
 
     # --- AI (optional) ---
     gemini_api_key: str = ""

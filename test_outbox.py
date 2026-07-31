@@ -114,6 +114,8 @@ def test_outbox_sweep_keeps_queue_when_shop_wa_offline(monkeypatch):
            "created_at": datetime.now(timezone.utc).isoformat()}
     fake = FakeDB(tables={"wa_outbox": [row]})
     monkeypatch.setattr(outbox_sweep, "require_db", lambda: fake)
+    # Pin the window OPEN so this test is about retry policy, not the clock.
+    monkeypatch.setattr(outbox_sweep.settings, "enforce_send_window", False)
 
     _run(outbox_sweep.run())
 
@@ -132,12 +134,87 @@ def test_outbox_sweep_expires_stale_rows(monkeypatch):
            "created_at": "2026-01-01T00:00:00+00:00"}   # months old
     fake = FakeDB(tables={"wa_outbox": [row]})
     monkeypatch.setattr(outbox_sweep, "require_db", lambda: fake)
+    monkeypatch.setattr(outbox_sweep.settings, "enforce_send_window", False)
 
     _run(outbox_sweep.run())
 
     upd = fake.writes["wa_outbox"][0]
     assert upd["status"] == "failed"
     assert upd["last_error"] == "expired"
+
+
+# ── Send window (quiet hours) ─────────────────────────────────────────────
+def test_send_window_boundaries():
+    """Queued CUSTOMER sends only leave during shop hours, so a laptop switched
+    on at midnight can't blast the day's backlog."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from app.jobs import outbox_sweep
+    IST = ZoneInfo("Asia/Kolkata")
+
+    inside = datetime(2026, 7, 20, 10, 0, tzinfo=IST)
+    assert outbox_sweep.within_send_window(inside) is True
+    # start is inclusive, end is exclusive
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 9, 0, tzinfo=IST)) is True
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 18, 59, tzinfo=IST)) is True
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 19, 0, tzinfo=IST)) is False
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 8, 59, tzinfo=IST)) is False
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 23, 30, tzinfo=IST)) is False
+
+
+def test_send_window_can_be_disabled(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from app.jobs import outbox_sweep
+    monkeypatch.setattr(outbox_sweep.settings, "enforce_send_window", False)
+    midnight = datetime(2026, 7, 20, 0, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
+    assert outbox_sweep.within_send_window(midnight) is True
+
+
+def test_sweep_sends_nothing_outside_the_window(monkeypatch):
+    """Outside shop hours the queue is left completely untouched."""
+    from datetime import datetime, timezone
+    from app.jobs import outbox_sweep
+    row = {"id": "ob3", "business_id": "biz1", "message_db_id": "m3",
+           "payload": {"phone": "919812345678", "message": "hi"},
+           "attempts": 0,
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    fake = FakeDB(tables={"wa_outbox": [row]})
+    monkeypatch.setattr(outbox_sweep, "require_db", lambda: fake)
+    monkeypatch.setattr(outbox_sweep.settings, "enforce_send_window", True)
+    # A window that can never contain "now" (start == end -> empty range).
+    monkeypatch.setattr(outbox_sweep.settings, "send_window_start_hour", 0)
+    monkeypatch.setattr(outbox_sweep.settings, "send_window_end_hour", 0)
+
+    _run(outbox_sweep.run())
+
+    assert not fake.writes.get("wa_outbox")   # nothing attempted, nothing marked
+
+
+# ── Store-forward-delete ──────────────────────────────────────────────────
+def test_cleanup_pdf_deletes_stored_invoice_after_delivery(monkeypatch):
+    from app.jobs import outbox_sweep
+    calls = []
+    monkeypatch.setattr(outbox_sweep.pdf_service, "delete_pdf",
+                        lambda bill_id, inv: calls.append((bill_id, inv)))
+    fake = FakeDB(tables={"messages": [{"bill_id": "bill-9"}],
+                          "bills": [{"invoice_number": "INV-7"}]})
+
+    outbox_sweep._cleanup_pdf(fake, "m1")
+
+    assert calls == [("bill-9", "INV-7")]
+
+
+def test_cleanup_pdf_noop_when_message_has_no_bill(monkeypatch):
+    from app.jobs import outbox_sweep
+    calls = []
+    monkeypatch.setattr(outbox_sweep.pdf_service, "delete_pdf",
+                        lambda bill_id, inv: calls.append((bill_id, inv)))
+    fake = FakeDB(tables={"messages": [{"bill_id": None}]})   # a reminder, not a bill
+
+    outbox_sweep._cleanup_pdf(fake, "m1")
+
+    assert calls == []
 
 
 if __name__ == "__main__":

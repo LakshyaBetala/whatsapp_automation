@@ -60,12 +60,37 @@ logging.basicConfig(
 )
 
 def log_and_print(msg: str, is_error=False):
+    # flush=True is essential: the packaged .exe's stdout is a pipe (not a tty),
+    # so Python fully-buffers it and the desktop app's log panel would stay empty
+    # until the buffer filled (often never). Flushing streams every line live.
     if is_error:
         logging.error(msg)
-        print(f"ERROR: {msg}")
+        print(f"ERROR: {msg}", flush=True)
     else:
         logging.info(msg)
-        print(msg)
+        print(msg, flush=True)
+
+
+def emit_progress(done: int, total: int, label: str = "") -> None:
+    """Machine-readable sync progress for the desktop app. The desktop parses
+    'ASVA_PROGRESS done/total label' out of the agent's stdout and shows a real
+    percentage bar. Harmless as a plain line when run from a CLI (no parser)."""
+    try:
+        print(f"ASVA_PROGRESS {int(done)}/{int(total)} {label}".rstrip(), flush=True)
+    except Exception:
+        pass
+
+# Identifiable User-Agent on every call to the ASVA server. Without it,
+# Cloudflare's bot check bans the request (HTTP 403, "error code: 1010") and the
+# whole thin client silently stops working. See tally_agent/pair.py.
+USER_AGENT = "Mozilla/5.0 (compatible; ASVA-Agent/1.6.0; +https://tryasva.com)"
+
+# Folder ASVA watches for Tally-exported bill PDFs. The owner points Tally's
+# invoice export/print-to-PDF at this same folder; the moment a PDF lands here,
+# the watcher reads that bill and sends it on WhatsApp. Defaulted here so a fresh
+# install watches a known folder even if config.json never set it.
+DEFAULT_BILL_PDF_DIR = r"C:\ASVA\bills"
+
 
 async def post_to_tally(host: str, port: int, payload: str, timeout: float = 180.0) -> bytes:
     url = f"http://{host}:{port}"
@@ -84,7 +109,7 @@ async def check_pending_refresh(config: dict) -> bool:
     try:
         base = config['backend_url'].rstrip('/')
         params = {"business_id": config['business_id'], "agent_token": config['agent_token']}
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
             resp = await client.get(f"{base}/tally/pending-refresh", params=params)
             resp.raise_for_status()
             return bool(resp.json().get("requested"))
@@ -96,12 +121,168 @@ async def send_to_backend(url: str, endpoint: str, token: str, payload: dict):
     full_url = f"{url.rstrip('/')}/{endpoint.lstrip('/')}"
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
     }
     async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(full_url, json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()
+
+
+# ── Outbox drain (thin client) ────────────────────────────────────────────
+# The shop has no database key. It pulls its own queued customer sends from the
+# server and delivers each from the shop's WhatsApp (localhost:3001), then acks
+# the outcome. The server owns the queue, the send window, and the audit trail;
+# this loop is only the WhatsApp exit. A transient failure (shop WhatsApp not
+# linked) leaves the item queued for the next cycle - nothing is ever lost.
+
+def _shop_wa_url(config: dict) -> str:
+    return str(config.get("shop_wa_url") or "http://localhost:3001").rstrip("/")
+
+
+def _drain_transient(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+        return True                                   # wa_service not up yet
+    msg = str(exc).lower()
+    return "503" in msg or "not ready" in msg         # up, but WhatsApp not linked
+
+
+async def _drain_once(config: dict) -> int:
+    import random
+    base = config["backend_url"].rstrip("/")
+    token = config["agent_token"]
+    wa = _shop_wa_url(config)
+    sent = 0
+    async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}) as http:
+        r = await http.post(f"{base}/license/outbox/pull",
+                            json={"agent_token": token, "limit": 10})
+        if r.status_code != 200:
+            return 0
+        items = r.json().get("items", [])
+        for i, it in enumerate(items):
+            if sent:
+                await asyncio.sleep(random.uniform(8, 20))   # human pacing
+            status, err = "sent", None
+            try:
+                resp = await http.post(f"{wa}/api/wa/send", json=it["payload"])
+                resp.raise_for_status()
+                data = resp.json()
+                if not data.get("success", True):
+                    raise RuntimeError(data.get("error", "wa_service reported failure"))
+                sent += 1
+            except Exception as exc:                          # noqa: BLE001
+                status = "queued" if _drain_transient(exc) else "failed"
+                err = str(exc)[:300]
+            await http.post(f"{base}/license/outbox/ack",
+                            json={"agent_token": token, "id": it["id"],
+                                  "status": status, "attempts": it.get("attempts", 0) + 1,
+                                  "error": err})
+            if status == "queued":
+                break               # shop WhatsApp offline - stop, retry next cycle
+    return sent
+
+
+async def run_drain_outbox(config: dict, interval: int = 20) -> None:
+    log_and_print("Outbox drainer started (delivers queued sends from this shop's WhatsApp).")
+    while True:
+        try:
+            n = await _drain_once(config)
+            if n:
+                log_and_print(f"Outbox: delivered {n} message(s).")
+        except Exception as e:                                # never let the loop die
+            log_and_print(f"Outbox drainer error (continuing): {e}", is_error=True)
+        await asyncio.sleep(interval)
+
+
+# ── Payment-entry drain (PAID -> queue -> confirm -> Tally) ────────────────
+# The owner confirms a receipt in the app; it is held on the backend as
+# 'confirmed'. This loop pulls confirmed receipts, allocates the amount FIFO
+# against the party's OWN open bills in Tally (exact Agst Refs), writes the
+# Receipt voucher, verifies Tally accepted it, and reports the outcome back. It
+# only touches Tally when there is something to post, so it stays cheap.
+
+async def _push_deposit_ledgers(config: dict) -> int:
+    """Cache the shop's Cash/Bank ledger names on the backend so the confirm
+    popup can offer the owner their own deposit accounts."""
+    try:
+        masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(config['company_name']))
+        ledgers = tally_xml.parse_cash_bank_ledgers(masters_xml)
+        if not ledgers:
+            return 0
+        base = config['backend_url'].rstrip('/')
+        async with httpx.AsyncClient(timeout=30.0, headers={"User-Agent": USER_AGENT}) as http:
+            await http.post(f"{base}/tally/deposit-ledgers", json={
+                "business_id": config['business_id'],
+                "agent_token": config['agent_token'],
+                "ledgers": ledgers})
+        return len(ledgers)
+    except Exception as e:
+        log_and_print(f"Deposit-ledger push failed (continuing): {e}", is_error=True)
+        return 0
+
+
+async def run_receipts_drain(config: dict, push_ledgers: bool = False) -> int:
+    """Post every owner-confirmed receipt into Tally. Returns how many posted.
+    Each failure is reported (not raised) so one bad receipt never blocks the
+    rest, and the owner sees the exact reason in the app."""
+    base = config['backend_url'].rstrip('/')
+    company = config['company_name']
+    if push_ledgers:
+        await _push_deposit_ledgers(config)
+    posted = 0
+    async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}) as http:
+        r = await http.get(f"{base}/tally/receipts/confirmed", params={
+            "business_id": config['business_id'], "agent_token": config['agent_token']})
+        if r.status_code != 200:
+            return 0
+        receipts = r.json().get("receipts", [])
+        if not receipts:
+            return 0
+        # One Tally read of all outstanding bills, reused for every receipt.
+        bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
+        for rc in receipts:
+            ok, voucher_id, err, alloc_out = False, None, None, None
+            try:
+                open_bills = tally_xml.parse_party_open_bills(bills_xml, rc['party_ledger'])
+                allocs, on_account = tally_xml.allocate_fifo(open_bills, rc['amount'])
+                if not allocs and on_account <= 0:
+                    err = "Nothing to record for this party."
+                else:
+                    date_str = (rc.get('receipt_date') or '').replace('-', '')
+                    xml = tally_xml.build_receipt_import(
+                        company, rc['party_ledger'], rc.get('deposit_ledger') or 'Cash',
+                        date_str, [(ref, str(a)) for ref, a in allocs],
+                        on_account=str(on_account) if on_account > 0 else 0)
+                    resp = await post_to_tally(config['tally_host'], config['tally_port'], xml)
+                    text = tally_xml.sanitize_xml(resp)
+                    ok = tally_xml.import_succeeded(text)
+                    if ok:
+                        voucher_id = tally_xml.parse_import_voucher_id(text)
+                        alloc_out = [{"ref": ref, "amount": float(a)} for ref, a in allocs]
+                        if on_account > 0:
+                            alloc_out.append({"ref": "On Account", "amount": float(on_account)})
+                    else:
+                        err = ("Tally did not accept the receipt. Check the party and "
+                               "deposit account names, then try again.")
+            except Exception as e:                              # noqa: BLE001
+                err = str(e)[:300]
+            try:
+                await http.post(f"{base}/tally/receipts/report", json={
+                    "business_id": config['business_id'], "agent_token": config['agent_token'],
+                    "id": rc['id'], "ok": ok, "voucher_id": voucher_id,
+                    "error": err, "allocation": alloc_out})
+            except Exception as e:
+                log_and_print(f"Receipt report failed for {rc.get('id')}: {e}", is_error=True)
+            if ok:
+                posted += 1
+                log_and_print(f"Receipt posted to Tally: {rc.get('party_display') or rc.get('party_ledger')} "
+                              f"Rs {rc.get('amount')}")
+            elif err:
+                log_and_print(f"Receipt NOT posted ({rc.get('party_display') or rc.get('party_ledger')}): {err}",
+                              is_error=True)
+    return posted
+
 
 async def check_company(config: dict):
     """Warn early if the configured company is not loaded in Tally."""
@@ -257,62 +438,86 @@ def _vouchers_payload(sales: list, receipts: list) -> list:
 
 
 async def run_watch(config: dict):
-    """Live LOCAL mode: poll Tally on this laptop every watch_interval_seconds
-    (default 300 = 5 min). A bill made in Tally reaches the customer's WhatsApp
-    (PDF + message) within one cycle - so a 9:00 bill goes out by ~9:05.
+    """Live LOCAL mode, TALLY-FRIENDLY.
 
-    Each cycle fetches only the last 3 days (light on Tally). Every few cycles
-    it ALSO refreshes the authoritative bill-wise outstanding (accuracy). Every
-    Tally call is made sequentially inside THIS single loop, so Tally (whose
-    HTTP server is single-threaded) never receives concurrent/overlapping
-    requests - the main cause of it wedging.
+    Tally's HTTP server is single-threaded and wedges if polled too often, so we
+    do NOT poll it on a fast timer. Instead we WATCH the PDF pickup folder (a
+    cheap directory listing, zero Tally load) every few seconds. The moment a new
+    bill PDF appears - i.e. the moment 'Send to ASVA' is pressed in Tally - we do
+    ONE Tally read for that bill and send it to the party. So Tally is touched
+    only (a) when a bill is actually sent to ASVA, and (b) on a slow background
+    beat that keeps payments + the 'connected' status fresh.
     """
-    # Fast tick (default 60s) so a dashboard "Reload data" override is picked up
-    # within ~1 min. The light 3-day voucher check runs every tick; the heavy
-    # full-outstanding refresh runs on its own slower cadence (default 300s =
-    # 5 min) OR immediately when the owner presses Reload.
-    interval = int(config.get('watch_interval_seconds', 60) or 60)
+    # Cheap folder check (seconds) - this NEVER touches Tally, so it can be fast.
+    folder_poll = max(3, int(config.get('folder_poll_seconds', 8) or 8))
+    # Slow background Tally read (payments + heartbeat). Kept LONG on purpose so
+    # Tally is never hammered; the folder watch above gives instant bill sending.
+    sync_every = max(60, int(config.get('watch_interval_seconds', 300) or 300))
     outstanding_every = int(config.get('outstanding_every_seconds', 300) or 300)
     company = config['company_name']
-    # Make sure the Tally PDF pickup folder exists (the TDL exports bills here).
-    pdf_dir = config.get('bill_pdf_dir', '')
+    # Make sure the Tally PDF pickup folder exists (Tally exports/prints bills here).
+    pdf_dir = config.get('bill_pdf_dir') or DEFAULT_BILL_PDF_DIR
     if pdf_dir:
         try:
             os.makedirs(pdf_dir, exist_ok=True)
         except Exception as e:
             log_and_print(f"Could not create bill_pdf_dir {pdf_dir}: {e}", is_error=True)
-    log_and_print(f"WATCH MODE (local): tick every {interval}s -> deliver new bills; full "
-                  f"outstanding refresh every {outstanding_every}s or on Reload. Ctrl+C to stop.")
 
+    def _pending_pdfs() -> set:
+        """PDFs waiting in the pickup folder (the /sent subfolder is a directory,
+        so it is skipped). Pure filesystem - no Tally involved."""
+        if not pdf_dir or not os.path.isdir(pdf_dir):
+            return set()
+        try:
+            return {f for f in os.listdir(pdf_dir) if f.lower().endswith('.pdf')}
+        except Exception:
+            return set()
+
+    log_and_print(f"WATCH MODE (local, Tally-friendly): folder checked every {folder_poll}s "
+                  f"-> send the instant a bill PDF appears; background Tally read every "
+                  f"{sync_every}s. Ctrl+C to stop.")
+
+    seen = _pending_pdfs()
+    last_sync = 0.0          # monotonic time of the last Tally read (0 = never)
+    last_outstanding = 0.0
+    last_receipts = 0.0      # confirmed-receipt drain (cheap; hits Tally only if any)
+    last_ledgers = 0.0       # deposit-ledger cache push (heavy read; slow cadence)
+    receipts_every = max(15, int(config.get('receipts_every_seconds', 25) or 25))
+    ledgers_every = max(1800, int(config.get('deposit_ledgers_every_seconds', 21600) or 21600))
     failures = 0
-    last_outstanding = 0.0   # monotonic time of the last full refresh (0 = never)
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
-        # ── STEP 1 (every tick, FAST): light 3-day voucher check + deliver new
-        # bills + HEARTBEAT. This runs FIRST and on a short Tally timeout so a
-        # wedged/slow Tally on the heavy refresh below can never freeze the tick
-        # or stop the "Tally connected" heartbeat. The backend stamps a sync on
-        # EVERY /tally/sync call (even 0 vouchers), so the dashboard shows
-        # "connected" as long as this loop is alive and reaching Tally.
-        try:
-            new_bills, payments = await _deliver_new_bills(config, company, pdf_dir, stamp)
-            log_and_print(f"[{stamp}] Tally checked (local) - {new_bills} new bill(s) sent, {payments} payment(s).")
-            failures = 0
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            failures += 1
-            log_and_print(f"[{stamp}] Watch cycle failed ({e}) - retry in {interval}s", is_error=True)
-            if failures in (5, 50):  # nudge at ~5min and ~50min of failures
-                log_and_print("Tally or backend unreachable for a while - check they are running.", is_error=True)
+        now_mono = asyncio.get_event_loop().time()
 
-        # ── STEP 2 (on cadence, isolated): heavy bill-wise outstanding refresh.
-        # Wrapped so a failure/timeout here NEVER affects the heartbeat above.
+        current = _pending_pdfs()
+        new_pdf = bool(current - seen)   # a bill was just sent to ASVA
+        due_sync = (last_sync == 0.0) or (now_mono - last_sync >= sync_every)
+
+        # Read Tally + deliver ONLY on a new PDF (button press) or the slow beat.
+        # Never on the fast folder tick, so Tally is never hammered.
+        if new_pdf or due_sync:
+            try:
+                if new_pdf:
+                    log_and_print(f"[{stamp}] New bill PDF detected - sending to the party now.")
+                new_bills, payments = await _deliver_new_bills(config, company, pdf_dir, stamp)
+                if due_sync and not new_pdf:
+                    log_and_print(f"[{stamp}] Tally checked - {new_bills} new bill(s) sent, {payments} payment(s).")
+                last_sync = asyncio.get_event_loop().time()
+                failures = 0
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                failures += 1
+                log_and_print(f"[{stamp}] Send/sync failed ({e}).", is_error=True)
+                if failures in (5, 50):
+                    log_and_print("Tally or backend unreachable for a while - check they are running.", is_error=True)
+            seen = _pending_pdfs()   # delivered PDFs have moved to /sent
+
+        # Heavy bill-wise outstanding refresh on its own slow cadence or on Reload.
         try:
-            now_mono = asyncio.get_event_loop().time()
-            due = (last_outstanding == 0.0) or (now_mono - last_outstanding >= outstanding_every)
-            forced = False if due else await check_pending_refresh(config)
-            if due or forced:
+            due_out = (last_outstanding == 0.0) or (now_mono - last_outstanding >= outstanding_every)
+            forced = False if due_out else await check_pending_refresh(config)
+            if due_out or forced:
                 if forced:
                     log_and_print(f"[{stamp}] Reload pressed - refreshing outstanding now.")
                 await run_apply_outstanding(config)
@@ -321,7 +526,32 @@ async def run_watch(config: dict):
             raise
         except Exception as e:
             log_and_print(f"[{stamp}] Outstanding refresh failed ({e}) - bills/heartbeat unaffected.", is_error=True)
-        await asyncio.sleep(interval)
+
+        # Deposit-ledger cache (Cash/bank names for the confirm popup): heavy read,
+        # so once at start and then on a long beat.
+        try:
+            if (last_ledgers == 0.0) or (now_mono - last_ledgers >= ledgers_every):
+                n = await _push_deposit_ledgers(config)
+                if n:
+                    log_and_print(f"[{stamp}] Deposit accounts synced ({n}).")
+                last_ledgers = asyncio.get_event_loop().time()
+        except Exception as e:
+            log_and_print(f"[{stamp}] Deposit-ledger sync failed ({e}) - non-fatal.", is_error=True)
+
+        # Confirmed-receipt drain: cheap backend check every ~25s; touches Tally
+        # only when the owner has confirmed a payment to post.
+        try:
+            if (now_mono - last_receipts >= receipts_every):
+                n = await run_receipts_drain(config)
+                if n:
+                    log_and_print(f"[{stamp}] Posted {n} confirmed receipt(s) to Tally.")
+                last_receipts = asyncio.get_event_loop().time()
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            log_and_print(f"[{stamp}] Receipt drain failed ({e}) - will retry.", is_error=True)
+
+        await asyncio.sleep(folder_poll)
 
 
 async def _deliver_new_bills(config: dict, company: str, pdf_dir: str, stamp: str) -> tuple[int, int]:
@@ -430,8 +660,10 @@ async def run_apply_outstanding(config: dict):
     truth for amounts + dates (fixes receipt-capture drift). Runs at the end
     of --sync and via --refresh-outstanding."""
     company = config['company_name']
+    emit_progress(1, 4, "Reading customer list from Tally")
     groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
     debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
+    emit_progress(2, 4, "Reading customers from Tally")
     masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
     debtor_names = sorted({d['name'] for d in debtors})
@@ -445,9 +677,11 @@ async def run_apply_outstanding(config: dict):
         for d in debtors if (d.get('current_outstanding') or 0) > 0
     }
 
+    emit_progress(3, 4, "Reading outstanding bills from Tally")
     bills_xml = await fetch_and_parse(config, tally_xml.build_bills_query(company))
     bills = tally_xml.parse_bills(bills_xml, set(debtor_names))
     if not bills and not ledger_balances:
+        emit_progress(4, 4, "Done")
         log_and_print("No outstanding data from Tally - nothing refreshed.", is_error=True)
         return
 
@@ -461,7 +695,14 @@ async def run_apply_outstanding(config: dict):
         } for b in bills],
         "all_parties": debtor_names,
         "ledger_balances": ledger_balances,
+        # Keep customer numbers current in the backend (source of truth = Tally).
+        # Reuses the masters we already fetched above - no extra Tally read.
+        "contacts": [
+            {"name": d["name"], "whatsapp_number": d.get("whatsapp_number")}
+            for d in debtors if d.get("whatsapp_number")
+        ],
     }
+    emit_progress(4, 4, "Saving to ASVA")
     log_and_print(f"Refreshing outstanding from Tally: {len(bills)} bills, "
                   f"{len(ledger_balances)} parties owing (ledger totals authoritative)...")
     try:
@@ -513,7 +754,7 @@ async def run_watch_all(companies: list):
     interval = int(companies[0].get('watch_interval_seconds', 60) or 60)
     outstanding_every = int(companies[0].get('outstanding_every_seconds', 300) or 300)
     last_out = {c['company_name']: 0.0 for c in companies}
-    pdf_dir = companies[0].get('bill_pdf_dir', '')
+    pdf_dir = companies[0].get('bill_pdf_dir') or DEFAULT_BILL_PDF_DIR
     if pdf_dir:
         try:
             os.makedirs(pdf_dir, exist_ok=True)
@@ -594,7 +835,7 @@ async def run_add_company(config: dict, name: str):
         log_and_print(f"Could not verify against Tally ({e}) - continuing.", is_error=True)
 
     base = config['backend_url'].rstrip('/')
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}) as client:
         resp = await client.post(f"{base}/tally/companies/register", json={
             "account_token": config['agent_token'],
             "company_name": name,
@@ -614,6 +855,177 @@ async def run_add_company(config: dict, name: str):
     log_and_print("Now run:  agent --import-masters   (one-time, brings its debtors in)")
 
 
+# ── Setup-wizard commands ────────────────────────────────────────────────
+# Each prints exactly one JSON line on stdout and exits, so the desktop wizard
+# can drive setup without reimplementing Tally's XML quirks in JavaScript.
+
+def _emit(obj: dict, failed: bool = False) -> None:
+    import json as _json
+    print(_json.dumps(obj))
+    if failed:
+        sys.exit(1)
+
+
+def _cli_pair(code: str, backend: str | None) -> None:
+    """Redeem a one-time setup code and write config.json."""
+    from pair import DEFAULT_BACKEND, PairError, pair_and_write
+    try:
+        cfg = pair_and_write(code, backend_url=backend or DEFAULT_BACKEND)
+    except PairError as e:
+        return _emit({"ok": False, "error": str(e)}, failed=True)
+    _emit({"ok": True, "business_id": cfg["business_id"],
+           "business_name": cfg.get("business_name", ""),
+           "company_name": cfg.get("company_name", "")})
+
+
+def _cli_list_companies(host, port) -> None:
+    """Companies open in Tally, so the owner taps theirs instead of typing it."""
+    from pair import PairError, list_tally_companies
+    try:
+        names = list_tally_companies(host or "localhost", int(port or 9000))
+    except PairError as e:
+        return _emit({"ok": False, "error": str(e)}, failed=True)
+    except Exception:
+        return _emit({"ok": False, "error": "Could not read companies from Tally."},
+                     failed=True)
+    _emit({"ok": True, "companies": names})
+
+
+def _cli_set_company(name: str) -> None:
+    """Persist the chosen Tally company without disturbing anything else."""
+    import json as _json
+    import os as _os
+    from pair import default_config_path
+    path = default_config_path()
+    cfg = {}
+    if _os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                cfg = _json.load(f) or {}
+        except Exception:
+            cfg = {}
+    cfg["company_name"] = name
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(cfg, f, ensure_ascii=False, indent=2)
+    _os.replace(tmp, path)
+    _emit({"ok": True, "company_name": name})
+
+
+def _cli_diagnose() -> None:
+    """Self-diagnosis for the setup wizard / dashboard. Prints ONE JSON line:
+    {ok, checks:[{name, ok, detail}]}. Each red check carries a plain-language
+    fix, so the owner (or the operator, remotely) can see exactly what is wrong
+    instead of guessing. This is the tool that turns 'it doesn't work' into 'the
+    server is unreachable' or 'Tally is closed'."""
+    import json as _json
+    import os as _os
+    from urllib import error as _er
+    from urllib import request as _rq
+    try:
+        from pair import DEFAULT_BACKEND, USER_AGENT, default_config_path
+    except ImportError:
+        from tally_agent.pair import DEFAULT_BACKEND, USER_AGENT, default_config_path
+
+    checks = []
+
+    def add(name, ok, detail=""):
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    def _get(url, timeout=12):
+        return _rq.urlopen(_rq.Request(url, headers={"User-Agent": USER_AGENT}), timeout=timeout)
+
+    # 1. Paired?
+    cfg = {}
+    path = default_config_path()
+    if _os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                cfg = _json.load(f) or {}
+        except Exception:
+            cfg = {}
+    paired = bool(cfg.get("agent_token") and cfg.get("business_id"))
+    add("Set up (paired to your shop)", paired,
+        "" if paired else "Not set up yet - enter your setup code.")
+
+    backend = (cfg.get("backend_url") or DEFAULT_BACKEND).rstrip("/")
+    token = cfg.get("agent_token") or ""
+    company = cfg.get("company_name") or ""
+    tally_host = cfg.get("tally_host") or "localhost"
+    tally_port = int(cfg.get("tally_port") or 9000)
+
+    # 2. Server reachable? (names the two field failures: firewall block / offline)
+    server_ok = False
+    try:
+        server_ok = _get(f"{backend}/health").status == 200
+        add("ASVA server reachable", server_ok,
+            "" if server_ok else "The server answered but is not healthy.")
+    except _er.HTTPError as e:
+        low = b""
+        try:
+            low = e.read()
+        except Exception:
+            pass
+        low = low.decode("utf-8", "replace").lower()
+        if e.code == 403 or "1010" in low:
+            add("ASVA server reachable", False,
+                "Blocked by the firewall (bot check). Ask your ASVA contact to allow the app.")
+        elif "1033" in low or e.code >= 520:
+            add("ASVA server reachable", False,
+                "Server is offline or restarting. Try again in a minute.")
+        else:
+            add("ASVA server reachable", False, f"Server said {e.code}.")
+    except Exception:
+        add("ASVA server reachable", False,
+            "No internet on this computer, or the server address is wrong.")
+
+    # 3. Token accepted?
+    if paired and server_ok:
+        try:
+            ok = _get(f"{backend}/license/status?token={token}").status == 200
+            add("Your shop is recognised", ok,
+                "" if ok else "Re-pair with a fresh code.")
+        except _er.HTTPError as e:
+            add("Your shop is recognised", False,
+                "Token not accepted - re-pair with a fresh code." if e.code == 401
+                else f"Server said {e.code}.")
+        except Exception:
+            add("Your shop is recognised", False, "Could not check right now.")
+
+    # 4. Tally open + right company?
+    try:
+        try:
+            from tally_agent import tally_xml
+        except ImportError:
+            import tally_xml
+        body = tally_xml.build_company_list_query().encode("utf-8")
+        req = _rq.Request(f"http://{tally_host}:{tally_port}", data=body,
+                          headers={"Content-Type": "text/xml"}, method="POST")
+        raw = _rq.urlopen(req, timeout=12).read()
+        companies = tally_xml.parse_companies(tally_xml.sanitize_xml(raw))
+        add("TallyPrime is open", True, "")
+        if company:
+            match = company in companies
+            add("Your company is loaded", match, "" if match else
+                f"'{company}' is not open. Open now: {', '.join(companies) or 'none'}.")
+    except Exception:
+        add("TallyPrime is open", False,
+            "Open TallyPrime and turn on its HTTP server (port 9000).")
+
+    # 5. Shop WhatsApp linked?
+    try:
+        wa = str(cfg.get("shop_wa_url") or "http://localhost:3001").rstrip("/")
+        d = _json.loads(_rq.urlopen(_rq.Request(f"{wa}/api/wa/status"), timeout=8)
+                        .read().decode("utf-8", "replace"))
+        ready = bool(d.get("ready"))
+        add("Shop WhatsApp connected", ready,
+            "" if ready else "Scan the QR to link your shop's WhatsApp.")
+    except Exception:
+        add("Shop WhatsApp connected", False, "WhatsApp is not running yet.")
+
+    _emit({"ok": all(c["ok"] for c in checks), "checks": checks})
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tally Sync Agent")
     parser.add_argument('--import-masters', action='store_true', help='Run one-time import of all debtors')
@@ -623,16 +1035,49 @@ def main():
     parser.add_argument('--refresh-outstanding', action='store_true', help='Apply Tally bill-by-bill outstanding as the source of truth (accurate amounts + dates)')
     parser.add_argument('--companies', action='store_true', help='List companies open in Tally (and which are connected to ASVA)')
     parser.add_argument('--add-company', metavar='NAME', help='Connect another Tally company to ASVA (its own separate data)')
+    # --- Setup wizard commands (machine-readable JSON on stdout) ---
+    parser.add_argument('--pair', metavar='CODE', help='Connect this install to its business with a one-time setup code')
+    parser.add_argument('--list-companies-json', action='store_true', help='Print Tally companies as JSON (setup wizard)')
+    parser.add_argument('--set-company', metavar='NAME', help='Save the chosen Tally company (setup wizard)')
+    parser.add_argument('--drain-outbox', action='store_true', help='Deliver queued customer sends from this shop\'s WhatsApp (thin client)')
+    parser.add_argument('--drain-receipts', action='store_true', help='Post owner-confirmed payments into Tally right now (one-shot)')
+    parser.add_argument('--diagnose', action='store_true', help='Check server/Tally/WhatsApp connectivity and print JSON (setup wizard / doctor)')
+    parser.add_argument('--backend', metavar='URL', help='Server URL to pair against')
+    parser.add_argument('--tally-host', default='localhost')
+    parser.add_argument('--tally-port', default=9000)
 
     args = parser.parse_args()
 
+    # Setup commands run BEFORE load_config(): a fresh install has no config
+    # yet, which is the entire point of pairing. They print one JSON line so
+    # the wizard can show the owner a clean message instead of a traceback.
+    if args.pair:
+        return _cli_pair(args.pair, args.backend)
+    if args.list_companies_json:
+        return _cli_list_companies(args.tally_host, args.tally_port)
+    if args.set_company:
+        return _cli_set_company(args.set_company)
+    if args.diagnose:
+        return _cli_diagnose()
+
     if not (args.import_masters or args.sync or args.watch or args.check_outstanding
-            or args.refresh_outstanding or args.companies or args.add_company):
+            or args.refresh_outstanding or args.companies or args.add_company
+            or args.drain_outbox or args.drain_receipts):
         print("Please specify --import-masters, --sync, --watch, --check-outstanding, "
-              "--refresh-outstanding, --companies or --add-company \"NAME\"")
+              "--refresh-outstanding, --companies, --add-company \"NAME\", --drain-outbox "
+              "or --drain-receipts")
         sys.exit(1)
 
     config = load_config()
+
+    # The outbox drainer needs only the backend + token + local WhatsApp, not
+    # Tally - so it skips Tally discovery and runs on its own (its own process).
+    if args.drain_outbox:
+        try:
+            asyncio.run(run_drain_outbox(config))
+        except KeyboardInterrupt:
+            log_and_print("Outbox drainer stopped.")
+        return
 
     # Auto-discover host and port
     host, port = asyncio.run(auto_discover_tally(config))
@@ -667,6 +1112,9 @@ def main():
             asyncio.run(run_import(cfg))
         if args.sync:
             asyncio.run(run_sync(cfg))
+        if args.drain_receipts:
+            n = asyncio.run(run_receipts_drain(cfg, push_ledgers=True))
+            log_and_print(f"Confirmed receipts posted to Tally: {n}")
 
     if args.watch:
         try:

@@ -35,7 +35,7 @@ Send these and check each reply:
 
 | Send | Expect |
 |---|---|
-| `HI` | Simple English menu (SEE YOUR MONEY / SEND A REMINDER / ADD A BILL / OTHER) |
+| `HI` | Simple English menu: exactly 7 commands with `-----` separators |
 | `LIST` | "who owes you" list with rupee totals |
 | `CHECK <real party>` | That party's bills, phone, reminder ON/OFF |
 | `DIGEST` | Today's summary immediately, in plain English |
@@ -54,17 +54,29 @@ Send these and check each reply:
    Nothing arrives (bot says "queue"). Switch the shop laptop ON -
    the queued message must arrive within ~2 minutes of boot.
 
-## 5. Dashboard round-trip (shop laptop, localhost:8000/admin?token=...)
+## 5. Dashboard round-trip (INSIDE the ASVA desktop app - this matters)
+
+Do this in the DESKTOP APP, not just a browser: the app is Electron, where
+pop-up input boxes never worked before. Every edit below now uses an in-page
+box (modal), so it must work in the app.
 
 1. The `BILL` you created in step 3 must appear on the dashboard under the
    party, and on the party page with a blue **WhatsApp** tag.
-2. Party page: change credit days - due date on the open bill must change.
-3. Record a payment on that party - bill flips to partial/paid; if the shop
-   WhatsApp is connected the party gets a confirmation.
-4. Press **Send now** on a party while shop WhatsApp is DISCONNECTED - the
-   dashboard must show the failure reason, not a fake success.
-5. Reminders page: add a second batch (English, different hour), save,
-   assign the test party to it on the dashboard, reload - assignment sticks.
+2. Party page -> **Edit party**: change the name and add/fix the WhatsApp
+   number, Save - the header updates. (Only non-Tally parties show this; a
+   Tally party shows "name and number come from Tally".)
+3. Party page -> **+ Add bill** and **Edit** on a non-Tally bill: a box opens
+   for amount + bill number. Save - the bill row updates. **Delete** removes it.
+4. Party page -> **Delete party**: removes the party and all its bills, then
+   returns to the Dashboard. (Non-Tally only.)
+5. Dashboard -> non-Tally party -> **Rs Pay**: a box opens for the amount.
+   Save - the bill flips to partial/paid and (if WhatsApp is connected) the
+   party gets a confirmation.
+6. Party page: change credit days - the due date on the open bill must change.
+7. Press **Send now** while shop WhatsApp is DISCONNECTED - the dashboard must
+   show the real failure reason, not a fake success.
+8. Reminders page: add a second batch (English, different hour), save, assign
+   the test party to it on the dashboard, reload - assignment sticks.
 
 ## 6. Tally flow (shop laptop, Tally open)
 
@@ -83,6 +95,29 @@ Send these and check each reply:
 | Each batch's hour (default 11:00) | Reminder sweep sends that batch's due reminders from the SHOP number, paced, capped |
 | Your digest hour (default 10 PM; change with `DIGEST 9PM` on the bot) | Daily summary arrives on the owner phone FROM THE BOT number |
 | Any time | Customer replies (HISAB / PAID) get answered on the shop number |
+
+## 7a. Command Center + subscriptions (operator only)
+
+The Command Center is YOUR cockpit - it reads the shared database, so it shows
+EVERY shop centrally. It is gated by `ADMIN_API_KEY` (set it in the server
+`.env`; while empty, the page is off).
+
+1. Open `http://<host>:8000/ops` - a key prompt appears. Enter `ADMIN_API_KEY`.
+2. You see KPI cards (businesses, online, active/grace/suspended, messages this
+   month, failed today, outdated) and a table with every business: status pill,
+   plan, expiry, days left, last seen (green dot = agent seen in the last 5 min),
+   agent version, messages used, failed sends today.
+3. **Renew +1 mo** on a row - its expiry jumps forward 30 days (stacks on
+   remaining days if still active). The row flips to active.
+4. **Suspend** on a row - status goes suspended; that shop's WhatsApp sends stop
+   immediately (server-side). **Renew** brings it back.
+5. Change the **plan** dropdown - the tier changes without touching the expiry.
+6. Leave it open - it refreshes every 30 s. Start a shop's ASVA app and within a
+   minute its dot goes green and its version appears (via /tally/sync + the
+   desktop heartbeat).
+
+Note: a suspended shop still SYNCS Tally (read-only, so its numbers stay
+correct), but sends/reminders/digest/OCR stop until renewed.
 
 ## 7b. Missed-hour catch-up (laptop off at the send hour)
 

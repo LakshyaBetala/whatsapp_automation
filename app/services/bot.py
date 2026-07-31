@@ -22,7 +22,8 @@ from datetime import date
 
 from app.config import settings
 from app.db import require_db
-from app.models import Lang, MessageType, Plan
+from app.models import Lang, MessageType, Plan, plan_has_bot
+from app.services import checkpoint, i18n, names, promises, proof, replies
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
 from app.services.templates import apply_discount, inr
@@ -51,12 +52,80 @@ log = logging.getLogger(__name__)
 # we do not recognise (so a new customer or a pilot tester is never ghosted).
 _GREETING = ("HI", "HELLO", "HELP", "MENU", "START", "?", "HEY", "NAMASTE")
 
+# A non-owner who messages the ASVA marketing number (from the poster) saying any
+# of these is a warm lead ready to sign up.
+_JOIN_WORDS = {"YES", "HAAN", "HAA", "HA", "JOIN", "INTERESTED", "CHAHIYE", "SIGNUP"}
+
+# Hindi/Hinglish first-word aliases so an owner types the way he speaks
+# ("BAND Ramesh", "SOOCHI", "CHALU Ramesh"). Only unambiguous verbs, and NONE
+# that collide with the checkpoint/photo words (OK/HOLD/RUKO/YES/HAAN), which are
+# handled before this runs. Maps the leading verb to its canonical English command.
+_CMD_ALIASES = {
+    "BAND": "STOP", "SOOCHI": "LIST", "SUCHI": "LIST", "SUCHII": "LIST",
+    "CHALU": "START", "SHURU": "START", "YAAD": "REMIND", "YAD": "REMIND",
+}
+
+
+def _canon_command(upper: str) -> str:
+    """Rewrite a leading Hindi/Hinglish command verb to its English form, so the
+    normal command dispatch below understands it. Only the first word is touched."""
+    parts = upper.split(None, 1)
+    if parts and parts[0] in _CMD_ALIASES:
+        rest = f" {parts[1]}" if len(parts) > 1 else ""
+        return (_CMD_ALIASES[parts[0]] + rest).strip()
+    return upper
+
+
+def _prospect_reply(text: str, upper: str) -> str:
+    """Someone who is NOT a registered owner messaged the ASVA marketing/bot
+    number (e.g. off the poster). Never bounce them - invite them. A human watches
+    this number and follows up; a YES routes straight to that follow-up."""
+    tokens = set(re.findall(r"[A-Z]+", upper))
+    if tokens & _JOIN_WORDS:
+        log.info("ASVA lead (interested): %s -> %s", "prospect", text[:120])
+        return ("Bahut badhiya! ASVA aapka udhaar aapke hi WhatsApp number se recover karega, "
+                "aapke Tally ke saath. Humari team aapse jaldi baat karke setup kar degi. "
+                "Pehla mahina bilkul free.\n\n"
+                "Great, our team will contact you shortly to set up ASVA. First month free.")
+    log.info("ASVA lead (inquiry): %s", text[:120])
+    return ("Namaste! Main ASVA hoon, aapka collection assistant.\n"
+            "Main aapke Tally se aur aapke apne WhatsApp number se customers ko bill aur "
+            "payment reminder bhejta hoon, taaki aapka phasa hua paisa time par wapas aaye.\n"
+            "Shuru karne ke liye YES bhejein. Pehla mahina bilkul free.\n\n"
+            "I am ASVA, your collection assistant. Reply YES to start. First month free.")
+
+
+def _checkpoint_hold(db, business_id: str, cp: dict, arg: str) -> str | None:
+    """Hold a party in today's morning checkpoint by number (1-based) or name.
+    Returns a reply, or None if the arg names no party in today's list (the
+    caller then treats the message as a normal PAID)."""
+    items = cp.get("items") or []
+    target = None
+    if arg.isdigit():
+        i = int(arg)
+        if 1 <= i <= len(items):
+            target = items[i - 1]
+    else:
+        low = arg.lower()
+        matches = [it for it in items if low in str(it.get("name", "")).lower()]
+        if len(matches) == 1:
+            target = matches[0]
+        elif len(matches) > 1:
+            names = ", ".join(it["name"] for it in matches[:5])
+            return f"'{arg}' matches more than one: {names}. Reply PAID with the number instead."
+    if not target:
+        return None
+    checkpoint.hold(db, business_id, target["id"])
+    return (f"Held {target['name']}, I will not remind them today.\n"
+            f"Please enter their payment in Tally so your books stay correct.")
+
 
 def _last10(n: str) -> str:
     """Last 10 digits of a phone number - used as a format-agnostic match key
-    so a number stored as 91XXXXXXXXXX still matches +91, 0-prefixed, etc."""
-    d = "".join(c for c in str(n or "") if c.isdigit())
-    return d[-10:] if len(d) >= 10 else ""
+    so a number stored as 91XXXXXXXXXX still matches +91, 0-prefixed, etc.
+    Delegates to the shared, exhaustively-tested phones module."""
+    from app.services import phones
+    return phones.last10(n)
 
 
 def _send_fail_note(result: dict) -> str:
@@ -114,8 +183,9 @@ async def handle(
     # ── Identify sender: owner or customer? ───────────────────────────
     business = _match_row(
         db, "businesses",
-        "id, business_name, plan, whatsapp_number, upi_vpa, discount_pct, "
-        "msg_language, reminder_batches, reminder_hour",
+        "id, business_name, plan, whatsapp_number, upi_vpa, upi_vpa_2, upi_vpa_3, "
+        "bank_account_name, bank_account_no, bank_ifsc, bank_name, discount_pct, "
+        "msg_language, owner_language, reminder_batches, reminder_hour",
         from_number)
     is_owner = business is not None
 
@@ -125,22 +195,48 @@ async def handle(
     # customer self-service flow here - we reply to a greeting once so they
     # are not ghosted, and stay silent otherwise.
     if channel == "bot" and not is_owner:
-        if upper in _GREETING:
-            team = settings.product_team_number
-            tail = f"\n\nTo join ASVA, contact: {team}" if team else ""
-            return (
-                "Hello! This is the ASVA assistant number.\n"
-                "It works only for registered ASVA shop owners." + tail
-            )
-        log.info("Non-owner %s messaged the bot channel: %s", from_number, text)
-        return ""
+        # The marketing number IS this bot number, so a non-owner here is almost
+        # always a PROSPECT off the poster. Invite them into the funnel instead of
+        # bouncing them - every bounced message is a lost sale.
+        return _prospect_reply(text, upper)
+
+    # ── Bot assistant is a paid feature (Basic plan does NOT include it) ──
+    if channel == "bot" and is_owner and not plan_has_bot(business.get("plan")):
+        return ("The ASVA assistant is available on the Growth plan and above.\n"
+                "Your bills and reminders keep working. To turn on the assistant "
+                "(LIST, BILL, photo bills, digest), upgrade your plan.")
 
     if is_owner:
         business_id = business["id"]
+        # The owner's chosen language, used for every reply below so the chat
+        # matches the app (English chosen -> pure English; else Hinglish).
+        lang = i18n.norm_lang(business.get("owner_language"))
 
         # ── Photo of a bill → OCR → confirm flow ─────────────────────
         if media_b64:
             return await _handle_photo_bill(business, media_b64, media_type)
+
+        # ── Morning checkpoint replies (only while today's preview is live) ──
+        #    Placed ABOVE the photo-bill "OK" so OK / HOLD / PAID <n> answer the
+        #    morning list when one is live; otherwise they fall through (photo
+        #    confirm and the normal PAID still work; YES/HAAN always confirm a
+        #    photo). A PAID naming no listed party also falls through.
+        if upper in ("OK", "SEND", "SEND ALL", "HOLD", "HOLD ALL", "PAUSE", "RUKO") \
+                or upper.startswith("PAID "):
+            _cp = checkpoint.get_today(db, business_id)
+            if _cp is not None:
+                if upper.startswith("PAID "):
+                    arg = re.match(r"PAID\s+(.+)", text.strip(), re.IGNORECASE).group(1).strip()
+                    reply = _checkpoint_hold(db, business_id, _cp, arg)
+                    if reply:
+                        return reply
+                elif upper in ("HOLD", "HOLD ALL", "PAUSE", "RUKO"):
+                    n = checkpoint.hold_all(db, business_id)
+                    return (f"Held all {n} reminders for today. Nothing will go out; "
+                            f"they come back tomorrow." if n
+                            else "There is nothing queued to hold today.")
+                else:   # OK / SEND
+                    return "Okay, I will send today's reminders as planned. I'll summarise tonight."
 
         # ── Photo-bill confirmation / correction commands ─────────────
         if upper in ("YES", "HAAN", "HA", "OK", "CONFIRM"):
@@ -152,6 +248,12 @@ async def handle(
             return await _correct_photo_bill(
                 business_id, fix_match.group(1), text.strip().split(None, 1)[1])
 
+        # Rewrite a Hindi/Hinglish command verb to English so every command below
+        # understands it (BAND -> STOP, SOOCHI -> LIST, CHALU -> START, YAAD ->
+        # REMIND). Done here, after the checkpoint/photo words, so nothing above
+        # is affected.
+        upper = _canon_command(upper)
+
         # ── LIST ──────────────────────────────────────────────────────
         if upper == "LIST":
             return await _handle_list(business_id, business["business_name"])
@@ -159,6 +261,14 @@ async def handle(
         # ── DIGEST - today's summary, on demand (same as the nightly one) ─
         if upper in ("DIGEST", "REPORT", "SUMMARY", "AAJ"):
             return await _handle_digest(business_id)
+
+        # ── SENT - the parties reminded today, by name ────────────────
+        if upper in ("SENT", "SENT TODAY", "REMINDED", "REMINDERS"):
+            return await _handle_sent_today(business_id)
+
+        # ── RECOVERED - the proof: money ASVA helped bring back ───────
+        if upper in ("RECOVERED", "RECOVERY", "WAPASI", "KITNA AAYA"):
+            return await _handle_recovered(business_id, lang=lang)
 
         # ── DIGEST 9PM / DIGEST TIME 21 - set the daily summary time ──
         dt_match = re.match(r"DIGEST(?:\s+TIME)?\s+(\d{1,2})\s*(AM|PM)?$", upper)
@@ -181,32 +291,40 @@ async def handle(
         stop_match = re.match(r"STOP\s+(.+)", upper)
         if stop_match:
             client_name = stop_match.group(1).strip()
-            return await _handle_stop(business_id, client_name)
+            return await _handle_stop(business_id, client_name, lang=lang)
 
         # ── START <name> ─────────────────────────────────────────────
         start_match = re.match(r"START\s+(.+)", upper)
         if start_match:
             client_name = start_match.group(1).strip()
-            return await _handle_start(business_id, client_name)
+            return await _handle_start(business_id, client_name, lang=lang)
+
+        # ── EXCLUDE / INCLUDE <name> - the do-not-chase list ─────────
+        excl_match = re.match(r"EXCLUDE\s+(.+)", upper)
+        if excl_match:
+            return await _handle_exclude(business_id, excl_match.group(1).strip(), True, lang=lang)
+        incl_match = re.match(r"INCLUDE\s+(.+)", upper)
+        if incl_match:
+            return await _handle_exclude(business_id, incl_match.group(1).strip(), False, lang=lang)
 
         # ── PAID <name> ──────────────────────────────────────────────
         paid_match = re.match(r"PAID\s+(.+)", upper)
         if paid_match:
             client_name = paid_match.group(1).strip()
             return await _handle_paid_owner(
-                business_id, client_name, Plan(business["plan"])
+                business_id, client_name, Plan(business["plan"]), lang=lang
             )
 
         # ── CHECK <name> - live balance, matches Tally to the rupee ──
         check_match = re.match(r"CHECK\s+(.+)", upper)
         if check_match:
-            return await _handle_check(business_id, check_match.group(1).strip())
+            return await _handle_check(business_id, check_match.group(1).strip(), lang=lang)
 
         # ── TERMS <name> <days> - set a party's credit period ────────
         terms_match = re.match(r"TERMS\s+(.+?)\s+(\d{1,3})$", upper)
         if terms_match:
             return await _handle_terms(
-                business_id, terms_match.group(1).strip(), int(terms_match.group(2)))
+                business_id, terms_match.group(1).strip(), int(terms_match.group(2)), lang=lang)
 
         # ── REMIND - owner decides who gets reminded, right now ──────
         #    REMIND <naam>      one party (consolidated bills + QR)
@@ -216,6 +334,15 @@ async def handle(
         if remind_match:
             return await _handle_remind(business, remind_match.group(1).strip())
 
+        # ── PROMISES - who has claimed payment or promised a date ────
+        if upper in ("PROMISES", "PROMISE"):
+            return await _handle_promises(business_id)
+
+        # ── CHASE <name> - cancel a Promise-to-Pay hold, resume now ──
+        chase_match = re.match(r"CHASE\s+(.+)", upper)
+        if chase_match:
+            return await _handle_chase(business_id, chase_match.group(1).strip(), lang=lang)
+
         # ── TEAM / SUPPORT <message> - reach the ASVA product team ───
         team_match = re.match(r"(?:TEAM|SUPPORT|PROBLEM|MADAD)\s+(.+)", text.strip(), re.IGNORECASE)
         if team_match:
@@ -223,34 +350,13 @@ async def handle(
                 business_id, business.get("business_name", ""), from_number, team_match.group(1).strip())
 
         # ── HELP / unrecognised ──────────────────────────────────────
-        # Written for 20-70 year old shop owners: simple English, short
-        # lines, generous spacing, only the commands they actually need.
-        # "Ramesh Traders" is clearly marked as an example.
+        # For 20-70 year old shop owners: grouped by intent, one bold example per
+        # command, plain words, WhatsApp *bold* headers. In the OWNER's chosen
+        # language (English -> pure English; Hinglish -> Hinglish), so the chat
+        # matches the app. "Ramesh" is only an example name.
         prefix = ("" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START")
-                  else "Sorry, I did not understand that.\nHere is what I can do:\n\n")
-        return (
-            prefix
-            + "Hello! I am ASVA, your business assistant.\n\n"
-            "Type a command, then your party's name.\n"
-            "\"Ramesh Traders\" below is only an EXAMPLE.\n"
-            "Always type your own party's name.\n\n"
-            "SEE YOUR MONEY\n\n"
-            "LIST\nWho owes you, full list\n\n"
-            "CHECK Ramesh Traders\nOne party's full account\n\n"
-            "DIGEST\nToday's summary, right now\n\n"
-            "SEND A REMINDER\n(always goes from your shop number)\n\n"
-            "REMIND Ramesh Traders\nRemind that party now\n\n"
-            "REMIND TOP 5\nRemind your 5 biggest dues\n\n"
-            "ADD A BILL (not in Tally)\n\n"
-            "BILL Ramesh Traders 12500\nNew bill of Rs 12,500\n"
-            "Or just send a PHOTO of the bill.\n\n"
-            "OTHER\n\n"
-            "MSG Ramesh Traders: your goods are ready\nSends your message to that party\n\n"
-            "PAID Ramesh Traders\nMark their payment as received\n\n"
-            "STOP Ramesh Traders\nStop reminders for them\n(START to switch back on)\n\n"
-            "DIGEST 9PM\nChange your daily summary time\n\n"
-            "Any problem? Type TEAM and your message."
-        )
+                  else i18n.t(lang, "unknown_prefix"))
+        return prefix + i18n.t(lang, "help")
 
     # ── Customer message (not owner) ──────────────────────────────────
     # Look up which business this customer belongs to (format-agnostic match)
@@ -262,12 +368,15 @@ async def handle(
         # everything else, so the bot never auto-replies to ordinary chatter
         # (which would be intrusive and risk the number being flagged).
         if upper in _GREETING:
+            # Unknown number, so we have no business/language context: answer in
+            # both English and Hinglish so nobody is stuck with the wrong one.
             return (
-                "Namaste! Main is dukaan ka WhatsApp assistant hoon.\n\n"
-                "HISAB bhejein - apna baaki dekhein\n"
-                "PAID bhejein - payment ki khabar dein\n\n"
-                "Aapka number hamare records me nahi mila.\n"
-                "Dukaan se baat karni ho to TEAM likhkar apni baat bhejein."
+                "Hello! I am this shop's WhatsApp assistant.\n"
+                "Send HISAB to see your balance, or PAID to report a payment.\n"
+                "Your number is not in our records yet. Send TEAM + your message to reach the shop.\n\n"
+                "Namaste! Main is dukaan ka assistant hoon.\n"
+                "HISAB bhejein apna baaki dekhne ke liye, ya PAID payment batane ke liye.\n"
+                "Dukaan se baat karni ho to TEAM likhkar bhejein."
             )
         log.info("Message from unknown number %s: %s", from_number, text)
         return ""  # stay silent on non-greeting messages from unknown numbers
@@ -281,10 +390,6 @@ async def handle(
         p in low for p in ("band kar", "mat bhej", "reminder band", "stop reminder", "unsubscribe")
     ):
         return await _handle_customer_optout(client, from_number)
-
-    # ── Customer says PAID ────────────────────────────────────────────
-    if upper == "PAID" or upper.startswith("PAID"):
-        return await _handle_paid_customer(client)
 
     # ── Customer self-service (keyword-only: this number is ALSO the
     #    shop's normal chat, so the bot must stay silent on normal talk) ─
@@ -321,6 +426,24 @@ async def handle(
             "Koi sawaal ho to TEAM likhkar apni baat bhejein.\n"
             "Dukaan tak pahuncha denge."
         )
+
+    # ── Reply capture: payment claims, promises, screenshots ──────────
+    # Reads the reply (keyword fast-path + Gemini), HOLDS reminders on a claim or
+    # a promised date, and NUDGES THE OWNER (never replies to the customer). A
+    # misread or low-confidence reply is forwarded to the owner, never auto-held.
+    # Returns True when it acted (stay silent to the customer).
+    if settings.enable_promise_capture:
+        # ASVA never replies to the customer in the owner's voice. capture_reply
+        # pauses reminders (if warranted) and NUDGES THE OWNER; when it has acted
+        # we stay silent to the customer (return "") and do not fall through.
+        acted = await replies.capture_reply(
+            client, text, media_b64=media_b64, media_type=media_type)
+        if acted:
+            return ""
+
+    # Legacy PAID (capture disabled, or nothing captured): notify the owner.
+    if upper == "PAID" or upper.startswith("PAID"):
+        return await _handle_paid_customer(client)
 
     # Stay silent on everything else: a human will reply
     return ""
@@ -743,90 +866,95 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     return "\n".join(lines)
 
 
-async def _handle_stop(business_id: str, client_name: str) -> str:
-    """Pause reminders for a client by fuzzy name match."""
+# ── Shared party resolver (forgiving, area-aware, bilingual) ─────────────────
+# Every owner command that names a party goes through this instead of a raw
+# `ilike %query%`. It fetches the business's parties and lets names.resolve do
+# the forgiving match (case/typo/prefix tolerant, same-name families kept
+# distinct, asks when unsure). One place = one behaviour across all commands.
+def _resolve_party(db, business_id: str, query: str, select: str = "id, name"):
+    """Return (status, rows): ("one", [row]) | ("many", rows) | ("none", [])."""
+    try:
+        rows = (db.table("clients").select(select)
+                .eq("business_id", business_id).execute()).data or []
+    except Exception:
+        return "none", []
+    if not rows:
+        return "none", []
+    res = names.resolve(query, [r.get("name") or "" for r in rows])
+    if res["status"] == "one":
+        return "one", [rows[res["index"]]]
+    if res["status"] == "many":
+        return "many", [rows[i] for i in res["indices"]]
+    return "none", []
+
+
+def _party_pick_msg(status: str, query: str, rows: list, lang: str) -> str:
+    """The bilingual 'which one?' / 'no match' message for a non-single resolve."""
+    if status == "many":
+        listing = ", ".join(names.clean_display(r.get("name") or "") for r in rows[:6])
+        return i18n.t(lang, "which_one", q=query, list=listing)
+    return i18n.t(lang, "no_match", q=query)
+
+
+async def _handle_stop(business_id: str, client_name: str, *, lang: str = "english") -> str:
+    """Pause reminders for a client (forgiving name match, owner's language)."""
     db = require_db()
-    # Case-insensitive partial match
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, reminders_enabled")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(db, business_id, client_name, "id, name, reminders_enabled")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
+    disp = names.clean_display(client["name"])
     if not client["reminders_enabled"]:
-        return f"{client['name']}'s reminders are already off."
-
-    db.table("clients").update({"reminders_enabled": False}).eq(
-        "id", client["id"]
-    ).execute()
-
-    return (f"{client['name']}'s reminders are now OFF.\n"
-            f"To start again, send: START {client['name']}")
+        return i18n.t(lang, "already_off", name=disp)
+    db.table("clients").update({"reminders_enabled": False}).eq("id", client["id"]).execute()
+    return i18n.t(lang, "stopped", name=disp)
 
 
-async def _handle_start(business_id: str, client_name: str) -> str:
-    """Resume reminders for a client by fuzzy name match."""
+async def _handle_start(business_id: str, client_name: str, *, lang: str = "english") -> str:
+    """Resume reminders for a client (forgiving name match, owner's language)."""
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, reminders_enabled")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(db, business_id, client_name, "id, name, reminders_enabled")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
+    disp = names.clean_display(client["name"])
     if client["reminders_enabled"]:
-        return f"{client['name']}'s reminders are already on."
-
-    # Selection day = today: the overdue track restarts from the day the
-    # owner switches a party ON (see reminder_anchor in the sweep).
+        return i18n.t(lang, "already_on", name=disp)
+    # Selection day = today: the overdue track restarts from the day the owner
+    # switches a party ON (see reminder_anchor in the sweep).
     db.table("clients").update(
-        {"reminders_enabled": True, "reminder_anchor": date.today().isoformat()}).eq(
-        "id", client["id"]
-    ).execute()
-
-    return f"{client['name']}'s reminders are now ON."
+        {"reminders_enabled": True, "reminder_anchor": date.today().isoformat()}
+    ).eq("id", client["id"]).execute()
+    return i18n.t(lang, "started", name=disp)
 
 
-async def _handle_check(business_id: str, client_name: str) -> str:
+async def _handle_recovered(business_id: str, *, lang: str = "english") -> str:
+    """The proof-of-value reply: what ASVA recovered this month + what is still
+    out. This is the number that renews subscriptions and fuels referrals."""
+    db = require_db()
+    p = proof.build_proof(db, business_id)
+    out = inr(p["outstanding"])
+    if p["recovered_this_month"] <= 0:
+        return i18n.t(lang, "recovered_zero", out=out)
+    delta = ""
+    if p["recovered_last_month"] > 0:
+        delta = i18n.t(lang, "recovered_delta", last=inr(p["recovered_last_month"]))
+    return i18n.t(lang, "recovered", this=inr(p["recovered_this_month"]),
+                  out=out, month=p["month"], delta=delta)
+
+
+async def _handle_check(business_id: str, client_name: str, *, lang: str = "english") -> str:
     """Instant per-party statement - the anti-'sync is broken' command.
 
     Answers with open bills + total + last sync time so the owner can
     verify against Tally to the rupee, any time, in 5 seconds.
     """
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, whatsapp_number, reminders_enabled")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(
+        db, business_id, client_name, "id, name, whatsapp_number, reminders_enabled")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
     bills_resp = (
         db.table("bills")
         .select("invoice_number, outstanding, due_date, status")
@@ -839,7 +967,7 @@ async def _handle_check(business_id: str, client_name: str) -> str:
     open_bills = bills_resp.data or []
 
     from datetime import date as _date
-    lines = [f"{client['name']}"]
+    lines = [names.clean_display(client["name"])]
     if not open_bills:
         lines.append("Nothing pending. All clear.")
     else:
@@ -956,13 +1084,38 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
     # Early-payment discount from the batch: QR + line reflect the discount
     # (line appears only when the batch actually sets one).
     pay_amount, discount_line = apply_discount(total, batch["disc"], batch["lang"])
-    from app.services.batches import batch_vpa
-    vpa = batch_vpa(business, batch)
+    from app.services.batches import batch_payment
+    pay = batch_payment(business, batch)
+    vpa, bank = pay["vpa"], pay["bank"]
     qr_b64 = None
+
+    upi_block: list[str] = []
     if vpa:
         link = upi.upi_link(vpa, biz_name, pay_amount, f"{len(bills)} bills")
         qr_b64 = upi.qr_png_base64(link)
-        lines += ["", (f"To pay via UPI: {link}" if en else f"UPI se payment: {link}")]
+        upi_block = ["", (f"To pay via UPI: {link}" if en else f"UPI se payment: {link}")]
+
+    # Bank/NEFT details are sent ONLY when this batch's account is set to "Bank
+    # transfer" - not on every reminder. A UPI batch stays UPI-only.
+    bank_block: list[str] = []
+    if bank and pay["primary"] == "bank":
+        bank_block = ["", ("For bank transfer (NEFT/IMPS/RTGS):"
+                           if en else "Bank transfer (NEFT/IMPS) ke liye:")]
+        if bank["name"]:
+            bank_block.append((f"Name: {bank['name']}" if en else f"Naam: {bank['name']}"))
+        bank_block.append(f"A/c No: {bank['no']}")
+        if bank["ifsc"]:
+            bank_block.append(f"IFSC: {bank['ifsc']}")
+        if bank["bank"]:
+            bank_block.append(f"Bank: {bank['bank']}")
+
+    if pay["primary"] == "bank":
+        # Bank chosen for this batch: lead with the bank details, still offer UPI.
+        lines += bank_block + upi_block
+    else:
+        # UPI chosen: UPI only - no bank details unless the batch asks for them.
+        lines += upi_block
+
     if discount_line:
         lines += ["", discount_line]
     if batch.get("line"):
@@ -1118,6 +1271,67 @@ async def _handle_digest(business_id: str) -> str:
     return p.get("rendered_message") or "The summary came back empty. Please try again in a minute."
 
 
+def _day_start_utc_iso() -> str:
+    """Start of TODAY in the business timezone, as a UTC ISO string. messages
+    stores created_at in UTC, so we compute the local midnight then convert -
+    otherwise 'today' would drift by the UTC offset (5.5h for IST)."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    local = datetime.now(ZoneInfo(settings.timezone))
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight.astimezone(timezone.utc).isoformat()
+
+
+async def _handle_sent_today(business_id: str) -> str:
+    """SENT - the parties ASVA reminded today, BY NAME. The digest gives only a
+    count; owners asked to see exactly who was chased, so they can eyeball the
+    list and catch a wrong send before a customer complains."""
+    db = require_db()
+    rows = (
+        db.table("messages")
+        .select("client_id, delivery_status, clients(name)")
+        .eq("business_id", business_id)
+        .eq("type", MessageType.reminder.value)
+        .gte("created_at", _day_start_utc_iso())
+        .execute()
+    ).data or []
+
+    delivered: dict[str, int] = {}
+    queued = 0
+    failed = 0
+    for r in rows:
+        name = (r.get("clients") or {}).get("name") or "Unknown"
+        status = r.get("delivery_status")
+        if status in ("sent", "delivered"):
+            delivered[name] = delivered.get(name, 0) + 1
+        elif status == "queued":
+            queued += 1
+        elif status in ("failed", "limit_reached", "suspended"):
+            failed += 1
+
+    if not delivered:
+        if queued:
+            return (f"No reminders have gone out yet today.\n"
+                    f"{queued} are in the queue and will send from your shop number.")
+        return "No reminders have gone out today yet."
+
+    total = sum(delivered.values())
+    lines = [f"Reminders sent today ({total}):", ""]
+    for i, (name, n) in enumerate(sorted(delivered.items()), 1):
+        if i > 30:
+            lines.append(f"...and {len(delivered) - 30} more parties")
+            break
+        lines.append(f"{i}. {name}" + (f" (x{n})" if n > 1 else ""))
+    tail = []
+    if queued:
+        tail.append(f"{queued} more waiting to send")
+    if failed:
+        tail.append(f"{failed} could not be sent")
+    if tail:
+        lines.append("\n" + ", ".join(tail) + ".")
+    return "\n".join(lines)
+
+
 async def _handle_owner_msg(business: dict, rest: str) -> str:
     """MSG <party>: <text> - owner sends a free-form WhatsApp message to one
     party through ASVA. Colon separates name from message; without a colon
@@ -1171,80 +1385,106 @@ async def _handle_owner_msg(business: dict, rest: str) -> str:
     return f"{client['name']}: {_send_fail_note(result)}"
 
 
+_PAID_AMT_RE = re.compile(
+    r"^(.*?)[\s,]+(?:rs\.?\s*|₹\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:/-)?\s*$",
+    re.IGNORECASE)
+
+
+def _split_paid_amount(arg: str):
+    """Pull a trailing rupee amount off a PAID command:
+    "Ramesh Electricals 5000" -> ("Ramesh Electricals", Decimal(5000)).
+    Tolerates "rs 5000", "5,000", "5000/-". Returns (name, amount|None); the
+    caller falls back to the whole string when the leftover name does not match a
+    party (so a party name that ends in a number is not mangled)."""
+    m = _PAID_AMT_RE.match((arg or "").strip())
+    if not m:
+        return (arg or "").strip(), None
+    name = m.group(1).strip()
+    if not name:                       # "PAID 5000" with no name is not a party
+        return (arg or "").strip(), None
+    try:
+        return name, Decimal(m.group(2).replace(",", ""))
+    except Exception:
+        return name, None
+
+
 async def _handle_paid_owner(
-    business_id: str, client_name: str, plan: Plan
+    business_id: str, client_name: str, plan: Plan, *, lang: str = "english"
 ) -> str:
-    """Owner confirmed payment - mark paid immediately."""
+    """Owner confirms a customer paid: PAID <name> [amount].
+
+    This QUEUES the receipt for the app - it does not mark anything blindly. The
+    owner opens ASVA, checks the amount + deposit account (their Cash/bank) and
+    the bill it clears, then posts it into Tally with one tap. Tally stays the
+    single source of truth (no double counting): the next sync reflects it back
+    into the dashboard. A queued receipt also resolves any open promise/claim."""
+    from app.services import receipts_queue as rq
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
 
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name."
+    # Split an optional trailing amount: "PAID Ramesh Electricals 5000" ->
+    # name="Ramesh Electricals", amt=5000 (also "rs 5000", "5,000", "5000/-").
+    sel = "id, name, tally_ledger_name"
+    raw = (client_name or "").strip()
+    name_try, amount = _split_paid_amount(raw)
+    status, rows = _resolve_party(db, business_id, name_try, sel)
+    # If stripping the number left a name that does not resolve, the digits may
+    # be part of the party name (e.g. a shop literally called "SHOP 21"): retry
+    # with the whole string and no amount.
+    if status != "one" and amount is not None:
+        s2, r2 = _resolve_party(db, business_id, raw, sel)
+        if s2 == "one":
+            status, rows, amount = s2, r2, None
+    if status != "one":
+        return _party_pick_msg(status, name_try, rows, lang)
+    client = rows[0]
 
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
-
-    # Find oldest open bill to get amount
+    # Outstanding drives the default amount (owner can edit it in the popup).
     bill_resp = (
-        db.table("bills")
-        .select("outstanding")
-        .eq("business_id", business_id)
-        .eq("client_id", client["id"])
+        db.table("bills").select("outstanding")
+        .eq("business_id", business_id).eq("client_id", client["id"])
         .in_("status", ["pending", "partial", "overdue"])
-        .order("invoice_date", desc=False)
-        .limit(1)
-        .execute()
-    )
+        .order("invoice_date", desc=False).execute())
+    open_total = sum(Decimal(str(b.get("outstanding") or 0)) for b in (bill_resp.data or []))
+    if amount is None:
+        amount = open_total
+    if amount is None or amount <= 0:
+        return f"{client['name']} has no pending amount to record."
 
-    if not bill_resp.data:
-        return f"{client['name']} has no pending bill."
+    disp = names.clean_display(client["name"])
+    ledger = client.get("tally_ledger_name") or client["name"]
+    try:
+        row = rq.create_pending(
+            db, business_id, client_id=client["id"], party_ledger=ledger,
+            party_display=disp, amount=amount)
+    except ValueError:
+        return f"{client['name']}: amount must be more than zero."
+    if not row:
+        return "Could not queue that right now. Please try again."
 
-    outstanding = Decimal(str(bill_resp.data[0]["outstanding"]))
-    result = await payments_service.apply_payment(
-        business_id=business_id,
-        client_id=client["id"],
-        amount=outstanding,
-        source="bot",
-    )
+    # A queued receipt supersedes any promise/claim hold (it's being handled).
+    try:
+        promises.close_for_client(db, business_id, client["id"], "kept")
+    except Exception:
+        pass
 
-    if result.get("applied"):
-        return (
-            f"Payment of {inr(outstanding)} marked for {client['name']}.\n"
-            f"{result['bills_affected']} bill(s) updated."
-        )
-    return f"Could not apply the payment: {result.get('reason', 'unknown error')}"
+    if lang == "hinglish":
+        return (f"{disp} ka {inr(amount)} receipt app mein add kar diya. "
+                f"ASVA kholein, deposit account (Cash/bank) check karke Tally mein post karein.")
+    return (f"Queued {inr(amount)} from {disp}. Open ASVA, check the deposit "
+            f"account (Cash/bank) and post it into Tally with one tap.")
 
 
-async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
+async def _handle_terms(business_id: str, client_name: str, days: int, *, lang: str = "english") -> str:
     """TERMS <name> <days>: set the party's credit period. The reminder
     cadence scales with it automatically (90 din -> nudges at 9/21/45/
     63/90), and open bills' due dates are recomputed."""
     if not 1 <= days <= 365:
-        return "Credit days must be between 1 and 365."
+        return i18n.t(lang, "terms_range")
     db = require_db()
-    clients_resp = (
-        db.table("clients")
-        .select("id, name, credit_days")
-        .eq("business_id", business_id)
-        .ilike("name", f"%{client_name}%")
-        .execute()
-    )
-    if not clients_resp.data:
-        return f"'{client_name}' - no party found with that name. Type the exact name."
-    if len(clients_resp.data) > 1:
-        names = ", ".join(c["name"] for c in clients_resp.data[:5])
-        return f"'{client_name}' matches more than one party: {names}. Type the full name."
-
-    client = clients_resp.data[0]
+    status, rows = _resolve_party(db, business_id, client_name, "id, name, credit_days")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang)
+    client = rows[0]
     db.table("clients").update({"credit_days": days}).eq("id", client["id"]).execute()
 
     # Recompute due dates on open bills so the new cadence applies to them
@@ -1265,11 +1505,8 @@ async def _handle_terms(business_id: str, client_name: str, days: int) -> str:
         db.table("bills").update({"due_date": new_due}).eq("id", b["id"]).execute()
         updated += 1
 
-    return (
-        f"{client['name']}'s credit period is now {days} days.\n"
-        f"{updated} open bills got a new due date.\n"
-        f"Reminders will follow the new period."
-    )
+    return i18n.t(lang, "terms_set", name=names.clean_display(client["name"]),
+                  days=days, updated=updated)
 
 
 def _biz_is_en(business_id: str) -> bool:
@@ -1349,6 +1586,69 @@ async def _handle_customer_optout(client: dict, from_number: str) -> str:
                 "You can always talk to the shop directly. Thank you.")
     return ("Theek hai, aapko ab payment reminder nahi bhejenge.\n"
             "Zaroorat ho to dukaan se baat kar sakte hain. Dhanyavaad.")
+
+
+async def _find_client_by_name(business_id: str, name: str) -> dict | None:
+    """Find one client by the forgiving matcher. Returns the confident single
+    match, or None (including when the name is ambiguous - the caller should
+    prefer _resolve_party to show a which-one prompt)."""
+    db = require_db()
+    status, rows = _resolve_party(db, business_id, name)
+    return rows[0] if status == "one" else None
+
+
+async def _handle_exclude(business_id: str, name: str, exclude: bool, *, lang: str = "english") -> str:
+    """Move a party on/off the do-not-chase list. Excluded parties get no more
+    reminders and do not appear in the morning 'who to chase' checkpoint."""
+    db = require_db()
+    status, rows = _resolve_party(db, business_id, name)
+    if status != "one":
+        return _party_pick_msg(status, name, rows, lang)
+    c = rows[0]
+    disp = names.clean_display(c["name"])
+    try:
+        db.table("clients").update({"excluded": bool(exclude)}).eq("id", c["id"]).execute()
+    except Exception:
+        return "Could not update that right now. Please try again."
+    return i18n.t(lang, "excluded_on" if exclude else "excluded_off", name=disp)
+
+
+async def _handle_chase(business_id: str, name: str, *, lang: str = "english") -> str:
+    """Owner override: cancel a Promise-to-Pay hold and resume reminders now."""
+    db = require_db()
+    status, rows = _resolve_party(db, business_id, name)
+    if status != "one":
+        return _party_pick_msg(status, name, rows, lang)
+    c = rows[0]
+    disp = names.clean_display(c["name"])
+    if promises.close_for_client(db, business_id, c["id"], "cancelled"):
+        return i18n.t(lang, "chase_resumed", name=disp)
+    return i18n.t(lang, "chase_none", name=disp)
+
+
+async def _handle_promises(business_id: str) -> str:
+    """Owner view: the open promise-to-pay ledger (who claimed paid / gave a date)."""
+    db = require_db()
+    rows = promises.open_for_business(db, business_id)
+    if not rows:
+        return ("No open promises right now. When a customer says they have paid "
+                "or gives a date, it will show here.")
+    names = {}
+    try:
+        ids = list({r["client_id"] for r in rows})
+        cr = (db.table("clients").select("id, name").in_("id", ids).execute()).data or []
+        names = {c["id"]: c.get("name") for c in cr}
+    except Exception:
+        pass
+    lines = ["*Open promises*"]
+    for r in rows[:20]:
+        nm = names.get(r["client_id"]) or "A customer"
+        when = (f"by {r['promise_date']}" if r.get("kind") == "promise" and r.get("promise_date")
+                else "says paid")
+        amt = f" {inr(r['amount'])}" if r.get("amount") else ""
+        lines.append(f"- {nm}: {when}{amt}")
+    lines.append("\nReply *CHASE <name>* to resume reminders for anyone.")
+    return "\n".join(lines)
 
 
 async def _handle_paid_customer(client: dict) -> str:

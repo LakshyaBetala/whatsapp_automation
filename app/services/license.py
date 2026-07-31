@@ -1,0 +1,268 @@
+"""License + heartbeat - the server-authoritative subscription answer.
+
+The installed client (Tally agent + desktop app) is a thin pipe. It calls
+``POST /license/heartbeat`` periodically and OBEYS whatever the server returns:
+plan, expiry, remaining messages, debtor cap, feature flags, and update info.
+The real enforcement still lives server-side (whatsapp.send_message blocks a
+suspended business's sends) - the heartbeat just lets the client show the right
+state and stop wasting effort. Never trust the client.
+
+``build_heartbeat`` is the single place that assembles that answer, so the
+dashboard, the agent, and any future ops view all agree on one truth.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import secrets
+from typing import Optional
+
+from app.config import settings
+from app.models import PLAN_LABELS, PLAN_LIMITS, Plan
+from app.services import i18n
+from app.services import subscription as subs
+
+
+def generate_license_key() -> str:
+    """A short, human-readable licence identity, e.g. 'ASVA-3B6A-CA12-9F0E'.
+    Shown to the owner and used for support; NOT a secret (agent_token is)."""
+    raw = secrets.token_hex(6).upper()  # 12 hex chars
+    return "ASVA-" + "-".join(raw[i:i + 4] for i in range(0, 12, 4))
+
+
+def generate_agent_token() -> str:
+    """The per-shop SECRET the thin client uses to authenticate to the server
+    (heartbeat + Tally push). Unlike the licence key, this must stay private -
+    it lives only in the shop's config.json, never in a browser."""
+    return secrets.token_urlsafe(24)
+
+
+def normalize_wa_number(raw: str) -> str:
+    """A 10-digit Indian mobile -> E.164-without-plus (91XXXXXXXXXX), the shape
+    the businesses table stores. Tolerates +, spaces, a leading 0 or 91."""
+    digits = "".join(c for c in str(raw or "") if c.isdigit())
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        digits = "91" + digits
+    return digits
+
+
+def create_business(db, *, owner_name: str, whatsapp_number: str,
+                    business_name: Optional[str] = None, plan: str = "starter",
+                    months: float = 1, today: Optional[_dt.date] = None) -> dict:
+    """Onboard a new shop from the Command Center: insert the business row and
+    mint its agent_token + licence key + first paid cycle. Returns the created
+    row (including the secret agent_token, shown ONCE to the operator so it can
+    be dropped into the new shop's config.json).
+
+    Raises ValueError for bad input; lets a DB unique-violation propagate so the
+    caller can turn a duplicate WhatsApp number into a clean 409."""
+    today = today or _dt.date.today()
+    wa = normalize_wa_number(whatsapp_number)
+    if len(wa) != 12 or not wa.startswith("91"):
+        raise ValueError("WhatsApp number must be a 10-digit Indian mobile.")
+    try:
+        plan_v = Plan(plan).value
+    except ValueError:
+        raise ValueError("Unknown plan. Use starter/growth/pro/max.")
+    if months <= 0 or months > 60:
+        raise ValueError("months must be between 0 and 60.")
+
+    row = {
+        "owner_name": (owner_name or "").strip() or "Owner",
+        "business_name": (business_name or "").strip() or None,
+        "whatsapp_number": wa,
+        "plan": plan_v,
+        "agent_token": generate_agent_token(),
+        "license_key": generate_license_key(),
+        "plan_expires_on": renew_expiry(None, months, today).isoformat(),
+        "onboarding_status": "active",
+    }
+    res = db.table("businesses").insert(row).execute()
+    return res.data[0] if getattr(res, "data", None) else row
+
+
+def ensure_license_key(db, biz: dict) -> str:
+    """Return the business's licence key, generating + persisting one if absent.
+    Retries on the rare unique-index collision."""
+    key = (biz.get("license_key") or "").strip()
+    if key:
+        return key
+    for _ in range(5):
+        candidate = generate_license_key()
+        try:
+            db.table("businesses").update({"license_key": candidate}).eq("id", biz["id"]).execute()
+            return candidate
+        except Exception:
+            continue  # unique collision - try another
+    return ""  # best-effort: never fail a heartbeat over a display key
+
+
+def stamp_last_seen(db, business_id: str) -> None:
+    """Record that this business's agent just contacted us (liveness for the
+    ops health monitor). Best-effort - never fail the caller over it. The Tally
+    watcher hits /tally/sync every ~60s, so last_seen stays fresh while the
+    shop's ASVA is running and reaching Tally."""
+    try:
+        db.table("businesses").update(
+            {"last_seen": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        ).eq("id", business_id).execute()
+    except Exception:
+        pass
+
+
+def _plan_of(biz: dict) -> Plan:
+    try:
+        return Plan(biz.get("plan") or "starter")
+    except ValueError:
+        return Plan.starter
+
+
+def active_debtor_count(db, business_id: str) -> int:
+    """Parties with a WhatsApp number AND an open bill - the billing metric
+    (what the owner pays for and what drives cost). Paged for big shops."""
+    open_ids: set = set()
+    start = 0
+    while True:
+        rows = (db.table("bills").select("client_id")
+                .eq("business_id", business_id)
+                .in_("status", ["pending", "partial", "overdue"])
+                .range(start, start + 999).execute()).data or []
+        for r in rows:
+            if r.get("client_id"):
+                open_ids.add(r["client_id"])
+        if len(rows) < 1000:
+            break
+        start += 1000
+    if not open_ids:
+        return 0
+    with_phone: set = set()
+    ids = list(open_ids)
+    for i in range(0, len(ids), 200):
+        chunk = ids[i:i + 200]
+        rows = (db.table("clients").select("id, whatsapp_number")
+                .eq("business_id", business_id).in_("id", chunk).execute()).data or []
+        for r in rows:
+            if r.get("whatsapp_number"):
+                with_phone.add(r["id"])
+    return len(with_phone)
+
+
+def messages_used_this_month(db, business_id: str, today: Optional[_dt.date] = None) -> int:
+    today = today or _dt.date.today()
+    period = today.replace(day=1).isoformat()
+    r = (db.table("usage").select("message_count")
+         .eq("business_id", business_id).eq("period_month", period)
+         .limit(1).execute())
+    return int(r.data[0]["message_count"]) if r.data else 0
+
+
+def _vparts(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in str(v or "0").strip().split("."))
+    except ValueError:
+        return (0,)
+
+
+def _latest_release(db) -> tuple[str, bool]:
+    """(latest_version, mandatory) from app_releases, best-effort."""
+    try:
+        r = (db.table("app_releases").select("version, mandatory")
+             .order("created_at", desc=True).limit(1).execute()).data
+        if r:
+            return str(r[0]["version"]), bool(r[0].get("mandatory"))
+    except Exception:
+        pass
+    return settings.app_version, False
+
+
+def feature_flags(status: str) -> dict:
+    """What the client is allowed to do, derived from subscription status.
+    Advisory to the client; the server still blocks sends independently.
+
+    suspended: the paid actions stop (send/reminders/digest/ocr) so the owner
+    is nudged to renew - but Tally SYNC stays on (read-only, keeps the data
+    fresh so the moment they renew everything is current, and the dashboard
+    never lies about what is owed)."""
+    live = status in ("active", "grace")
+    return {
+        "send": live,
+        "reminders": live,
+        "digest": live,
+        "ocr": live,
+        "sync": True,
+    }
+
+
+def renew_expiry(current: Optional[str | _dt.date], months: int = 1,
+                 today: Optional[_dt.date] = None) -> _dt.date:
+    """New expiry after paying for ``months`` cycles.
+
+    A month = settings.subscription_cycle_days (30). Renewing an ACTIVE sub
+    stacks onto its remaining time (renew from the current expiry); renewing a
+    LAPSED sub starts fresh from today. So paying on time never loses days, and
+    paying late never back-dates. months can be a fraction for a trial/pro-rata.
+    """
+    today = today or _dt.date.today()
+    base = today
+    if current:
+        cur = current if isinstance(current, _dt.date) else _dt.date.fromisoformat(str(current)[:10])
+        if cur > today:
+            base = cur
+    return base + _dt.timedelta(days=round(settings.subscription_cycle_days * months))
+
+
+def build_heartbeat(db, biz: dict, today: Optional[_dt.date] = None) -> dict:
+    """The authoritative subscription answer for one business."""
+    today = today or _dt.date.today()
+    plan = _plan_of(biz)
+    limits = PLAN_LIMITS[plan]
+    exp = biz.get("plan_expires_on")
+    status = subs.effective_status(exp, today)
+    dleft = subs.days_left(exp, today)
+
+    used = messages_used_this_month(db, biz["id"], today)
+    msg_limit = int(limits["messages"])
+    debtors = active_debtor_count(db, biz["id"])
+    debtor_cap = int(limits["debtors"])
+
+    latest, mandatory = _latest_release(db)
+    update_available = _vparts(latest) > _vparts(settings.app_version)
+
+    # Is THIS shop's build too old to update itself? Compared against the fleet
+    # floor, using the version the client last reported (agent_version). A build
+    # below the floor predates the self-updater, so it can never pull the feed -
+    # the app must show a blocking "download the latest" bar instead. Unknown
+    # (never-reported) versions are NOT flagged: a fresh install pairs first, then
+    # reports, and we don't want to scare a shop that simply hasn't pinged yet.
+    min_ver = settings.app_min_version
+    client_ver = (biz.get("agent_version") or "").strip()
+    below_min = bool(client_ver) and _vparts(client_ver) < _vparts(min_ver)
+
+    return {
+        "ok": True,
+        "business_id": biz["id"],
+        "business_name": biz.get("business_name") or "",
+        "license_key": ensure_license_key(db, biz),
+        "status": status,                       # active | grace | suspended
+        "plan": plan.value,
+        "plan_label": PLAN_LABELS.get(plan, plan.value.title()),
+        "price": int(limits.get("price", 0)),
+        "plan_expires_on": str(exp)[:10] if exp else None,
+        "days_left": dleft,
+        "messages_used": used,
+        "messages_limit": msg_limit,
+        "messages_remaining": max(0, msg_limit - used),
+        "active_debtors": debtors,
+        "debtor_cap": debtor_cap,
+        "over_debtor_cap": debtors > debtor_cap,
+        "features": feature_flags(status),
+        "server_version": settings.app_version,
+        "latest_version": latest,
+        "update_available": update_available,
+        "update_mandatory": mandatory and update_available,
+        "min_supported_version": min_ver,
+        "below_min": below_min,             # too old to self-update -> reinstall
+        "owner_language": i18n.norm_lang(biz.get("owner_language")),
+        "server_time": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+    }

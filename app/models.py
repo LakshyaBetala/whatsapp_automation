@@ -71,15 +71,17 @@ class SyncType(str, Enum):
 # "messages" is a SILENT anti-abuse ceiling (debtors x 8), set well above real
 # use so it never throttles reminders inside a tier. "clients" is uncapped in
 # practice so a full Tally import is never blocked.
-#   Basic  Rs699  -> 300 active debtors
-#   Growth Rs1099 -> 500 active debtors
-#   Pro    Rs1999 -> 1000 active debtors
-#   Max    Rs2999 -> 1300 active debtors
+# "bot" = access to the ASVA owner assistant (LIST/BILL/photo/digest on WhatsApp).
+# Basic does NOT include it; everything above does.
+#   Basic   Rs699   -> 300 active debtors,  NO bot assistant
+#   Growth  Rs1099  -> 500 active debtors,  bot assistant
+#   Pro     Rs1999  -> 1000 active debtors, bot assistant
+#   Custom  -> larger shops, bot assistant, priced on request (price 0 = "contact us")
 PLAN_LIMITS: dict[Plan, dict[str, int]] = {
-    Plan.starter: {"debtors": 300, "messages": 2400, "clients": 1000000, "price": 699},
-    Plan.growth: {"debtors": 500, "messages": 4000, "clients": 1000000, "price": 1099},
-    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1999},
-    Plan.max: {"debtors": 1300, "messages": 10400, "clients": 1000000, "price": 2999},
+    Plan.starter: {"debtors": 300, "messages": 2400, "clients": 1000000, "price": 699, "bot": 0},
+    Plan.growth: {"debtors": 500, "messages": 4000, "clients": 1000000, "price": 1099, "bot": 1},
+    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1999, "bot": 1},
+    Plan.max: {"debtors": 5000, "messages": 40000, "clients": 1000000, "price": 0, "bot": 1},
 }
 
 # Owner-facing plan labels (the enum values stay stable in the DB).
@@ -87,8 +89,17 @@ PLAN_LABELS: dict[Plan, str] = {
     Plan.starter: "Basic",
     Plan.growth: "Growth",
     Plan.pro: "Pro",
-    Plan.max: "Max",
+    Plan.max: "Custom",
 }
+
+
+def plan_has_bot(plan_value) -> bool:
+    """Does this plan include the ASVA owner assistant (bot)? Basic does not."""
+    try:
+        p = plan_value if isinstance(plan_value, Plan) else Plan(plan_value or "starter")
+    except ValueError:
+        p = Plan.starter
+    return bool(PLAN_LIMITS[p].get("bot", 0))
 
 # Tier order, cheapest first - used to recommend the right plan for a shop.
 PLAN_ORDER: tuple[Plan, ...] = (Plan.starter, Plan.growth, Plan.pro, Plan.max)
