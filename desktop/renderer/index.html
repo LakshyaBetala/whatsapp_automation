@@ -56,6 +56,7 @@
   .grow { flex: 1; position: relative; }
   webview { width: 100%; height: 100%; border: 0; }
   #updatebar { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; background: #294d38; color: #eef6ef; font-size: .9rem; flex-shrink: 0; }
+  #updatebar .whatsnew { margin-top: 5px; font-size: .8rem; font-weight: 400; line-height: 1.45; color: #cfe6d8; }
   #updatebar b { color: #fff; }
   #updatebar.must { background: #5a1e1a; color: #ffe6e2; }
   #updatebar.must b { color: #fff; }
@@ -668,9 +669,15 @@ if (window.asva.onUpdate) window.asva.onUpdate((u) => {
   if (_mustReinstall) return;   // reinstall bar wins over ordinary update states
   if (u.state === 'ready') {
     const v = u.version ? ' (' + u.version + ')' : '';
-    msg.innerHTML = en
+    const notes = (u.notes || '').trim();
+    const nhtml = notes
+      ? '<div class="whatsnew">' + (en ? 'What’s new:' : 'Is version mein naya:') + '<br>'
+        + notes.split('\n').map(l => l.trim()).filter(Boolean).map(l => '• ' + esc(l)).join('<br>')
+        + '</div>'
+      : '';
+    msg.innerHTML = (en
       ? '<b>A new version of ASVA' + v + ' is ready.</b> Your data and WhatsApp stay connected.'
-      : '<b>ASVA ka naya version' + v + ' taiyaar hai.</b> Aapka data aur WhatsApp juda rehta hai.';
+      : '<b>ASVA ka naya version' + v + ' taiyaar hai.</b> Aapka data aur WhatsApp juda rehta hai.') + nhtml;
     btn.style.display = 'inline-block';
     btn.textContent = en ? 'Restart to update' : 'Update ke liye restart karein';
     bar.style.display = 'flex';

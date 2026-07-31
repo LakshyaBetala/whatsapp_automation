@@ -704,12 +704,18 @@ function setupAutoUpdate() {
 
   autoUpdater.autoDownload = true;           // fetch quietly in the background
   autoUpdater.autoInstallOnAppQuit = true;   // also apply on the next normal quit
+  const notesOf = (info) => {
+    const n = info && info.releaseNotes;
+    if (!n) return '';
+    if (Array.isArray(n)) return n.map((x) => (x && x.note) || x).join('\n');
+    return String(n);
+  };
   autoUpdater.on('update-available', (info) =>
-    sendToWindow('update', { state: 'downloading', version: info && info.version }));
+    sendToWindow('update', { state: 'downloading', version: info && info.version, notes: notesOf(info) }));
   autoUpdater.on('download-progress', (p) =>
     sendToWindow('update', { state: 'downloading', percent: Math.round((p && p.percent) || 0) }));
   autoUpdater.on('update-downloaded', (info) =>
-    sendToWindow('update', { state: 'ready', version: info && info.version }));
+    sendToWindow('update', { state: 'ready', version: info && info.version, notes: notesOf(info) }));
   autoUpdater.on('update-not-available', () => sendToWindow('update', { state: 'current' }));
   autoUpdater.on('error', (err) => {
     console.error('[update] error:', (err && err.message) || err);

@@ -28,6 +28,9 @@
         "url": "https://app.tryasva.com/updates"
       }
     ],
+    "releaseInfo": {
+      "releaseNotes": "Speaks your language: ASVA now replies in English or Hinglish, in the app and on WhatsApp.\nFinds the right party even from a short name or a small typo, and asks when it is unsure.\nRECOVERED: see how much money came back this month.\nPhone app: scan a QR from the app to see your dues on your phone (view only).\nSteadier reminders, a clearer health check, and one-tap Check for updates."
+    },
     "files": [
       "main.js",
       "preload.js",
