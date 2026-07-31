@@ -66,7 +66,9 @@ def test_ambiguous_name_asks_which_one(monkeypatch):
         {"id": "c2", "name": "Ramesh Electricals"}])
     out = asyncio.run(bot.handle("919444294894", "EXCLUDE ramesh", channel="bot"))
     assert rec.updates == []                           # never guessed
-    assert "more than one" in out.lower()
+    # A clean, numbered which-one prompt (reply a number), not a run-on line.
+    assert "1." in out and "2." in out
+    assert "number" in out.lower()
     assert "Ramesh Traders" in out and "Ramesh Electricals" in out
 
 

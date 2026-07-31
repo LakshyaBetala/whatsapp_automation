@@ -13,9 +13,11 @@ Security rule (from CTO audit):
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
 import random
 import re
+import time
 from decimal import Decimal
 
 from datetime import date
@@ -30,7 +32,14 @@ from app.services.templates import apply_discount, inr
 
 
 async def _forward_to_team(business_id: str, business_name: str, from_number: str, message: str) -> str:
-    """Forward an owner's support request to the ASVA product team."""
+    """Forward an owner's support request to the ASVA product team, and log it to
+    the Command Center so the operator can see and manage every request."""
+    from app.services import support
+    try:
+        support.record(require_db(), business_id=business_id, business_name=business_name,
+                       from_number=from_number, message=message)
+    except Exception:
+        log.exception("Could not log support request (continuing)")
     team = settings.product_team_number
     if not team:
         return "Noted. The ASVA team will contact you soon."
@@ -74,6 +83,37 @@ def _canon_command(upper: str) -> str:
         rest = f" {parts[1]}" if len(parts) > 1 else ""
         return (_CMD_ALIASES[parts[0]] + rest).strip()
     return upper
+
+
+# Every command verb the owner can type (+ Hindi aliases), for "did you mean".
+_KNOWN_CMDS = [
+    "PAID", "LIST", "HISAB", "CHECK", "STOP", "START", "TERMS", "REMIND",
+    "PROMISES", "CHASE", "EXCLUDE", "INCLUDE", "BILL", "RECOVERED", "TEAM",
+    "SUPPORT", "HELP", "MENU", "BAND", "SOOCHI", "CHALU", "SHURU", "YAAD",
+]
+# Verbs that take a party name, so the suggestion can show a real example.
+_CMD_TAKES_NAME = {"PAID", "CHECK", "STOP", "START", "TERMS", "REMIND", "CHASE",
+                   "EXCLUDE", "INCLUDE", "BAND", "CHALU", "SHURU", "YAAD", "SOOCHI"}
+
+
+def _suggest_command(text: str, lang: str) -> str:
+    """When the first word looks like a mistyped command, return a one-line
+    'Did you mean X?' with a ready example. '' when nothing is close enough."""
+    parts = (text or "").strip().split(None, 1)
+    if not parts:
+        return ""
+    first = parts[0].upper()
+    if first in _KNOWN_CMDS:               # spelled right (arg problem, not the verb)
+        return ""
+    match = difflib.get_close_matches(first, _KNOWN_CMDS, n=1, cutoff=0.6)
+    if not match:
+        return ""
+    cmd = match[0]
+    rest = parts[1].strip() if len(parts) > 1 else ("Ramesh" if cmd in _CMD_TAKES_NAME else "")
+    example = f"{cmd} {rest}".strip()
+    if lang == "hinglish":
+        return f"Shayad aapka matlab *{example}* tha? Wahi bhejein.\n\n"
+    return f"Did you mean *{example}*? Send that.\n\n"
 
 
 def _prospect_reply(text: str, upper: str) -> str:
@@ -211,6 +251,23 @@ async def handle(
         # The owner's chosen language, used for every reply below so the chat
         # matches the app (English chosen -> pure English; else Hinglish).
         lang = i18n.norm_lang(business.get("owner_language"))
+
+        # ── Reply to a "which one?" prompt: a bare number picks that party ──
+        # Runs first so "2" answers the last which-one list. Re-runs the SAME
+        # command on the chosen party by id (unambiguous), reusing every handler.
+        pick = _get_pick(business_id)
+        if pick and not media_b64:
+            sel = _parse_selection(text, len(pick["cands"]))
+            if sel == "cancel":
+                _clear_pick(business_id)
+                return ("Okay, cancelled. Send the command again when you are ready."
+                        if lang == "english"
+                        else "Theek hai, cancel kar diya. Zaroorat ho to command dobara bhejein.")
+            if sel is not None:
+                cand = pick["cands"][sel]
+                _clear_pick(business_id)
+                return await handle(from_number, f"{pick['verb']} #{cand['id']}{pick['suffix']}",
+                                    channel=channel)
 
         # ── Photo of a bill → OCR → confirm flow ─────────────────────
         if media_b64:
@@ -354,9 +411,12 @@ async def handle(
         # command, plain words, WhatsApp *bold* headers. In the OWNER's chosen
         # language (English -> pure English; Hinglish -> Hinglish), so the chat
         # matches the app. "Ramesh" is only an example name.
-        prefix = ("" if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START")
-                  else i18n.t(lang, "unknown_prefix"))
-        return prefix + i18n.t(lang, "help")
+        if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START"):
+            return i18n.t(lang, "help")
+        # A mistyped command ("PAI ramesh", "chek ramesh") -> gently suggest the
+        # right one with a ready-to-use example, then show the full menu.
+        hint = _suggest_command(text, lang)
+        return (hint or i18n.t(lang, "unknown_prefix")) + i18n.t(lang, "help")
 
     # ── Customer message (not owner) ──────────────────────────────────
     # Look up which business this customer belongs to (format-agnostic match)
@@ -872,15 +932,27 @@ async def _handle_list(business_id: str, business_name: str) -> str:
 # the forgiving match (case/typo/prefix tolerant, same-name families kept
 # distinct, asks when unsure). One place = one behaviour across all commands.
 def _resolve_party(db, business_id: str, query: str, select: str = "id, name"):
-    """Return (status, rows): ("one", [row]) | ("many", rows) | ("none", [])."""
+    """Return (status, rows): ("one", [row]) | ("many", rows) | ("none", []).
+
+    A query of the form ``#<client_id>`` resolves that exact party directly (used
+    when the owner picks a number from a which-one prompt) - unambiguous even for
+    two parties with identical names."""
+    q = (query or "").strip()
     try:
+        if q.startswith("#") and len(q) > 1:
+            # Command routing upper-cases the text, so lower-case the id back
+            # (client ids are lower-case uuids) before the exact-id lookup.
+            cid = q[1:].strip().lower()
+            r = (db.table("clients").select(select)
+                 .eq("business_id", business_id).eq("id", cid).limit(1).execute()).data
+            return ("one", [r[0]]) if r else ("none", [])
         rows = (db.table("clients").select(select)
                 .eq("business_id", business_id).execute()).data or []
     except Exception:
         return "none", []
     if not rows:
         return "none", []
-    res = names.resolve(query, [r.get("name") or "" for r in rows])
+    res = names.resolve(q, [r.get("name") or "" for r in rows])
     if res["status"] == "one":
         return "one", [rows[res["index"]]]
     if res["status"] == "many":
@@ -888,11 +960,83 @@ def _resolve_party(db, business_id: str, query: str, select: str = "id, name"):
     return "none", []
 
 
-def _party_pick_msg(status: str, query: str, rows: list, lang: str) -> str:
-    """The bilingual 'which one?' / 'no match' message for a non-single resolve."""
+# ── Which-one selection: remember the shortlist so the owner can reply a NUMBER ─
+# In-memory (single web worker), short-lived. The owner sees a numbered list and
+# replies "2"; we re-run the SAME command on candidate #2 by its id. Lost on a
+# restart -> the owner just re-types the name. Keyed by the owner's number.
+_PENDING_PICK: dict[str, dict] = {}
+_PICK_TTL_S = 600
+
+
+def _set_pick(key: str, verb: str, suffix: str, rows: list) -> None:
+    _PENDING_PICK[key] = {
+        "verb": verb, "suffix": suffix or "",
+        "cands": [{"id": r.get("id"), "name": r.get("name") or ""} for r in rows[:9]],
+        "ts": time.time(),
+    }
+
+
+def _get_pick(key: str) -> dict | None:
+    p = _PENDING_PICK.get(key)
+    if not p:
+        return None
+    if time.time() - p["ts"] > _PICK_TTL_S:
+        _PENDING_PICK.pop(key, None)
+        return None
+    return p
+
+
+def _clear_pick(key: str) -> None:
+    _PENDING_PICK.pop(key, None)
+
+
+def _parse_selection(text: str, n: int):
+    """Read a reply to a which-one prompt: a bare number 1..n -> its 0-based index;
+    'cancel'/'0'/'no' -> 'cancel'; anything else -> None (not a selection)."""
+    t = (text or "").strip().lower()
+    if t in ("cancel", "0", "no", "nahi", "rehne do", "chhodo", "chhod do"):
+        return "cancel"
+    m = re.fullmatch(r"#?\s*(\d{1,2})", t)
+    if m:
+        i = int(m.group(1))
+        if 1 <= i <= n:
+            return i - 1
+    return None
+
+
+def _numbered_pick(query: str, rows: list, lang: str) -> str:
+    """A clean, tap-friendly which-one prompt: one party per line, numbered, with
+    the distinguishing area/branch highlighted so identical stems are told apart."""
+    disp = [names.clean_display(r.get("name") or "") for r in rows[:9]]
+    tails = names.distinguisher([r.get("name") or "" for r in rows[:9]])
+    lines = []
+    for i, (full, tail) in enumerate(zip(disp, tails), 1):
+        # Show the full name; if a short distinguisher exists and differs, hint it.
+        extra = f"  ({tail})" if tail and tail.lower() not in full.lower() else ""
+        lines.append(f"{i}. {full}{extra}")
+    body = "\n".join(lines)
+    if lang == "hinglish":
+        return (f"'{query}' se milte-julte {len(disp)} parties hain. "
+                f"Number reply karein (jaise 1):\n\n{body}\n\n"
+                f"Ya poora naam likhein. Cancel ke liye 0 bhejein.")
+    return (f"'{query}' matches {len(disp)} parties. Reply with the number (e.g. 1):\n\n"
+            f"{body}\n\nOr type the fuller name. Send 0 to cancel.")
+
+
+def _party_pick_msg(status: str, query: str, rows: list, lang: str,
+                    *, pick_key: str | None = None, verb: str | None = None,
+                    suffix: str = "") -> str:
+    """The bilingual which-one / no-match reply. On 'many', when a pick_key + verb
+    are given, it REMEMBERS the shortlist so the owner can reply with a number and
+    we re-run `verb` on the chosen party."""
     if status == "many":
+        if pick_key and verb:
+            _set_pick(pick_key, verb, suffix, rows)
+            return _numbered_pick(query, rows, lang)
         listing = ", ".join(names.clean_display(r.get("name") or "") for r in rows[:6])
         return i18n.t(lang, "which_one", q=query, list=listing)
+    if pick_key:
+        _clear_pick(pick_key)
     return i18n.t(lang, "no_match", q=query)
 
 
@@ -901,7 +1045,8 @@ async def _handle_stop(business_id: str, client_name: str, *, lang: str = "engli
     db = require_db()
     status, rows = _resolve_party(db, business_id, client_name, "id, name, reminders_enabled")
     if status != "one":
-        return _party_pick_msg(status, client_name, rows, lang)
+        return _party_pick_msg(status, client_name, rows, lang,
+                               pick_key=business_id, verb="STOP")
     client = rows[0]
     disp = names.clean_display(client["name"])
     if not client["reminders_enabled"]:
@@ -915,7 +1060,8 @@ async def _handle_start(business_id: str, client_name: str, *, lang: str = "engl
     db = require_db()
     status, rows = _resolve_party(db, business_id, client_name, "id, name, reminders_enabled")
     if status != "one":
-        return _party_pick_msg(status, client_name, rows, lang)
+        return _party_pick_msg(status, client_name, rows, lang,
+                               pick_key=business_id, verb="START")
     client = rows[0]
     disp = names.clean_display(client["name"])
     if client["reminders_enabled"]:
@@ -953,7 +1099,8 @@ async def _handle_check(business_id: str, client_name: str, *, lang: str = "engl
     status, rows = _resolve_party(
         db, business_id, client_name, "id, name, whatsapp_number, reminders_enabled")
     if status != "one":
-        return _party_pick_msg(status, client_name, rows, lang)
+        return _party_pick_msg(status, client_name, rows, lang,
+                               pick_key=business_id, verb="CHECK")
     client = rows[0]
     bills_resp = (
         db.table("bills")
@@ -1435,7 +1582,10 @@ async def _handle_paid_owner(
         if s2 == "one":
             status, rows, amount = s2, r2, None
     if status != "one":
-        return _party_pick_msg(status, name_try, rows, lang)
+        # Remember the amount so picking a number re-runs "PAID #<id> <amount>".
+        suffix = f" {amount}" if amount is not None else ""
+        return _party_pick_msg(status, name_try, rows, lang,
+                               pick_key=business_id, verb="PAID", suffix=suffix)
     client = rows[0]
 
     # Outstanding drives the default amount (owner can edit it in the popup).
@@ -1483,7 +1633,8 @@ async def _handle_terms(business_id: str, client_name: str, days: int, *, lang: 
     db = require_db()
     status, rows = _resolve_party(db, business_id, client_name, "id, name, credit_days")
     if status != "one":
-        return _party_pick_msg(status, client_name, rows, lang)
+        return _party_pick_msg(status, client_name, rows, lang,
+                               pick_key=business_id, verb="TERMS", suffix=f" {days}")
     client = rows[0]
     db.table("clients").update({"credit_days": days}).eq("id", client["id"]).execute()
 
@@ -1603,7 +1754,8 @@ async def _handle_exclude(business_id: str, name: str, exclude: bool, *, lang: s
     db = require_db()
     status, rows = _resolve_party(db, business_id, name)
     if status != "one":
-        return _party_pick_msg(status, name, rows, lang)
+        return _party_pick_msg(status, name, rows, lang, pick_key=business_id,
+                               verb="EXCLUDE" if exclude else "INCLUDE")
     c = rows[0]
     disp = names.clean_display(c["name"])
     try:
@@ -1618,7 +1770,8 @@ async def _handle_chase(business_id: str, name: str, *, lang: str = "english") -
     db = require_db()
     status, rows = _resolve_party(db, business_id, name)
     if status != "one":
-        return _party_pick_msg(status, name, rows, lang)
+        return _party_pick_msg(status, name, rows, lang,
+                               pick_key=business_id, verb="CHASE")
     c = rows[0]
     disp = names.clean_display(c["name"])
     if promises.close_for_client(db, business_id, c["id"], "cancelled"):

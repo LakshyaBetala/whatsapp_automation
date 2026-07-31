@@ -18,6 +18,7 @@ from collections import Counter
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from app.config import settings
 from app.db import require_db
@@ -197,6 +198,34 @@ async def ops_data(key: str = Query("")):
     return JSONResponse(build_ops_data(require_db()))
 
 
+@router.get("/support")
+async def ops_support(key: str = Query("")):
+    """Every TEAM/support request an owner sent, so the operator can see who asked
+    what, and when - and mark each resolved."""
+    if not _key_ok(key):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+    from app.services import support
+    return JSONResponse({"requests": support.list_recent(require_db(), 100)})
+
+
+class SupportResolvePayload(BaseModel):
+    admin_key: str
+    id: str
+    status: str = "resolved"     # resolved | open (reopen)
+
+
+@router.post("/support/resolve")
+async def ops_support_resolve(payload: SupportResolvePayload):
+    if not _key_ok(payload.admin_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+    from app.services import support
+    ok = support.resolve(require_db(), payload.id,
+                         "open" if payload.status == "open" else "resolved")
+    if not ok:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return {"ok": True}
+
+
 @router.get("/health")
 async def ops_health(key: str = Query("")):
     """The health center snapshot: system state, per-shop health, 14-day traffic,
@@ -310,6 +339,16 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .tabs{display:flex;gap:8px;margin:4px 0 16px}
  .tab{font:inherit;font-size:.9rem;font-weight:700;border:1px solid #24332a;background:#17211b;color:#8fae9c;border-radius:8px;padding:8px 16px;cursor:pointer}
  .tab.on{background:#123524;color:#46d67e;border-color:#2c5c42}
+ .reqbadge{display:inline-block;background:#ff6a5c;color:#2a0f0c;font-size:.7rem;font-weight:800;border-radius:9999px;padding:0 7px;margin-left:7px;vertical-align:middle}
+ .reqcard{background:#17211b;border:1px solid #24332a;border-radius:12px;padding:14px 16px;margin-bottom:10px}
+ .reqcard.done{opacity:.55}
+ .reqhead{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:baseline}
+ .reqhead b{color:#eaf3ee;font-size:.98rem}
+ .reqnum{color:#8fae9c;font-size:.85rem;font-variant-numeric:tabular-nums}
+ .reqtime{color:#6f8a7b;font-size:.78rem;margin-left:auto}
+ .reqmsg{color:#cfe0d5;font-size:.95rem;line-height:1.5;margin:8px 0 12px;white-space:pre-wrap}
+ .reqacts{display:flex;gap:10px;align-items:center}
+ .reqok{color:#46d67e;font-weight:700;font-size:.85rem}
  .sys{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:14px}
  .sys .c{background:#17211b;border:1px solid #24332a;border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:11px}
  .sys .c .big{font-size:1.5rem;line-height:1}
@@ -403,6 +442,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <div class="tabs">
     <button class="tab on" id="tabH" onclick="showTab('health')">Health</button>
     <button class="tab" id="tabS" onclick="showTab('subs')">Subscriptions</button>
+    <button class="tab" id="tabR" onclick="showTab('requests')">Requests<span id="reqbadge" class="reqbadge" style="display:none"></span></button>
   </div>
 
   <div id="tab_health">
@@ -444,6 +484,12 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
    <tbody id="rows"></tbody>
   </table></div>
   <div class="muted" style="margin-top:10px">Auto-refreshes every 30s. "Days" is time to expiry (negative = past). Online = agent seen in the last 5 min.</div>
+  </div>
+
+  <div id="tab_requests" style="display:none">
+    <div class="sect">Owner requests (sent via TEAM on WhatsApp)</div>
+    <div id="reqlist"><div class="muted">Loading...</div></div>
+    <div class="muted" style="margin-top:10px">Every message an owner sends with TEAM/SUPPORT lands here. Reply to them on WhatsApp, then mark it resolved.</div>
   </div>
 </div>
 <script>
@@ -605,9 +651,43 @@ let TAB='health';
 function showTab(t){TAB=t;
   document.getElementById('tab_health').style.display=(t==='health')?'':'none';
   document.getElementById('tab_subs').style.display=(t==='subs')?'':'none';
+  document.getElementById('tab_requests').style.display=(t==='requests')?'':'none';
   document.getElementById('tabH').classList.toggle('on',t==='health');
   document.getElementById('tabS').classList.toggle('on',t==='subs');
-  if(t==='health')loadHealth(); else load();
+  document.getElementById('tabR').classList.toggle('on',t==='requests');
+  if(t==='health')loadHealth(); else if(t==='requests')loadSupport(); else load();
+}
+function fmtWhen(iso){try{var d=new Date(iso);return d.toLocaleString();}catch(e){return iso||'';}}
+async function loadSupport(){
+  var box=document.getElementById('reqlist');
+  try{
+    var r=await fetch('/ops/support?key='+encodeURIComponent(KEY));
+    if(!r.ok){ fetchFailed(r,'Requests'); return; }
+    var reqs=(await r.json()).requests||[];
+    var open=reqs.filter(function(x){return x.status==='open';}).length;
+    var badge=document.getElementById('reqbadge');
+    if(open){ badge.style.display='inline-block'; badge.textContent=open; }
+    else { badge.style.display='none'; }
+    if(!reqs.length){ box.innerHTML='<div class="muted">No requests yet. When an owner sends TEAM &lt;message&gt; on WhatsApp, it shows here.</div>'; return; }
+    box.innerHTML=reqs.map(function(q){
+      var done=q.status==='resolved';
+      return '<div class="reqcard'+(done?' done':'')+'">'+
+        '<div class="reqhead"><b>'+esc(q.business_name||'Unknown shop')+'</b>'+
+          '<span class="reqnum">'+esc(q.from_number||'')+'</span>'+
+          '<span class="reqtime">'+esc(fmtWhen(q.created_at))+'</span></div>'+
+        '<div class="reqmsg">'+esc(q.message||'')+'</div>'+
+        '<div class="reqacts">'+
+          (done ? '<span class="reqok">Resolved</span><button class="btn" onclick="reopenReq(\''+q.id+'\')">Reopen</button>'
+                : '<button class="btn" onclick="resolveReq(\''+q.id+'\')">Mark resolved</button>')+
+        '</div></div>';
+    }).join('');
+  }catch(e){ box.innerHTML='<div class="muted">Could not load requests.</div>'; }
+}
+async function resolveReq(id){
+  await post('/ops/support/resolve',{admin_key:KEY,id:id,status:'resolved'}); loadSupport();
+}
+async function reopenReq(id){
+  await post('/ops/support/resolve',{admin_key:KEY,id:id,status:'open'}); loadSupport();
 }
 function ago(m){if(m==null)return '-';if(m>=1e8)return 'never';if(m<1)return 'now';if(m<60)return m+'m';var h=Math.floor(m/60);if(h<24)return h+'h';return Math.floor(h/24)+'d';}
 function minsSince(iso){try{return Math.floor((Date.now()-new Date(iso).getTime())/60000);}catch(e){return null;}}
@@ -670,5 +750,7 @@ async function loadHealth(){
 
 setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString();},1000);
 showTab('health');
-setInterval(()=>{ if(TAB==='health') loadHealth(); else load(); }, 30000);
+loadSupport();   // populate the Requests badge on boot, whatever tab is open
+setInterval(()=>{ if(TAB==='health') loadHealth(); else if(TAB==='requests') loadSupport(); else load(); }, 30000);
+setInterval(loadSupport, 60000);   // keep the pending-requests badge fresh on any tab
 </script></body></html>"""
