@@ -116,23 +116,34 @@ def _suggest_command(text: str, lang: str) -> str:
     return f"Did you mean *{example}*? Send that.\n\n"
 
 
-def _prospect_reply(text: str, upper: str) -> str:
-    """Someone who is NOT a registered owner messaged the ASVA marketing/bot
-    number (e.g. off the poster). Never bounce them - invite them. A human watches
-    this number and follows up; a YES routes straight to that follow-up."""
+# ── Lead funnel (non-owner messages the ASVA marketing/bot number) ────────────
+# English only, no language step: a prospect off the poster gets a clear, warm
+# invite with a YES call-to-action, and a YES routes to the human follow-up.
+def _lead_pitch() -> str:
+    return ("Hello! I am ASVA. 🙏\n"
+            "I help shops get their outstanding money back, automatically.\n\n"
+            "ASVA works from your own WhatsApp number, connected to your Tally:\n\n"
+            "- Sends your customers their bill and polite payment reminders\n"
+            "- Tells you every day who to chase\n"
+            "- You stay in control: ASVA never messages anyone without you\n\n"
+            "The pilot is free till 15 September. Reply *YES* and our team will "
+            "set you up in a few minutes.")
+
+
+def _lead_interested() -> str:
+    return ("Perfect. Our team will contact you shortly to set up ASVA. "
+            "The pilot is free till 15 September. Welcome aboard!")
+
+
+def _prospect_reply(from_number: str, text: str, upper: str) -> str:
+    """A non-owner messaged the ASVA marketing/bot number (off the poster). Never
+    bounce them - invite them, in English. A YES routes to the human follow-up."""
     tokens = set(re.findall(r"[A-Z]+", upper))
     if tokens & _JOIN_WORDS:
-        log.info("ASVA lead (interested): %s -> %s", "prospect", text[:120])
-        return ("Bahut badhiya! ASVA aapka udhaar aapke hi WhatsApp number se recover karega, "
-                "aapke Tally ke saath. Humari team aapse jaldi baat karke setup kar degi. "
-                "Pehla mahina bilkul free.\n\n"
-                "Great, our team will contact you shortly to set up ASVA. First month free.")
+        log.info("ASVA lead (interested): %s", text[:120])
+        return _lead_interested()
     log.info("ASVA lead (inquiry): %s", text[:120])
-    return ("Namaste! Main ASVA hoon, aapka collection assistant.\n"
-            "Main aapke Tally se aur aapke apne WhatsApp number se customers ko bill aur "
-            "payment reminder bhejta hoon, taaki aapka phasa hua paisa time par wapas aaye.\n"
-            "Shuru karne ke liye YES bhejein. Pehla mahina bilkul free.\n\n"
-            "I am ASVA, your collection assistant. Reply YES to start. First month free.")
+    return _lead_pitch()
 
 
 def _checkpoint_hold(db, business_id: str, cp: dict, arg: str) -> str | None:
@@ -238,7 +249,7 @@ async def handle(
         # The marketing number IS this bot number, so a non-owner here is almost
         # always a PROSPECT off the poster. Invite them into the funnel instead of
         # bouncing them - every bounced message is a lost sale.
-        return _prospect_reply(text, upper)
+        return _prospect_reply(from_number, text, upper)
 
     # ── Bot assistant is a paid feature (Basic plan does NOT include it) ──
     if channel == "bot" and is_owner and not plan_has_bot(business.get("plan")):
@@ -898,10 +909,11 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     if not bills_resp.data:
         return f"{business_name}: nothing pending. All clear!"
 
-    # Group by client
+    # Group by client (key on the raw name so distinct parties stay separate;
+    # the clean display name is used only when showing the line).
     client_totals: dict[str, dict] = {}
     for row in bills_resp.data:
-        client_name = row.get("clients", {}).get("name", "Unknown")
+        client_name = (row.get("clients") or {}).get("name") or "Unknown"
         outstanding = Decimal(str(row["outstanding"]))
         if client_name in client_totals:
             client_totals[client_name]["total"] += outstanding
@@ -915,14 +927,15 @@ async def _handle_list(business_id: str, business_name: str) -> str:
     )
 
     grand_total = sum(c["total"] for c in client_totals.values())
-    lines = [f"{business_name} - who owes you:\n"]
+    lines = [f"*{business_name}* - who owes you:", ""]
     for i, (name, data) in enumerate(sorted_clients[:20], 1):
-        lines.append(f"{i}. {name}: {inr(data['total'])} ({data['count']} bills)")
+        disp = names.clean_display(name) or name
+        lines.append(f"{i}. {disp}: {inr(data['total'])} ({data['count']} bills)")
 
     if len(sorted_clients) > 20:
         lines.append(f"\n...and {len(sorted_clients) - 20} more")
 
-    lines.append(f"\nTotal: {inr(grand_total)}")
+    lines.append(f"\n*Total: {inr(grand_total)}*")
     return "\n".join(lines)
 
 
