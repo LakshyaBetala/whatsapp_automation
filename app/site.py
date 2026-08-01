@@ -45,8 +45,8 @@ DOWNLOAD_FILE = f"{APP_BASE}/download/ASVA-Setup.exe"
 # section. Bump DOWNLOAD_VERSION and prepend a row here on every shipped build.
 DOWNLOAD_VERSION = "1.8.9"
 VERSIONS = [
-    ("1.8.9", "Evening sends fixed, and payments capture themselves",
-     "Reminders, bills and Send Now now go out in the evening too (an after-7pm hold was stopping them). When a customer messages that they paid, or sends a payment screenshot, ASVA now reads the amount, matches the customer by their number, and drops it into your Payments tab ready to post into Tally. The daily summary now lists up to five people worth calling with their phone numbers, and on the last day of each month it tells you how much you collected."),
+    ("1.8.9", "Steadier WhatsApp, and payments capture themselves",
+     "WhatsApp now rides out a brief hiccup on its own instead of logging out and asking for a new QR scan (both the shop number and the ASVA bot number). Customer replies now reach ASVA reliably, so when someone messages that they paid, or sends a payment screenshot, ASVA reads the amount, matches the customer by their number, and drops it into your Payments tab ready to post into Tally. Reminders, bills and Send Now also go out in the evening now, and the daily summary lists up to five people worth calling with their numbers, plus a month-end total collected."),
     ("1.8.8", "New customers sync on their own",
      "Add a new customer in Tally and make their first bill, and ASVA now picks them up automatically on the next refresh, along with the bill, with no need to re-import. ASVA also reads the customer's number in the order you expect: the WhatsApp field first, then the Primary Mobile, then the address. Together this means a party you just created starts getting its bill and reminders on its own."),
     ("1.8.7", "Smoother payments, clearer chat, a guided tour",

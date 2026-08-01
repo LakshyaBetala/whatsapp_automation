@@ -114,6 +114,8 @@ let qrCodeData = null;   // data: URL of the current QR (null once connected)
 let clientReady = false;
 let starting = false;
 let reconnectFails = 0;  // consecutive TRANSIENT failures -> backoff
+let badSessionFails = 0; // consecutive code=500 badSession -> retry a few times BEFORE wiping
+const BAD_SESSION_MAX = 5;  // only wipe a paired session after this many 500s in a row
 let gen = 0;             // socket generation: events from an old socket are ignored
 let registered = false;  // creds are paired with a phone (no QR needed)
 let lastCloseCode = null;
@@ -318,6 +320,7 @@ async function start() {
                 registered = true;
                 qrCodeData = null;
                 reconnectFails = 0;
+                badSessionFails = 0;
                 console.log('WhatsApp CONNECTED (Baileys). Ready.');
             }
             if (connection === 'close') {
@@ -339,14 +342,35 @@ async function start() {
                     scheduleRestart(400);
                     return;
                 }
-                if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
-                    // 401: unlinked from the phone (or phone offline 14+ days).
-                    // 500: corrupt creds. Both need a clean wipe + fresh QR -
-                    // reconnecting with these creds would loop forever.
+                if (code === DisconnectReason.loggedOut) {
+                    // 401: genuinely unlinked from the phone (or phone offline
+                    // 14+ days). Only THIS wipes - reconnecting would loop forever.
                     try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
                     registered = false;
                     reconnectFails = 0;
-                    console.log('Session dead (logged out / bad session): wiped, a fresh QR will appear.');
+                    console.log('Logged out from the phone: session wiped, a fresh QR will appear.');
+                    scheduleRestart(2000);
+                    return;
+                }
+                if (code === DisconnectReason.badSession) {
+                    // 500: often a TRANSIENT WhatsApp stream error, not a truly dead
+                    // session. Wiping on the first one destroys a working, unattended
+                    // login and drops into an endless QR loop nobody is there to scan
+                    // (the exact failure seen in the field). So reconnect with the
+                    // SAME creds a few times first; only wipe if it keeps failing.
+                    if (registered && badSessionFails < BAD_SESSION_MAX) {
+                        badSessionFails += 1;
+                        const delay = Math.min(5000 * badSessionFails, 60000);
+                        console.log(`Stream error (500) - reconnecting WITHOUT re-scan `
+                            + `(attempt ${badSessionFails}/${BAD_SESSION_MAX}, in ${Math.round(delay/1000)}s).`);
+                        scheduleRestart(delay);
+                        return;
+                    }
+                    try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
+                    registered = false;
+                    reconnectFails = 0;
+                    badSessionFails = 0;
+                    console.log('Session bad after repeated retries: wiped, a fresh QR will appear.');
                     scheduleRestart(2000);
                     return;
                 }

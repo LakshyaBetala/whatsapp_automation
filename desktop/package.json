@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "Reminders, bills and Send Now now go out even in the evening (fixed a hold that stopped after-7pm sends).\nWhen a customer messages that they paid, or sends a payment screenshot, it now reaches ASVA and lands in the Payments tab automatically - amount read from the screenshot, matched to the customer by their number.\nDaily digest: who-to-chase (up to 5) now shows each customer's phone number, and on the last day of the month it adds how much you collected this month.\nNew customers added in Tally keep syncing automatically."
+      "releaseNotes": "Steadier WhatsApp: a brief hiccup no longer logs you out or forces a new QR scan - it reconnects on its own (both the shop and the ASVA bot number).\nCustomer replies now actually reach ASVA, so 'paid' messages and payment screenshots land in the Payments tab automatically - amount read from the screenshot, matched to the customer by their number.\nReminders, bills and Send Now go out in the evening too (window 10am-8pm; Send Now and fresh bills go instantly).\nDaily digest: who-to-chase (up to 5) with phone numbers, plus a month-end 'collected this month'."
     },
     "files": [
       "main.js",
