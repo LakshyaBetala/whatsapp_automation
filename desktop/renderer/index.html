@@ -677,19 +677,45 @@ function showWhatsNewIfUpdated() {
 // A deep, clean walk-through: it actually OPENS each tab as it explains it, so
 // the owner sees the real screen behind the spotlight. Skippable, shown once,
 // and re-openable anytime from the "? Tour" button. Esc skips; arrows navigate.
+// Tour copy in both languages (follows the EN/HI toggle) - short, plain words
+// for a 20 to 70 year old shop owner. WhatsApp is covered in detail because that
+// is how most owners will use ASVA day to day.
 const TOUR = [
-  { t: 'Welcome to ASVA', b: 'This is your recovery control room. A quick guided tour, under a minute. You can skip anytime, and reopen it from the “? Tour” button up top.' },
-  { sel: '.nav[data-v="dash"]', view: 'dash', t: 'Dashboard', b: 'Everyone who owes you, with their bills and dues. This is where you start each day, see who to chase, and record a payment.' },
-  { sel: '.nav[data-v="reminders"]', view: 'reminders', t: 'Reminders', b: 'Choose who gets reminded, when, and in which language. Group parties into batches, add holidays and early-pay discounts. ASVA sends them for you from your own WhatsApp.' },
-  { sel: '.nav[data-v="payments"]', view: 'payments', t: 'Payments', b: 'When a customer says they paid, it appears here. Check the amount and the deposit account, then post the receipt straight into Tally in one tap. ASVA never posts on its own.' },
-  { sel: '.nav[data-v="analytics"]', view: 'analytics', t: 'Analytics', b: 'Your collections over time, ageing, and biggest debtors, at a glance.' },
-  { sel: '.nav[data-v="accounts"]', view: 'accounts', t: 'Accounts', b: 'Your UPI ids and bank details. These go on the reminders so customers can pay you easily.' },
-  { sel: '.nav[data-v="setup"]', view: 'setup', t: 'WhatsApp Setup', b: 'Connect your shop’s WhatsApp by scanning a QR here. Every bill and reminder goes from your own number.' },
-  { sel: '#reloadbtn', t: 'Tally refresh', b: 'Pull the very latest from Tally whenever you want. A full refresh takes about 2 minutes; your reminders keep working meanwhile.' },
-  { sel: '#phonebtn', t: 'ASVA on your phone', b: 'Scan a QR to open ASVA on your phone: your live dues, who to chase, and one-tap calling, anywhere.' },
-  { sel: '#updchk', t: 'Always up to date', b: 'ASVA updates itself. Tap here anytime to check for the newest version.' },
-  { t: 'On WhatsApp too', b: 'Send these to your ASVA number anytime:\n\nLIST — who owes you\nCHECK Ramesh — one party’s balance\nPAID Ramesh — record a payment\nREMIND Ramesh — nudge one party now\nPROMISES — who said they will pay\n\nSend HELP anytime. That’s it, you’re ready!' },
+  { en: { t: 'Welcome to ASVA', b: 'ASVA helps you get your udhaar (outstanding) back on its own. This quick tour takes under a minute. Tap Next to see each part. You can press Skip anytime.' },
+    hi: { t: 'ASVA mein aapka swagat', b: 'ASVA aapka udhaar apne aap wapas laata hai. Yeh chhota tour ek minute se kam ka hai. Aage badhne ke liye Next dabayein. Kabhi bhi Skip kar sakte hain.' } },
+  { sel: '.nav[data-v="dash"]', view: 'dash',
+    en: { t: '1. Dashboard', b: 'Har roz yahin se shuru karein. This shows everyone who owes you, how much, and for how long. Tap any party to see their bills.' },
+    hi: { t: '1. Dashboard', b: 'Har roz yahin se shuru karein. Yahan dikhta hai kis-kis ka paisa baaki hai, kitna, aur kitne din se. Kisi bhi party par tap karke uske bill dekhein.' } },
+  { sel: '.nav[data-v="reminders"]', view: 'reminders',
+    en: { t: '2. Reminders', b: 'ASVA sends polite payment reminders for you, from your own WhatsApp number. Here you choose the time, the language, and holidays. You do nothing daily; it runs on its own.' },
+    hi: { t: '2. Reminders', b: 'ASVA aapki taraf se, aapke hi WhatsApp number se vinamra payment reminder bhejta hai. Yahan aap time, bhasha aur chhutti chunte hain. Roz kuch nahi karna, sab apne aap chalta hai.' } },
+  { sel: '.nav[data-v="payments"]', view: 'payments',
+    en: { t: '3. Payments', b: 'When a customer pays, it comes here. Check the amount and which account (Cash or bank), then tap once to put the receipt into Tally. ASVA never enters anything on its own; you always confirm.' },
+    hi: { t: '3. Payments', b: 'Jab customer paisa deta hai, wo yahan aata hai. Amount aur account (Cash ya bank) check karke, ek tap mein receipt Tally mein daal dein. ASVA khud kuch nahi daalta; confirm aap karte hain.' } },
+  { sel: '.nav[data-v="analytics"]', view: 'analytics',
+    en: { t: '4. Analytics', b: 'Your business numbers in simple form: how much came back, who owes the most, and how old the dues are.' },
+    hi: { t: '4. Analytics', b: 'Aapke business ke numbers aasaan tarike se: kitna wapas aaya, sabse zyada kiska baaki hai, aur dues kitne purane hain.' } },
+  { sel: '.nav[data-v="accounts"]', view: 'accounts',
+    en: { t: '5. Accounts', b: 'Put your UPI id and bank details here once. ASVA adds them to the reminders so customers can pay you easily.' },
+    hi: { t: '5. Accounts', b: 'Apna UPI id aur bank details yahan ek baar daal dein. ASVA inhe reminder mein laga deta hai taaki customer aasaani se pay kar sake.' } },
+  { sel: '.nav[data-v="setup"]', view: 'setup',
+    en: { t: '6. WhatsApp Setup', b: 'Connect your shop WhatsApp by scanning the QR here, just like WhatsApp Web. Every message goes from your own number, so customers see you, not a stranger.' },
+    hi: { t: '6. WhatsApp Setup', b: 'Yahan QR scan karke apna dukaan wala WhatsApp jodein, bilkul WhatsApp Web ki tarah. Har message aapke apne number se jaata hai, isliye customer ko aap dikhte hain, koi anjaan nahi.' } },
+  { sel: '#reloadbtn',
+    en: { t: 'Tally refresh', b: 'Press this to pull the newest data from Tally. It takes about 2 minutes; your reminders keep working meanwhile.' },
+    hi: { t: 'Tally refresh', b: 'Tally se sabse naya data laane ke liye ye dabayein. Isme takreeban 2 minute lagte hain; tab tak reminder chalte rehte hain.' } },
+  { sel: '#phonebtn',
+    en: { t: 'ASVA on your phone', b: 'Scan this to open ASVA on your phone: live dues, who to chase, and one-tap call, wherever you are.' },
+    hi: { t: 'Phone par ASVA', b: 'Ise scan karke apne phone par ASVA kholein: live baaki, kisko chase karna hai, aur ek tap mein call, aap kahin bhi ho.' } },
+  // WhatsApp is the heart of ASVA for most owners - two clear steps.
+  { en: { t: 'You can run ASVA from WhatsApp', b: 'You do not have to open this app for everything. Just message your ASVA WhatsApp number like you chat with anyone. Type a command, ASVA replies in seconds.' },
+    hi: { t: 'ASVA ko WhatsApp se chalayein', b: 'Har cheez ke liye ye app kholna zaroori nahi. Bas apne ASVA WhatsApp number par message karein, jaise kisi se chat karte hain. Command likhein, ASVA seconds mein jawab deta hai.' } },
+  { en: { t: 'Simple WhatsApp commands', b: 'LIST - who owes you\nCHECK Ramesh - one party’s balance\nPAID Ramesh - a customer paid\nREMIND Ramesh - remind one party now\nPROMISES - who said they will pay\n\nDo not remember all this. Just send HELP and ASVA shows the full list.' },
+    hi: { t: 'Aasaan WhatsApp commands', b: 'LIST - kiska paisa baaki hai\nCHECK Ramesh - ek party ka balance\nPAID Ramesh - customer ne pay kiya\nREMIND Ramesh - ek party ko abhi reminder\nPROMISES - kisne kaha paise denge\n\nSab yaad rakhne ki zaroorat nahi. Bas HELP bhejein, ASVA poori list dikha deta hai.' } },
+  { en: { t: 'That’s it!', b: 'You are ready. If you ever get stuck, send TEAM with your question on WhatsApp and a real person helps you. Reopen this tour anytime from the “? Tour” button.' },
+    hi: { t: 'Bas ho gaya!', b: 'Aap taiyaar hain. Kabhi atak jaayein to WhatsApp par TEAM likhkar apna sawaal bhejein, ek asli insaan aapki madad karega. Ye tour kabhi bhi upar “? Tour” se dobara khol sakte hain.' } },
 ];
+function tourLang() { return (typeof currentLang === 'function' && currentLang() === 'hinglish') ? 'hi' : 'en'; }
 let tourI = 0;
 function startTour() { tourI = 0; document.getElementById('tourpop').style.display = 'block'; showTourStep(); }
 function tourGo(d) { tourI += d; if (tourI >= TOUR.length) { endTour(); return; } if (tourI < 0) tourI = 0; showTourStep(); }
@@ -702,12 +728,16 @@ function showTourStep() {
   const s = TOUR[tourI], spot = document.getElementById('tourspot'),
     pop = document.getElementById('tourpop'), mask = document.getElementById('tourmask');
   if (s.view) { try { show(s.view); } catch (e) {} }   // open the real tab behind the spotlight
+  const L = tourLang(), c = s[L] || s.en;
+  const hi = L === 'hi';
   document.getElementById('tourbar').style.width = Math.round(((tourI + 1) / TOUR.length) * 100) + '%';
-  document.getElementById('tourstep').textContent = 'Step ' + (tourI + 1) + ' of ' + TOUR.length;
-  document.getElementById('tourtitle').textContent = s.t;
-  document.getElementById('tourbody').textContent = s.b;
+  document.getElementById('tourstep').textContent = (hi ? 'Kadam ' : 'Step ') + (tourI + 1) + (hi ? ' / ' : ' of ') + TOUR.length;
+  document.getElementById('tourtitle').textContent = c.t;
+  document.getElementById('tourbody').textContent = c.b;
   document.getElementById('tourback').style.visibility = tourI === 0 ? 'hidden' : 'visible';
-  document.getElementById('tournext').textContent = (tourI === TOUR.length - 1) ? 'Done' : 'Next';
+  document.getElementById('tourback').textContent = hi ? 'Peeche' : 'Back';
+  document.querySelector('#tourpop .tskip').textContent = hi ? 'Tour band karein' : 'Skip tour';
+  document.getElementById('tournext').textContent = (tourI === TOUR.length - 1) ? (hi ? 'Ho gaya' : 'Done') : (hi ? 'Aage' : 'Next');
   const el = s.sel ? document.querySelector(s.sel) : null;
   // Wait a tick so a just-switched view has laid out before we measure.
   setTimeout(() => {

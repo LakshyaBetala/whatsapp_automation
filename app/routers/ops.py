@@ -152,6 +152,14 @@ def build_ops_data(db) -> dict:
     order = {"suspended": 0, "grace": 1, "active": 2}
     rows.sort(key=lambda r: (order.get(r["status"], 3),
                              r["days_left"] if r["days_left"] is not None else 10 ** 9))
+    # Open issues (bot WhatsApp down, scheduler stalled, a shop's WhatsApp down,
+    # agent offline, stuck queue) so the page can show a banner on every tab.
+    try:
+        open_alerts = [{"title": a.get("title") or a.get("kind") or "Issue",
+                        "severity": a.get("severity") or "warn",
+                        "body": a.get("body") or ""} for a in alerts.list_open(db)]
+    except Exception:
+        open_alerts = []
     return {
         "server_time": now.isoformat(),
         "server_version": settings.app_version,
@@ -159,6 +167,7 @@ def build_ops_data(db) -> dict:
         "public_url": settings.public_base_url,
         "free_pilot_until": (settings.free_pilot_until or "") if subs.free_pilot_active() else "",
         "totals": tot,
+        "open_alerts": open_alerts,
         "businesses": rows,
     }
 
@@ -339,6 +348,12 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .tabs{display:flex;gap:8px;margin:4px 0 16px}
  .tab{font:inherit;font-size:.9rem;font-weight:700;border:1px solid #24332a;background:#17211b;color:#8fae9c;border-radius:8px;padding:8px 16px;cursor:pointer}
  .tab.on{background:#123524;color:#46d67e;border-color:#2c5c42}
+ .opsbanner{border-radius:12px;padding:12px 16px;margin-bottom:14px;font-size:.92rem;line-height:1.5}
+ .opsbanner a{font-weight:800;text-decoration:none;white-space:nowrap}
+ .opsbanner.down{background:#3a1613;color:#ff9b8f;border:1px solid #6b2a22}
+ .opsbanner.down a{color:#ffd0c8}
+ .opsbanner.warn{background:#3a2f10;color:#f0c04a;border:1px solid #5c4a1a}
+ .opsbanner.warn a{color:#ffe08a}
  .reqbadge{display:inline-block;background:#ff6a5c;color:#2a0f0c;font-size:.7rem;font-weight:800;border-radius:9999px;padding:0 7px;margin-left:7px;vertical-align:middle}
  .reqcard{background:#17211b;border:1px solid #24332a;border-radius:12px;padding:14px 16px;margin-bottom:10px}
  .reqcard.done{opacity:.55}
@@ -385,6 +400,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <div class="meta"><button class="add" onclick="openAdd()">+ Add business</button>
     &nbsp;&nbsp;<span id="clock"></span> &middot; server v<span id="sv"></span></div>
 </div>
+<div id="opsbanner" class="opsbanner" style="display:none"></div>
 <div id="pilotbar" style="display:none;background:#123524;color:#8fe0af;border:1px solid #1e5a3a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.9rem"></div>
 
 <div class="modal" id="addModal">
@@ -529,7 +545,29 @@ async function load(){
       '<div class="kpi '+(k[2])+'"><div class="n">'+inr(t[k[0]])+'</div><div class="l">'+k[1]+'</div></div>').join('');
     document.getElementById('rows').innerHTML = d.businesses.map(rowHtml).join('') ||
       '<tr><td colspan="12" class="muted" style="padding:22px">No businesses yet.</td></tr>';
-  }catch(e){document.getElementById('msg').textContent='Could not load. Retrying...';}
+    renderIssues(d.open_alerts||[]);
+  }catch(e){
+    // A thrown fetch = the ASVA server is unreachable (backend down / restarting).
+    showBanner('down','Cannot reach the ASVA server. The backend may be down or restarting. It retries automatically.');
+    document.getElementById('msg').textContent='Could not load. Retrying...';
+  }
+}
+// Top banner: the one place the operator sees "something is wrong" on any tab.
+function showBanner(kind, html){
+  const b=document.getElementById('opsbanner'); if(!b)return;
+  b.className='opsbanner '+kind; b.innerHTML=html; b.style.display='block';
+}
+function hideBanner(){const b=document.getElementById('opsbanner'); if(b)b.style.display='none';}
+function renderIssues(alerts){
+  const crit=alerts.filter(a=>a.severity==='critical');
+  const warn=alerts.filter(a=>a.severity!=='critical');
+  if(!alerts.length){ hideBanner(); return; }
+  const titles=alerts.slice(0,4).map(a=>esc(a.title)).join(' &middot; ');
+  const more=alerts.length>4?(' +'+(alerts.length-4)+' more'):'';
+  const head=crit.length?('&#9888; '+crit.length+' problem'+(crit.length>1?'s':'')+' need attention')
+                        :(warn.length+' thing'+(warn.length>1?'s':'')+' to check');
+  showBanner(crit.length?'down':'warn',
+    '<b>'+head+':</b> '+titles+more+' <a href="#" onclick="showTab(\'health\');return false">See Health &#8594;</a>');
 }
 function rowHtml(b){
   const days = (b.days_left==null)?'-':b.days_left;
@@ -713,6 +751,10 @@ async function loadHealth(){
       ['sent_today','Sent today','good'],['failed_today','Failed today',t.failed_today?'bad':''],
       ['blocked_today','Blocked','warn'],['queued_now','Queued now',t.queued_now?'warn':'']];
     const open=(d.alerts&&d.alerts.open)||[];
+    renderIssues(open);   // keep the top banner fresh on the Health tab too
+    // Bot WhatsApp down is a critical, host-level outage - surface it explicitly
+    // (bw is the bot_wa status already read above in this function).
+    if(bw && bw.configured && bw.ok===false){ showBanner('down','<b>&#9888; ASVA bot WhatsApp is disconnected.</b> Owner digests, alerts and replies are down. Re-link at link.tryasva.com/qr on the host. <a href="#" onclick="showTab(\'health\');return false">See Health &#8594;</a>'); }
     let kpi=K.map(k=>'<div class="kpi '+k[2]+'"><div class="n">'+inr(t[k[0]]||0)+'</div><div class="l">'+k[1]+'</div></div>').join('');
     kpi+='<div class="kpi '+((t.wa_down||0)?'bad':'good')+'"><div class="n">'+inr(t.wa_down||0)+'</div><div class="l">WhatsApp down</div></div>';
     kpi+='<div class="kpi '+(open.length?'bad':'good')+'"><div class="n">'+open.length+'</div><div class="l">Open alerts</div></div>';
@@ -745,7 +787,10 @@ async function loadHealth(){
         '<td class="num '+(b.queued?'warnv':'')+'">'+inr(b.queued)+'</td>'+
         '<td>'+ago(b.last_seen_min)+'</td></tr>';
     }).join('') || '<tr><td colspan="10" class="muted" style="padding:22px">No shops yet.</td></tr>';
-  }catch(e){document.getElementById('msg').textContent='Could not load health. Retrying...';}
+  }catch(e){
+    showBanner('down','Cannot reach the ASVA server. The backend may be down or restarting. It retries automatically.');
+    document.getElementById('msg').textContent='Could not load health. Retrying...';
+  }
 }
 
 setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString();},1000);
