@@ -217,7 +217,13 @@ function agentService(extraArgs) {
 //   drainer         = delivers the server's queued sends from this shop's number
 const SPECS = {
   whatsapp: { cmd: NODE_CMD, args: [path.join(WA_DIR, 'index.js')], cwd: WA_DIR,
+              // BACKEND_URL points wa_service at the REMOTE backend so inbound
+              // customer replies (PAID, payment screenshots) actually reach ASVA.
+              // Without it, wa_service defaults to localhost:8000 - which does not
+              // exist on a thin-client shop laptop (ECONNREFUSED) - so paid/promise
+              // detection never fires. Falls back to shop config's backend_url.
               env: { ...NODE_ENV, PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop',
+                     BACKEND_URL: CONFIG.backendUrl || 'http://localhost:8000',
                      WA_AUTH_DIR: WA_AUTH_ROOT } },
   watcher: agentService(['--watch']),
   drainer: agentService(['--drain-outbox']),

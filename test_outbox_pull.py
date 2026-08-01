@@ -84,6 +84,16 @@ def test_pull_is_empty_outside_the_send_window(monkeypatch):
     assert outbox.pull(db, "biz1") == []
 
 
+def test_pull_delivers_priority_rows_even_outside_the_window(monkeypatch):
+    # A Send Now / fresh bill (priority) goes out after hours; a normal reminder
+    # in the same queue still waits for morning.
+    monkeypatch.setattr(outbox, "within_send_window", lambda *a, **k: False)
+    prio = _row("p"); prio["priority"] = True
+    db = FakeDB([prio, _row("n")])          # n = ordinary reminder, not priority
+    items = outbox.pull(db, "biz1")
+    assert [i["id"] for i in items] == ["p"]
+
+
 def test_pull_expires_stale_rows_instead_of_delivering_them():
     db = FakeDB([_row("old", mins_old=60 * 80)])   # ~3.3 days old > 72h
     items = outbox.pull(db, "biz1")

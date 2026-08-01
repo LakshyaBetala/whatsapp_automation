@@ -172,6 +172,7 @@ async def _generate_and_deliver(
                 pdf_base64=pdf_base64,
                 pdf_filename=pdf_filename or f"Invoice_{invoice_num}.pdf",
                 template_name=tpl_name,
+                priority=True,   # a fresh bill goes out now, even after send-window hours
             )
         else:
             await whatsapp.send_template(

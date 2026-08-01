@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.8.8",
+  "version": "1.8.9",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "New customers added in Tally now appear in ASVA automatically, along with their bills, no re-import needed.\nPicks the customer's number in the right order: WhatsApp field, then Primary Mobile, then address.\nNew Payments tab: confirm a payment and post it into Tally in one tap (no double entries).\nNumbered which-one selection for similar names, and a guided in-app tour.\nRedesigned phone app with a Chase-today list and one-tap call."
+      "releaseNotes": "Reminders, bills and Send Now now go out even in the evening (fixed a hold that stopped after-7pm sends).\nWhen a customer messages that they paid, or sends a payment screenshot, it now reaches ASVA and lands in the Payments tab automatically - amount read from the screenshot, matched to the customer by their number.\nDaily digest: who-to-chase (up to 5) now shows each customer's phone number, and on the last day of the month it adds how much you collected this month.\nNew customers added in Tally keep syncing automatically."
     },
     "files": [
       "main.js",

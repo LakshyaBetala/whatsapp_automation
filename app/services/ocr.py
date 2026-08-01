@@ -93,3 +93,44 @@ async def extract_bill(image_b64: str, media_type: str = "image/jpeg") -> Option
     except Exception:
         log.exception("Bill OCR failed")
         return None
+
+
+_PAY_PROMPT = (
+    "This is a screenshot a customer sent to prove they paid (a UPI app, bank "
+    "transfer, or cheque). Read the RUPEE AMOUNT that was paid. Return JSON "
+    "{\"amount\": <number or null>}. Numeric only, no commas or symbols. If you "
+    "cannot clearly see a paid amount, return null.")
+_PAY_SCHEMA = {"type": "OBJECT", "properties": {"amount": {"type": "NUMBER", "nullable": True}}}
+
+
+async def extract_payment_amount(image_b64: str, media_type: str = "image/jpeg") -> Optional[float]:
+    """Read the paid amount off a payment screenshot (UPI/bank/cheque). Returns
+    the rupee amount, or None if not configured / not clearly readable. Best
+    effort - a failure never blocks the reply pipeline."""
+    if not is_configured():
+        return None
+    payload = {
+        "contents": [{
+            "parts": [
+                {"inline_data": {"mime_type": media_type, "data": image_b64}},
+                {"text": _PAY_PROMPT},
+            ],
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": _PAY_SCHEMA,
+            "temperature": 0,
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60) as http:
+            resp = await http.post(GEMINI_URL, params={"key": settings.gemini_api_key}, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        amt = json.loads(text).get("amount")
+        amt = float(amt) if amt is not None else None
+        return amt if (amt and amt > 0) else None
+    except Exception:
+        log.exception("Payment-screenshot OCR failed")
+        return None

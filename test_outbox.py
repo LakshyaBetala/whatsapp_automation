@@ -18,9 +18,15 @@ class _Query:
         self._rows = rows
         self._sink = sink
         self._insert = None
+        self._eq = {}
 
     def select(self, *a, **k): return self
-    def eq(self, *a, **k): return self
+    def eq(self, field, value):
+        # Only the priority filter is modelled (the real query also filters
+        # status='queued'); existing tests rely on rows being returned otherwise.
+        if field == "priority":
+            self._eq[field] = value
+        return self
     def in_(self, *a, **k): return self
     def order(self, *a, **k): return self
     def limit(self, *a, **k): return self
@@ -40,7 +46,9 @@ class _Query:
             saved.setdefault("id", "row-id")
             self._sink.append(saved)
             return _Result([saved])
-        return _Result(self._rows)
+        rows = [r for r in self._rows
+                if all(r.get(f) == v for f, v in self._eq.items())]
+        return _Result(rows)
 
 
 class FakeDB:
@@ -152,13 +160,11 @@ def test_send_window_boundaries():
     from app.jobs import outbox_sweep
     IST = ZoneInfo("Asia/Kolkata")
 
-    inside = datetime(2026, 7, 20, 10, 0, tzinfo=IST)
-    assert outbox_sweep.within_send_window(inside) is True
-    # start is inclusive, end is exclusive
-    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 9, 0, tzinfo=IST)) is True
-    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 18, 59, tzinfo=IST)) is True
-    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 19, 0, tzinfo=IST)) is False
-    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 8, 59, tzinfo=IST)) is False
+    # Window is 10 AM (inclusive) to 8 PM (exclusive), shop-local.
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 10, 0, tzinfo=IST)) is True
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 19, 59, tzinfo=IST)) is True
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 20, 0, tzinfo=IST)) is False
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 9, 59, tzinfo=IST)) is False
     assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 23, 30, tzinfo=IST)) is False
 
 

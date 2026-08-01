@@ -15,7 +15,7 @@ from decimal import Decimal
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan, PLAN_LIMITS
-from app.services import whatsapp
+from app.services import names, proof, whatsapp
 from app.services.templates import inr, render
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,21 @@ IST = timezone(timedelta(hours=5, minutes=30))
 def _today_ist() -> date:
     """Current date in IST (not system-local, not UTC)."""
     return datetime.now(IST).date()
+
+
+def _call_number(raw: str | None) -> str:
+    """A clean 10-digit dialling number for the digest (strip the 91 country
+    code), or '' when there is none."""
+    t = "".join(ch for ch in (raw or "") if ch.isdigit())
+    if len(t) == 12 and t.startswith("91"):
+        t = t[2:]
+    elif len(t) == 13 and t.startswith("091"):
+        t = t[3:]
+    return t if len(t) == 10 else ""
+
+
+def _is_month_end(d: date) -> bool:
+    return (d + timedelta(days=1)).month != d.month
 
 
 def _today_utc_range_for_ist(ist_date: date) -> tuple[str, str]:
@@ -179,7 +194,7 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
     try:
         od_resp = (
             db.table("bills")
-            .select("outstanding, due_date, client_id, clients(name)")
+            .select("outstanding, due_date, client_id, clients(name, whatsapp_number)")
             .eq("business_id", business_id)
             .eq("status", "overdue")
             .execute()
@@ -189,8 +204,9 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
             out = Decimal(str(b.get("outstanding") or 0))
             if out <= 0:
                 continue
+            cl = b.get("clients") or {}
             e = per_party.setdefault(b["client_id"], {
-                "name": (b.get("clients") or {}).get("name", "-"),
+                "name": cl.get("name", "-"), "phone": cl.get("whatsapp_number"),
                 "total": Decimal(0), "late": 0})
             e["total"] += out
             if b.get("due_date"):
@@ -198,15 +214,28 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
                     e["late"] = max(e["late"], (today - date.fromisoformat(str(b["due_date"]))).days)
                 except (TypeError, ValueError):
                     pass
-        top = sorted(per_party.values(), key=lambda e: e["total"], reverse=True)[:3]
+        # Up to 5 to chase today, biggest first, each with a clean name + number.
+        top = sorted(per_party.values(), key=lambda e: e["total"], reverse=True)[:5]
         if top:
             lines = []
             for i, e in enumerate(top, 1):
                 late = f" ({e['late']} days late)" if e["late"] > 0 else ""
-                lines.append(f"{i}. {e['name']}: {inr(e['total'])}{late}")
+                nm = names.clean_display(e["name"] or "") or (e["name"] or "-")
+                num = _call_number(e.get("phone"))
+                tail = f" - {num}" if num else ""
+                lines.append(f"{i}. {nm}: {inr(e['total'])}{late}{tail}")
             action_lines = "\n\nWORTH A CALL\n" + "\n".join(lines)
     except Exception:
         log.exception("Worth-a-call list failed - digest continues")
+
+    # ── Month-end (last day of the month): how much came back this month ─
+    if _is_month_end(today):
+        try:
+            pf = proof.build_proof(db, business_id, today)
+            action_lines += (f"\n\nTHIS MONTH ({pf.get('month', '')})\n"
+                             f"Collected: {inr(pf.get('recovered_this_month') or 0)}")
+        except Exception:
+            log.exception("Month-end summary failed - digest continues")
 
     # ── Build template params ─────────────────────────────────────────
     biz_name = business.get("business_name") or "Business"

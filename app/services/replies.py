@@ -30,7 +30,8 @@ import re
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
-from app.services import conversations, intent, promises, whatsapp
+from app.services import conversations, intent, names, promises, whatsapp
+from app.services import receipts_queue as rq
 from app.services.templates import inr
 
 log = logging.getLogger(__name__)
@@ -111,6 +112,35 @@ def _amt_phrase(amount) -> str:
     return f" ({inr(amount)})" if amount else ""
 
 
+def _queue_payment(business_id: str, client: dict, amount) -> bool:
+    """A KNOWN customer reported a specific amount paid: put it straight in the
+    owner's Payments tab (party matched by their number) so the owner just checks
+    the account and posts it into Tally. Deduped per party by receipts_queue.
+    Returns True if a receipt was queued. Best-effort - never breaks the reply."""
+    try:
+        amt = float(amount or 0)
+    except (TypeError, ValueError):
+        return False
+    if amt <= 0:
+        return False
+    try:
+        db = require_db()
+        led = client.get("tally_ledger_name")
+        if not led:
+            r = (db.table("clients").select("tally_ledger_name, name")
+                 .eq("id", client.get("id")).limit(1).execute()).data
+            if r:
+                led = r[0].get("tally_ledger_name") or r[0].get("name")
+        disp = names.clean_display(client.get("name") or "") or (client.get("name") or "Customer")
+        rq.create_pending(db, business_id, client_id=client.get("id"),
+                          party_ledger=led or client.get("name") or disp,
+                          party_display=disp, amount=amt)
+        return True
+    except Exception:
+        log.exception("could not queue customer-reported payment")
+        return False
+
+
 async def capture_reply(client: dict, text: str, *, media_b64: str | None = None,
                         media_type: str = "image/jpeg") -> bool:
     """The pipeline. The customer is NEVER replied to. Returns True when ASVA
@@ -131,12 +161,25 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     except Exception:
         pass
 
-    # 1. A screenshot with no clear instruction: treat as payment proof.
+    # 1. A screenshot with no clear instruction: treat as payment proof. Try to
+    #    read the amount off it (UPI/bank) so it can go straight to the Payments tab.
     if media_b64 and len(text) < 4:
         await _forward_proof(business_id, name, media_b64, media_type)   # sends the image to the owner
+        amount = None
+        try:
+            from app.services import ocr
+            amount = await ocr.extract_payment_amount(media_b64, media_type)
+        except Exception:
+            log.exception("screenshot amount OCR failed")
         promises.create(require_db(), business_id, client_id, kind="paid_claim",
-                        hold_until=_grace_hold(), raw_text="[payment screenshot]",
-                        source="screenshot")
+                        hold_until=_grace_hold(), amount=amount,
+                        raw_text="[payment screenshot]", source="screenshot")
+        if _queue_payment(business_id, client, amount):
+            await _notify_owner(business_id,
+                f"{name} sent a payment screenshot for {inr(amount)}. It is in your "
+                f"Payments tab - check the account and post it into Tally. Reminders "
+                f"paused for {settings.promise_grace_days} days. Reply CHASE {name} to resume.")
+            return True
         await _notify_owner(business_id,
             f"{name} sent a payment screenshot. ASVA PAUSED their reminders for "
             f"{settings.promise_grace_days} days (nothing was replied to {name}). "
@@ -155,6 +198,13 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
         promises.create(require_db(), business_id, client_id, kind="paid_claim",
                         hold_until=_grace_hold(), amount=amount, raw_text=text,
                         source="keyword")
+        queued = _queue_payment(business_id, client, amount)
+        if queued:
+            await _notify_owner(business_id,
+                f'{name} says they paid {inr(amount)}. It is in your Payments tab - '
+                f"check the account and post it into Tally. Reminders paused for "
+                f"{settings.promise_grace_days} days. Reply CHASE {name} to resume.")
+            return True
         await _notify_owner(business_id,
             f'{name} replied: "{text[:200]}". ASVA read this as "already paid"'
             f'{_amt_phrase(amount)} and PAUSED their reminders for {settings.promise_grace_days} '
@@ -190,6 +240,12 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
         promises.create(require_db(), business_id, client_id, kind="paid_claim",
                         hold_until=_grace_hold(), amount=amount, raw_text=text,
                         source="text", confidence=conf)
+        if _queue_payment(business_id, client, amount):
+            await _notify_owner(business_id,
+                f'{name} says they paid {inr(amount)} ("{text[:120]}"). It is in your '
+                f"Payments tab - check the account and post it into Tally. Reminders "
+                f"paused for {settings.promise_grace_days} days. Reply CHASE {name} to resume.")
+            return True
         await _notify_owner(business_id,
             f'{name} replied: "{text[:200]}". ASVA read this as "already paid"'
             f'{_amt_phrase(amount)} and PAUSED their reminders for {settings.promise_grace_days} '

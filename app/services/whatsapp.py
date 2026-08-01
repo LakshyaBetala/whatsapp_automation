@@ -55,6 +55,7 @@ async def send_message(
     image_media_type: Optional[str] = None,
     template_name: str = "openwa_custom",
     channel: str = "shop",
+    priority: bool = False,
 ) -> dict:
     """Send a WhatsApp message via OpenWA.
 
@@ -153,11 +154,15 @@ async def send_message(
             .execute()
         )
         db_id = msg_row.data[0]["id"] if msg_row.data else None
-        db.table("wa_outbox").insert({
+        outbox_row = {
             "business_id": business_id,
             "message_db_id": db_id,
             "payload": payload,
-        }).execute()
+        }
+        if priority:
+            # Owner-initiated (Send Now) or a fresh bill: deliver even after hours.
+            outbox_row["priority"] = True
+        db.table("wa_outbox").insert(outbox_row).execute()
         log.info("Queued WhatsApp send to %s via wa_outbox (shop number delivers)", to_number)
         return {
             "sent": False,
@@ -245,6 +250,7 @@ async def send_template(
     image_base64: Optional[str] = None,
     image_filename: Optional[str] = None,
     channel: str = "shop",
+    priority: bool = False,
 ) -> dict:
     """Template-shaped send used by jobs and routers.
 
@@ -285,6 +291,7 @@ async def send_template(
         image_filename=image_filename,
         template_name=campaign_name,
         channel=channel,
+        priority=priority,
     )
 
 

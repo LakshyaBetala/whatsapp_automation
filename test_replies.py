@@ -70,6 +70,23 @@ def test_keyword_paid_with_amount(monkeypatch):
     assert rec.created[0]["amount"] == 20000.0
 
 
+def test_paid_with_amount_queues_a_receipt_in_payments_tab(monkeypatch):
+    # A known customer reporting an amount lands in the owner's Payments tab,
+    # party matched by their number, ready to confirm + post to Tally.
+    rec = _setup(monkeypatch)
+    queued = []
+    monkeypatch.setattr(replies.rq, "create_pending",
+                        lambda db, bid, **kw: queued.append(kw) or {"id": "r1"})
+    client = {"id": "c1", "name": "Ramesh Traders", "business_id": "b1",
+              "tally_ledger_name": "RAMESH TRADERS"}
+    out = asyncio.run(replies.capture_reply(client, "PAID 5000"))
+    assert out is True
+    assert queued and queued[0]["amount"] == 5000.0
+    assert queued[0]["party_ledger"] == "RAMESH TRADERS"
+    assert queued[0]["client_id"] == "c1"
+    assert rec.owner and "Payments tab" in rec.owner[0]
+
+
 def test_keyword_paid_with_k_suffix(monkeypatch):
     rec = _setup(monkeypatch)
     _run("paid 20k")
@@ -132,6 +149,23 @@ def test_screenshot_forwards_proof_and_holds(monkeypatch):
     assert rec.created and rec.created[0]["source"] == "screenshot"
     assert rec.owner and "screenshot" in rec.owner[0].lower()   # owner nudged
     assert out is True
+
+
+def test_screenshot_with_readable_amount_queues_a_receipt(monkeypatch):
+    # When ASVA can read the amount off the screenshot, it goes to the Payments tab.
+    import app.services.ocr as ocr
+    rec = _setup(monkeypatch)
+    async def fake_amt(b64, mt="image/jpeg"): return 310.0
+    monkeypatch.setattr(ocr, "extract_payment_amount", fake_amt)
+    queued = []
+    monkeypatch.setattr(replies.rq, "create_pending",
+                        lambda db, bid, **kw: queued.append(kw) or {"id": "r1"})
+    client = {"id": "c1", "name": "Ramesh Traders", "business_id": "b1",
+              "tally_ledger_name": "RAMESH TRADERS"}
+    out = asyncio.run(replies.capture_reply(client, "", media_b64="ZmFrZQ==", media_type="image/jpeg"))
+    assert out is True
+    assert queued and queued[0]["amount"] == 310.0
+    assert "Payments tab" in rec.owner[0]
 
 
 def test_capture_reply_never_returns_a_customer_message(monkeypatch):

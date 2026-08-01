@@ -1194,7 +1194,7 @@ async def _open_bills_by_client(business_id: str) -> dict[str, dict]:
     return agg
 
 
-async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool, str]:
+async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: bool = False) -> tuple[bool, str]:
     """One reminder covering ALL of a party's open bills (single bill →
     bill number shown; multiple → itemised up to 4 + total). Returns
     (sent, summary-line-for-owner)."""
@@ -1297,6 +1297,7 @@ async def _send_consolidated_reminder(business: dict, entry: dict) -> tuple[bool
         message_text="\n".join(lines),
         image_base64=qr_b64,
         image_filename="payment_qr.png",
+        priority=priority,   # owner pressed Send Now / typed REMIND -> deliver now
     )
     if result.get("queued"):
         return True, f"{name}: {inr(total)} ({len(bills)} bills) - in queue, goes from your shop number"
@@ -1321,7 +1322,7 @@ async def _bulk_remind(business: dict, entries: list[dict], n: int, header: str)
         # Only pause between actual sends, not before the first.
         if sent_count > 0:
             await asyncio.sleep(random.uniform(settings.send_gap_min_s, settings.send_gap_max_s))
-        ok, line = await _send_consolidated_reminder(business, entry)
+        ok, line = await _send_consolidated_reminder(business, entry, priority=True)
         results.append(line)
         if ok:
             sent_count += 1
@@ -1390,7 +1391,7 @@ async def _handle_remind(business: dict, arg: str) -> str:
     if len(matches) > 1:
         names = ", ".join(e["client"].get("name", "?") for e in matches[:5])
         return f"'{arg}' matches more than one party: {names}. Type the full name."
-    ok, line = await _send_consolidated_reminder(business, matches[0])
+    ok, line = await _send_consolidated_reminder(business, matches[0], priority=True)
     return ("Reminder sent:\n" if ok else "") + line
 
 

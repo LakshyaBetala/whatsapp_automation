@@ -37,12 +37,21 @@ def pull(db, business_id: str, limit: int = PULL_LIMIT) -> list[dict]:
     reconnect). We check the hold ONE more time here, at the moment of handing
     the message over, and quietly hold any reminder whose party is now on a
     promise pause - so we never chase someone who just promised."""
-    if not within_send_window():
+    # Outside shop hours we still deliver PRIORITY rows - a bill the owner just
+    # made, or a Send Now they explicitly pressed - but hold ordinary reminders
+    # until morning. Inside the window, everything flows.
+    window = within_send_window()
+    q = (db.table("wa_outbox")
+         .select("id, payload, attempts, created_at, message_db_id, priority")
+         .eq("business_id", business_id).eq("status", "queued"))
+    if not window:
+        try:
+            q = q.eq("priority", True)
+        except Exception:
+            return []                      # column missing (pre-migration) - old behaviour
+    rows = (q.order("created_at").limit(max(1, min(50, limit))).execute()).data or []
+    if not rows:
         return []
-    rows = (db.table("wa_outbox")
-            .select("id, payload, attempts, created_at, message_db_id")
-            .eq("business_id", business_id).eq("status", "queued")
-            .order("created_at").limit(max(1, min(50, limit))).execute()).data or []
     # Resolve each row's party + type so we only pause REMINDERS (never a bill).
     # Best-effort: if any of this fails, we deliver normally rather than block a
     # send - a re-check error must never stop a legitimate reminder.

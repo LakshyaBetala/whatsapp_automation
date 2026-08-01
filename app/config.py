@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # is the in-app "Restart to update" bar. Keep this in step with the shipped
     # app version so the older app_releases dashboard banner stays quiet (it
     # fires only when app_releases > this) and shops never see two notices.
-    app_version: str = "1.8.8"
+    app_version: str = "1.8.9"
     # The oldest desktop build the fleet still supports. A build below this is too
     # old to update itself (it predates the electron-updater), so the heartbeat
     # flags it `below_min` and the app shows a blocking "download the latest"
@@ -121,9 +121,12 @@ class Settings(BaseSettings):
     # leave between these hours (shop-local, settings.timezone); outside them the
     # queue simply waits. Owner-facing sends (digest/alerts) are NOT affected -
     # they go from the bot number and keep their own schedule.
+    # Automated reminders only leave in this window (shop-local). Send Now and a
+    # freshly-made bill are PRIORITY (see wa_outbox.priority) and bypass it - they
+    # go out whenever the owner asks, day or night.
     enforce_send_window: bool = True
-    send_window_start_hour: int = 9      # inclusive
-    send_window_end_hour: int = 19       # exclusive (last send before 7pm)
+    send_window_start_hour: int = 10     # inclusive (10 AM)
+    send_window_end_hour: int = 20       # exclusive (last send before 8 PM)
 
     # --- Morning pre-reminder checkpoint (Option A: hold + nudge, never mark paid) ---
     # Before the sweep sends, ASVA messages the owner today's reminder list so they

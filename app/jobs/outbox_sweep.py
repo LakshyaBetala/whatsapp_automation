@@ -66,17 +66,19 @@ def _is_transient(exc: Exception) -> bool:
 
 
 async def run() -> None:
-    if not within_send_window():
-        return          # outside shop hours - the queue simply waits
     db = require_db()
-    rows = (
-        db.table("wa_outbox")
-        .select("id, business_id, message_db_id, payload, attempts, created_at")
-        .eq("status", "queued")
-        .order("created_at")
-        .limit(BATCH_LIMIT)
-        .execute()
-    ).data or []
+    # Outside shop hours, deliver only PRIORITY rows (a bill just made, or a
+    # Send Now the owner pressed); ordinary reminders wait for morning.
+    window = within_send_window()
+    q = (db.table("wa_outbox")
+         .select("id, business_id, message_db_id, payload, attempts, created_at")
+         .eq("status", "queued"))
+    if not window:
+        try:
+            q = q.eq("priority", True)
+        except Exception:
+            return          # pre-migration: keep old "wait outside hours" behaviour
+    rows = (q.order("created_at").limit(BATCH_LIMIT).execute()).data or []
     if not rows:
         return
 
