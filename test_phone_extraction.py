@@ -113,3 +113,25 @@ def test_contact_field_beats_alias_and_address():
       </LEDGER>
     </COLLECTION></DATA></BODY></ENVELOPE>"""
     assert parse_ledger_contacts(xml)["PRIORITY SHOP"] == "919000000001"
+
+
+def test_whatsapp_field_beats_mobile():
+    # When the owner set a dedicated WhatsApp number, it wins over Mobile/alias/address.
+    xml = """<ENVELOPE><BODY><DATA><COLLECTION>
+      <LEDGER NAME="WA SHOP">
+        <LEDGERWHATSAPP>9000000009</LEDGERWHATSAPP>
+        <LEDGERMOBILE>9000000001</LEDGERMOBILE>
+        <ADDRESS.LIST><ADDRESS>call 9000000003</ADDRESS></ADDRESS.LIST>
+      </LEDGER>
+    </COLLECTION></DATA></BODY></ENVELOPE>"""
+    assert parse_ledger_contacts(xml)["WA SHOP"] == "919000000009"
+
+
+def test_mobile_used_when_no_whatsapp_field():
+    xml = """<ENVELOPE><BODY><DATA><COLLECTION>
+      <LEDGER NAME="MOB SHOP">
+        <LEDGERMOBILE>9000000001</LEDGERMOBILE>
+        <ADDRESS.LIST><ADDRESS>9000000003</ADDRESS></ADDRESS.LIST>
+      </LEDGER>
+    </COLLECTION></DATA></BODY></ENVELOPE>"""
+    assert parse_ledger_contacts(xml)["MOB SHOP"] == "919000000001"

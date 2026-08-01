@@ -43,8 +43,10 @@ DOWNLOAD_FILE = f"{APP_BASE}/download/ASVA-Setup.exe"
 # The version of the installer being served, and a short honest changelog (newest
 # first). Shown on the download page ("you are downloading X") and the What's new
 # section. Bump DOWNLOAD_VERSION and prepend a row here on every shipped build.
-DOWNLOAD_VERSION = "1.8.7"
+DOWNLOAD_VERSION = "1.8.8"
 VERSIONS = [
+    ("1.8.8", "New customers sync on their own",
+     "Add a new customer in Tally and make their first bill, and ASVA now picks them up automatically on the next refresh, along with the bill, with no need to re-import. ASVA also reads the customer's number in the order you expect: the WhatsApp field first, then the Primary Mobile, then the address. Together this means a party you just created starts getting its bill and reminders on its own."),
     ("1.8.7", "Smoother payments, clearer chat, a guided tour",
      "Recording a payment into Tally is now rock solid: confirm the amount and account in one tap, with no accidental double entries, and the form no longer refreshes while you fill it. When a name matches more than one party, ASVA shows a numbered list so you just reply a number, and a mistyped command gets a friendly suggestion. The phone app is redesigned clean and simple, with a Chase-today list and one-tap calling. New owners get a short, skippable guided tour that walks through every feature, and you can reopen it anytime."),
     ("1.8.6", "Enter a payment into Tally in one tap",

@@ -63,6 +63,9 @@ class FakeTable:
     def order(self, *args, **kwargs):
         return self
 
+    def limit(self, n):
+        return self
+
     def range(self, start, end):
         # Fake ignores paging; real tables are paged by _fetch_all
         return self
@@ -195,6 +198,52 @@ def test_sync_duplicate_voucher(fake_db):
         assert bill_updates[0][1]["amount"] == 500.0
         # Should not trigger whatsapp for duplicate
         mock_bg.assert_not_called()
+
+def test_outstandings_auto_creates_new_party(fake_db):
+    # A party added in Tally AFTER the one-time import (exactly the Lakshya Betala
+    # case) must be auto-created on the live refresh - not silently dropped.
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token", "plan": "starter"}]
+    fake_db.storage["clients"] = []                      # not known yet
+    payload = {
+        "business_id": biz_id, "agent_token": "valid_token", "company_name": "TEST",
+        "parties": [{"name": "Lakshya Betala", "whatsapp_number": "8072116397",
+                     "credit_days": 30, "tally_group": "Customer"}],
+        "all_parties": ["Lakshya Betala"],
+        "ledger_balances": {"Lakshya Betala": 310.0},
+        "bills": [{"party_name": "Lakshya Betala", "bill_ref": "2627RTC0153",
+                   "bill_date": "2026-07-30", "due_date": "2026-08-29", "amount": 310.0}],
+    }
+    resp = client.post("/tally/outstandings", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["new_parties"] == 1
+    client_inserts = [i[1] for i in fake_db.inserts if i[0] == "clients"]
+    lk = next(c for c in client_inserts if c["name"] == "Lakshya Betala")
+    assert lk["tally_ledger_name"] == "Lakshya Betala"
+    assert lk["whatsapp_number"] == "918072116397"      # normalized to 91...
+    assert lk["reminders_enabled"] is True
+    assert lk.get("credit_days") == 30
+
+
+def test_outstandings_does_not_duplicate_existing_party(fake_db):
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token", "plan": "starter"}]
+    fake_db.storage["clients"] = [{"id": "c1", "business_id": biz_id,
+        "tally_ledger_name": "Existing Co", "name": "Existing Co", "whatsapp_number": None}]
+    payload = {
+        "business_id": biz_id, "agent_token": "valid_token", "company_name": "TEST",
+        "parties": [{"name": "Existing Co", "whatsapp_number": "9000000000",
+                     "credit_days": 30, "tally_group": "Customer"}],
+        "all_parties": ["Existing Co"], "ledger_balances": {"Existing Co": 100.0},
+        "bills": [{"party_name": "Existing Co", "bill_ref": "R1",
+                   "bill_date": "2026-07-30", "due_date": "2026-08-29", "amount": 100.0}],
+    }
+    resp = client.post("/tally/outstandings", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["new_parties"] == 0
+    client_inserts = [i[1] for i in fake_db.inserts if i[0] == "clients"]
+    assert client_inserts == []                          # never re-created
+
 
 def test_sync_unmatched_party(fake_db):
     biz_id = str(uuid.uuid4())

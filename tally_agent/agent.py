@@ -703,6 +703,14 @@ async def run_apply_outstanding(config: dict):
             {"name": d["name"], "whatsapp_number": d.get("whatsapp_number")}
             for d in debtors if d.get("whatsapp_number")
         ],
+        # Full debtor list so the backend can AUTO-CREATE parties added in Tally
+        # after the one-time import (name, number, credit terms, group). Without
+        # this, a new customer + their bill never appear in ASVA.
+        "parties": [
+            {"name": d["name"], "whatsapp_number": d.get("whatsapp_number"),
+             "credit_days": d.get("credit_days"), "tally_group": d.get("tally_group")}
+            for d in debtors
+        ],
     }
     emit_progress(4, 4, "Saving to ASVA")
     log_and_print(f"Refreshing outstanding from Tally: {len(bills)} bills, "

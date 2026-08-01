@@ -601,6 +601,15 @@ class TallyContact(BaseModel):
     whatsapp_number: Optional[str] = None  # agent-extracted number (field/alias/address)
 
 
+class TallyParty(BaseModel):
+    """A Sundry-Debtor ledger, sent on every refresh so the backend can create
+    parties added in Tally AFTER the one-time import."""
+    name: str
+    whatsapp_number: Optional[str] = None
+    credit_days: Optional[int] = None
+    tally_group: Optional[str] = None
+
+
 def _sync_contacts(db, biz: str, contacts: list, clients_by_ledger: dict) -> int:
     """Keep customer WhatsApp numbers in step with Tally (the source of truth).
     Runs every refresh but is cheap: only the few clients whose number actually
@@ -630,6 +639,7 @@ class TallyOutstandingsPayload(BaseModel):
     bills: list[TallyOpenBill]
     all_parties: list[str] = []       # every debtor ledger (to clear fully-paid ones)
     contacts: list[TallyContact] = [] # {name, whatsapp_number} - keeps numbers current
+    parties: list[TallyParty] = []    # full debtor details -> auto-create new ones
     # Ledger ClosingBalance per party (Tally's authoritative "what they owe
     # today" total). This is the source of truth for the amount; the bill-wise
     # list above only breaks it into aged bills WHEN it reconciles. Sending
@@ -665,6 +675,43 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
         if c.get("tally_ledger_name")
     }
     clients_by_id = {c["id"]: c for c in clients_by_ledger.values()}
+
+    # ── Auto-create parties added in Tally AFTER the one-time import ──────
+    # Previously only /tally/import (one-time) created clients, so a NEW customer
+    # and their bill never appeared in ASVA. Now every refresh sends the full
+    # Sundry-Debtor list (payload.parties); any not already known is created here,
+    # then its bills flow through the normal upsert below (and /tally/sync delivers
+    # the new bill on its next tick).
+    created_parties = 0
+    if payload.parties:
+        new_rows = []
+        for p in payload.parties:
+            if not p.name or p.name in clients_by_ledger:
+                continue
+            cd = p.credit_days if (p.credit_days and 1 <= p.credit_days <= 365) else None
+            row = {
+                "business_id": biz,
+                "name": p.name,
+                "tally_ledger_name": p.name,
+                "tally_group": p.tally_group,
+                "whatsapp_number": _normalize_phone(p.whatsapp_number),
+                "reminders_enabled": True,
+            }
+            if cd:
+                row["credit_days"] = cd
+            new_rows.append(row)
+        for chunk in _chunked(new_rows, 200):
+            try:
+                res = db.table("clients").insert(chunk).execute()
+                for c in (res.data or []):
+                    if c.get("tally_ledger_name"):
+                        clients_by_ledger[c["tally_ledger_name"]] = c
+                        clients_by_id[c["id"]] = c
+                        created_parties += 1
+            except Exception:
+                log.exception("auto-create of new Tally parties failed (business %s)", biz)
+        if created_parties:
+            log.info("Auto-created %d new party(ies) from Tally refresh", created_parties)
 
     # Refresh customer numbers from Tally before anything else (cheap, targeted).
     _sync_contacts(db, biz, payload.contacts, clients_by_ledger)
@@ -807,6 +854,7 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
 
     return {
         "parties": len(target_ids),
+        "new_parties": created_parties,
         "bills_upserted": upserted,
         "bills_marked_paid": marked_paid,
         "payments_detected": len(payments),

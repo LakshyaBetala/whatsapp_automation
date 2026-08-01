@@ -132,22 +132,26 @@ def _alias_texts(ledger: ET.Element):
 
 
 def _phone_from_ledger(ledger: ET.Element) -> Optional[str]:
-    """Best mobile for a LEDGER element, in priority order:
-      1. the dedicated contact fields (Mobile / Phone / Contact),
-      2. the ledger ALIAS / mailing name (some shops store the number there),
-      3. the address lines (first number wins).
+    """Best number for a LEDGER element, in the priority the shop expects:
+      1. the WhatsApp number field (LedgerWhatsApp) - if the owner set one, that
+         is deliberately the number to message,
+      2. the primary Mobile field (LedgerMobile),
+      3. other dedicated contact fields (Phone / Contact),
+      4. the ledger ALIAS / mailing name (some shops type the number there),
+      5. the address lines (first number wins),
+      6. otherwise no number.
     Covers every place a shop might have typed the customer's number."""
-    # 1. dedicated contact fields
-    for tag in ('LEDGERMOBILE', 'LEDGERPHONE', 'LEDGERCONTACT'):
+    # 1. dedicated WhatsApp field, then 2. mobile, then 3. phone/contact
+    for tag in ('LEDGERWHATSAPP', 'LEDGERMOBILE', 'LEDGERPHONE', 'LEDGERCONTACT'):
         phone = extract_indian_mobile(ledger.findtext(tag, ''))
         if phone:
             return phone
-    # 2. alias / mailing name
+    # 4. alias / mailing name
     for txt in _alias_texts(ledger):
         phone = extract_indian_mobile(txt)
         if phone:
             return phone
-    # 3. address lines - first number in reading order
+    # 5. address lines - first number in reading order
     for addr in ledger.iter('ADDRESS'):
         phone = extract_indian_mobile(addr.text or '')
         if phone:
@@ -196,7 +200,7 @@ def build_masters_query(company: str = "") -> str:
     """All ledgers with balances + contact + credit-period fields in one shot."""
     return _collection_query('Ledger', [
         'Name', 'Parent', 'OpeningBalance', 'ClosingBalance',
-        'LedgerPhone', 'LedgerMobile', 'LedgerContact', 'Address',
+        'LedgerWhatsApp', 'LedgerMobile', 'LedgerPhone', 'LedgerContact', 'Address',
         'BillCreditPeriod',
     ], company)
 
