@@ -97,6 +97,7 @@ def _build_summary(db, biz: dict) -> dict:
             "amt": float(amt),                 # numeric -> phone sorts by amount
             "overdue_days": worst_due.get(cid, 0),
             "paused": cid in held,
+            "whatsapp": c.get("whatsapp_number") or "",   # phone can offer Call
         })
     # Full owing list, ordered as the default "who to chase": active parties
     # first (most overdue, then biggest), paused/on-promise parties last. The
@@ -199,8 +200,8 @@ def phone_link_qr(token: str = Query("")):
 def manifest():
     return JSONResponse({
         "name": "ASVA", "short_name": "ASVA", "start_url": "/m",
-        "display": "standalone", "background_color": "#0f1512",
-        "theme_color": "#17211b",
+        "display": "standalone", "background_color": "#f4f5f2",
+        "theme_color": "#ffffff",
         "icons": [{"src": "/m/icon.svg", "sizes": "any", "type": "image/svg+xml"}],
     }, media_type="application/manifest+json")
 
@@ -239,59 +240,94 @@ def app_shell(token: str = Query("")):
 _APP_HTML = r"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><title>ASVA</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#17211b">
+<meta name="theme-color" content="#ffffff">
 <link rel="manifest" href="/m/manifest.webmanifest">
 <style>
+ :root{--bg:#f4f5f2;--card:#ffffff;--ink:#16211b;--muted:#6b7d72;--line:#e7eae5;
+   --green:#0a7d33;--greenink:#0a7d33;--wa:#25d366;--amber:#9a6a00;--shadow:0 1px 2px rgba(20,40,25,.05),0 8px 24px rgba(20,40,25,.05)}
  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
- body{margin:0;font-family:'SF Pro Display','Helvetica Neue',system-ui,sans-serif;background:#0f1512;color:#eef3ef}
- header{position:sticky;top:0;background:#17211b;padding:14px 16px calc(14px + env(safe-area-inset-top)) 16px;border-bottom:1px solid #24332b}
- header .n{font-weight:800;letter-spacing:.03em;font-size:1.15rem}
- header .s{color:#9fb7a6;font-size:.82rem;margin-top:2px}
- .wrap{padding:14px 16px 40px}
- .recov{background:linear-gradient(135deg,#1c5a40,#123a2a);border:1px solid #2c6a4c;border-radius:14px;padding:14px 16px;margin-bottom:12px;font-size:1.5rem;font-weight:800;color:#eafff2}
- .recov span{display:block;font-size:.72rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8fd6b0;margin-top:2px}
+ body{margin:0;font-family:'SF Pro Display','Helvetica Neue',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+ header{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.86);backdrop-filter:saturate(1.4) blur(10px);
+   padding:12px 16px calc(12px + env(safe-area-inset-top)) 16px;border-bottom:1px solid var(--line);
+   display:flex;align-items:center;gap:12px}
+ header .who{flex:1;min-width:0}
+ header .n{font-weight:800;letter-spacing:-.01em;font-size:1.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ header .s{color:var(--muted);font-size:.8rem;margin-top:1px}
+ .getapp{flex-shrink:0;border:1px solid var(--line);background:#fff;color:var(--green);font-weight:700;
+   font-size:.8rem;padding:8px 12px;border-radius:9999px;text-decoration:none;box-shadow:var(--shadow)}
+ .getapp:active{background:#f0f3ef}
+ .wrap{padding:14px 16px 92px;max-width:640px;margin:0 auto}
+ .recov{background:linear-gradient(135deg,#0f9d58,#0a7d33);border-radius:18px;padding:16px 18px;margin-bottom:14px;
+   font-size:1.6rem;font-weight:800;color:#fff;box-shadow:0 10px 24px rgba(10,125,51,.22)}
+ .recov span{display:block;font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#d6ffe6;margin-top:2px}
  .kpis{display:flex;gap:10px;margin-bottom:16px}
- .kpi{flex:1;background:#16221b;border:1px solid #24332b;border-radius:14px;padding:14px}
- .kpi .v{font-size:1.35rem;font-weight:800}
- .kpi .l{color:#9fb7a6;font-size:.74rem;margin-top:3px}
- .sect{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:#7f978a;margin:18px 2px 8px}
- .row{display:flex;align-items:center;gap:12px;background:#16221b;border:1px solid #24332b;border-radius:12px;padding:13px 14px;margin-bottom:8px;cursor:pointer}
- .row:active{background:#1e2c23}
+ .kpi{flex:1;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 12px;box-shadow:var(--shadow)}
+ .kpi .v{font-size:1.3rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+ .kpi .l{color:var(--muted);font-size:.72rem;margin-top:4px}
+ .sect{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:20px 2px 9px}
+ .today{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:6px 6px 4px;margin-bottom:6px;box-shadow:var(--shadow);overflow:hidden}
+ .today .th{display:flex;align-items:baseline;justify-content:space-between;padding:12px 12px 6px}
+ .today .th b{font-size:.98rem}
+ .today .th span{color:var(--muted);font-size:.75rem}
+ .trow{display:flex;align-items:center;gap:12px;padding:11px 12px;border-top:1px solid var(--line)}
+ .trow:first-of-type{border-top:0}
+ .trow .rk{width:22px;height:22px;flex-shrink:0;border-radius:50%;background:#eef3ee;color:var(--green);font-weight:800;
+   font-size:.8rem;display:flex;align-items:center;justify-content:center}
+ .trow .nm{flex:1;min-width:0}
+ .trow .nm b{display:block;font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .trow .nm span{color:var(--amber);font-size:.76rem}
+ .trow .amt{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:.92rem}
+ .callmini{flex-shrink:0;width:38px;height:38px;border-radius:50%;background:var(--wa);color:#0a2e17;
+   display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:1.05rem}
+ .callmini:active{filter:brightness(.94)}
+ .row{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+   padding:13px 14px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow)}
+ .row:active{background:#f6f8f5}
  .row .nm{flex:1;min-width:0}
- .row .nm b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .row .nm span{color:#9fb7a6;font-size:.8rem}
+ .row .nm b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.96rem}
+ .row .nm span{color:var(--muted);font-size:.78rem}
  .row .amt{font-weight:800;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
- .paused{color:#e0b34a}
- .empty,.err{color:#9fb7a6;text-align:center;padding:36px 16px;line-height:1.6}
- .err{color:#e2916a}
+ .paused{color:var(--amber)}
+ .chev{color:#c3ccc5;font-size:1.1rem;flex-shrink:0}
+ .empty,.err{color:var(--muted);text-align:center;padding:34px 16px;line-height:1.6}
+ .err{color:#b5482f}
  .find{display:flex;gap:8px;margin-bottom:10px}
- .find input{flex:1;min-width:0;padding:11px 13px;border-radius:11px;border:1px solid #2c4536;background:#16221b;color:#eef3ef;font-size:.95rem}
- .find select{padding:11px 10px;border-radius:11px;border:1px solid #2c4536;background:#16221b;color:#eef3ef;font-size:.85rem;max-width:44%}
+ .find input{flex:1;min-width:0;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);font-size:.95rem;box-shadow:var(--shadow)}
+ .find input:focus{outline:2px solid #bfe6cd;border-color:#bfe6cd}
+ .find select{padding:12px 10px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);font-size:.82rem;max-width:44%;box-shadow:var(--shadow)}
  .pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
- .pager button{flex:1;padding:11px;border:1px solid #2c4536;border-radius:11px;background:#16221b;color:#cfe0d5;font-weight:700;font-size:.9rem}
+ .pager button{flex:1;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);font-weight:700;font-size:.9rem;box-shadow:var(--shadow)}
  .pager button:disabled{opacity:.4}
- .pager .pinfo{color:#9fb7a6;font-size:.8rem;white-space:nowrap}
- .back{background:none;border:0;color:#8fdca9;font:inherit;font-size:.95rem;padding:6px 0;cursor:pointer}
- .card{background:#16221b;border:1px solid #24332b;border-radius:14px;padding:15px;margin-bottom:12px}
- .promise{border-left:4px solid #c9a227;background:#241f10}
- .promise b{color:#f0d68a}
- .bill{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #24332b;font-size:.92rem}
+ .pager .pinfo{color:var(--muted);font-size:.8rem;white-space:nowrap}
+ .back{background:none;border:0;color:var(--green);font:inherit;font-weight:700;font-size:.95rem;padding:6px 0;cursor:pointer}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:12px;box-shadow:var(--shadow)}
+ .promise{border-left:4px solid #d8a400;background:#fffaf0}
+ .promise b{color:#8a6300}
+ .bill{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);font-size:.92rem;font-variant-numeric:tabular-nums}
  .bill:last-child{border-bottom:0}
- .od{color:#e2916a;font-size:.82rem}
+ .od{color:#b5482f;font-size:.82rem}
  .callbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
-   min-height:52px;background:#25d366;color:#0a2e17;font-weight:800;font-size:1.02rem;
-   border-radius:14px;text-decoration:none;margin-bottom:12px}
+   min-height:54px;background:var(--wa);color:#0a2e17;font-weight:800;font-size:1.02rem;
+   border-radius:16px;text-decoration:none;margin-bottom:12px;box-shadow:0 8px 20px rgba(37,211,102,.2)}
  .callbtn:active{filter:brightness(.94)}
- .msg{color:#cdd9cf;font-size:.9rem;line-height:1.5;padding:9px 0;border-bottom:1px solid #24332b}
+ .msg{color:#3a4a41;font-size:.9rem;line-height:1.5;padding:10px 0;border-bottom:1px solid var(--line)}
  .msg:last-child{border-bottom:0}
- .msg span{display:block;color:#7f978a;font-size:.72rem;margin-top:3px}
- .login{padding:40px 22px;text-align:center}
- .login input{width:100%;padding:13px;border-radius:10px;border:1px solid #2c4536;background:#16221b;color:#eef3ef;font-size:1rem;margin:14px 0}
- .login button{width:100%;padding:13px;border:0;border-radius:10px;background:#46d67e;color:#10321f;font-weight:800;font-size:1rem}
- .ro{position:fixed;bottom:0;left:0;right:0;text-align:center;padding:8px calc(8px + env(safe-area-inset-bottom));background:#0f1512;color:#5f7568;font-size:.72rem;border-top:1px solid #1c261f}
+ .msg span{display:block;color:var(--muted);font-size:.72rem;margin-top:3px}
+ .login{padding:56px 24px;text-align:center;max-width:420px;margin:0 auto}
+ .logo{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,#0f9d58,#0a7d33);color:#fff;
+   font-weight:800;font-size:2rem;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 10px 24px rgba(10,125,51,.25)}
+ .login input{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);font-size:1rem;margin:16px 0;box-shadow:var(--shadow)}
+ .login button{width:100%;padding:14px;border:0;border-radius:12px;background:var(--green);color:#fff;font-weight:800;font-size:1rem}
+ .install{display:flex;align-items:center;gap:10px;background:#eef4ef;border:1px solid #d8e6dc;border-radius:14px;padding:11px 13px;margin-bottom:14px}
+ .install .it{flex:1;font-size:.84rem;color:#2f4a3a;line-height:1.4}
+ .install button{border:0;background:var(--green);color:#fff;font-weight:700;font-size:.82rem;padding:8px 12px;border-radius:9px;flex-shrink:0}
+ .install .x{background:none;color:#7c948a;font-size:1.1rem;padding:4px 6px}
+ .ro{position:fixed;bottom:0;left:0;right:0;text-align:center;padding:9px calc(9px + env(safe-area-inset-bottom));
+   background:rgba(255,255,255,.9);backdrop-filter:blur(8px);color:var(--muted);font-size:.72rem;border-top:1px solid var(--line)}
+ .ro a{color:var(--green);text-decoration:none;font-weight:700}
 </style></head><body>
 <div id="app"></div>
-<div class="ro">View only. Changes are made on the shop computer.</div>
+<div class="ro">View only &middot; changes are made on the shop computer &middot; <a href="/download">Get the computer app</a></div>
 <script>
 const app=document.getElementById('app');
 const qs=new URLSearchParams(location.search);
@@ -299,6 +335,24 @@ let TOKEN=qs.get('token')||localStorage.getItem('asva_m_token')||'';
 if(qs.get('token')){localStorage.setItem('asva_m_token',qs.get('token'));
   history.replaceState({},'',location.pathname);}
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
+function telNum(w){var t=(w||'').replace(/[^0-9]/g,'');
+  if(t.length===12&&t.slice(0,2)==='91')t=t.slice(2);
+  else if(t.length===13&&t.slice(0,3)==='091')t=t.slice(3);
+  return t;}
+// Install-to-home-screen (Android fires beforeinstallprompt; iOS shows a hint).
+let INSTALL_EVT=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();INSTALL_EVT=e;});
+function installBar(){
+  if(localStorage.getItem('asva_m_installed')||window.matchMedia('(display-mode: standalone)').matches)return '';
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const txt=ios?'Add ASVA to your home screen: tap Share, then Add to Home Screen.'
+              :'Add ASVA to your home screen for one-tap access.';
+  const btn=ios?'':'<button onclick="doInstall()">Add</button>';
+  return '<div class="install" id="installbar"><div class="it">'+txt+'</div>'+btn+
+    '<button class="x" onclick="dismissInstall()">&times;</button></div>';
+}
+async function doInstall(){ if(INSTALL_EVT){INSTALL_EVT.prompt();try{await INSTALL_EVT.userChoice;}catch(e){} INSTALL_EVT=null;} dismissInstall(); }
+function dismissInstall(){localStorage.setItem('asva_m_installed','1');var b=document.getElementById('installbar');if(b)b.remove();}
 async function api(path){
   const r=await fetch('/m/api/'+path+(path.includes('?')?'&':'?')+'token='+encodeURIComponent(TOKEN));
   if(r.status===401){logout();throw new Error('unauthorised');}
@@ -307,8 +361,9 @@ async function api(path){
 }
 function logout(){localStorage.removeItem('asva_m_token');TOKEN='';loginView();}
 function loginView(){
-  app.innerHTML='<div class="login"><div style="font-size:1.4rem;font-weight:800;letter-spacing:.04em">ASVA</div>'+
-   '<p style="color:#9fb7a6;line-height:1.6">Enter your ASVA code to see your shop. This is a view-only screen.</p>'+
+  app.innerHTML='<div class="login"><div class="logo">A</div>'+
+   '<div style="font-size:1.3rem;font-weight:800;letter-spacing:-.01em">ASVA</div>'+
+   '<p style="color:var(--muted);line-height:1.6">Enter your ASVA code to see your shop. This is a view-only screen.</p>'+
    '<input id="tk" placeholder="Your ASVA code" autocomplete="off">'+
    '<button onclick="doLogin()">Open my shop</button></div>';
 }
@@ -316,15 +371,38 @@ function doLogin(){const v=document.getElementById('tk').value.trim();
   if(!v)return;localStorage.setItem('asva_m_token',v);TOKEN=v;home();}
 let CHASE=[], chaseSearch='', chaseSort='chase', chasePage=0;
 const PER=50;
+function headerHtml(title, sub, back){
+  return '<header>'+(back?'<button class="back" onclick="home()">&#8592;</button>':'')+
+    '<div class="who"><div class="n">'+esc(title)+'</div><div class="s">'+esc(sub)+'</div></div>'+
+    (back?'':'<a class="getapp" href="/download">Get app</a>')+'</header>';
+}
 async function home(){
   app.innerHTML='<div class="empty">Loading...</div>';
   let d;try{d=await api('summary');}catch(e){
     if(e.message==='unauthorised')return;
     app.innerHTML='<div class="err">Could not reach ASVA. Check the internet and pull to refresh.</div>';return;}
   CHASE=d.chase||[]; chasePage=0;
+  // Chase today = the 3 most urgent active parties, each with a one-tap Call.
+  const active=CHASE.filter(p=>!p.paused).slice()
+    .sort((a,b)=>(b.overdue_days-a.overdue_days)||(b.amt-a.amt));
+  const top=active.slice(0,3);
+  let today='';
+  if(top.length){
+    today='<div class="today"><div class="th"><b>Chase today</b><span>'+active.length+' to chase</span></div>'+
+      top.map((p,i)=>{
+        const t=telNum(p.whatsapp);
+        const od=p.overdue_days>0?(p.overdue_days+' days overdue'):'due now';
+        return '<div class="trow"><div class="rk">'+(i+1)+'</div>'+
+          '<div class="nm" onclick="party('+JSON.stringify(p.id).replace(/"/g,'&quot;')+')"><b>'+esc(p.name)+'</b><span>'+od+'</span></div>'+
+          '<div class="amt">&#8377;'+esc(p.outstanding)+'</div>'+
+          (t?'<a class="callmini" href="tel:'+esc(t)+'" title="Call">&#128222;</a>':'')+
+        '</div>';
+      }).join('')+'</div>';
+  }
   app.innerHTML=
-   '<header><div class="n">'+esc(d.business_name)+'</div><div class="s">Tap a party to see details</div></header>'+
+   headerHtml(d.business_name,'Your live collections',false)+
    '<div class="wrap">'+
+   installBar()+
    ((d.recovered_this_month && d.recovered_this_month!=='0')
      ? '<div class="recov">&#8377;'+esc(d.recovered_this_month)+' <span>recovered in '+esc(d.recovered_month||'')+'</span></div>'
      : '')+
@@ -333,7 +411,8 @@ async function home(){
      '<div class="kpi"><div class="v">'+d.parties_owing+'</div><div class="l">Parties owing</div></div>'+
      '<div class="kpi"><div class="v">'+d.on_promise+'</div><div class="l">On promise</div></div>'+
    '</div>'+
-   '<div class="sect">Who to chase</div>'+
+   today+
+   '<div class="sect">All parties</div>'+
    '<div class="find">'+
      '<input id="q" placeholder="Search a party by name" autocomplete="off" value="'+esc(chaseSearch)+'">'+
      '<select id="srt">'+
@@ -392,7 +471,7 @@ function rowHtml(p){
   const od=p.overdue_days>0?('<span>'+p.overdue_days+' days overdue</span>'):(p.paused?'<span class="paused">Paused &middot; promised</span>':'<span>not overdue</span>');
   return '<div class="row" onclick="party('+JSON.stringify(p.id).replace(/"/g,'&quot;')+')">'+
    '<div class="nm"><b>'+esc(p.name)+'</b>'+od+'</div>'+
-   '<div class="amt">&#8377;'+esc(p.outstanding)+'</div></div>';
+   '<div class="amt">&#8377;'+esc(p.outstanding)+'</div><div class="chev">&#8250;</div></div>';
 }
 async function party(id){
   app.innerHTML='<div class="empty">Loading...</div>';
@@ -405,16 +484,12 @@ async function party(id){
     const head=p.kind==='paid_claim'?'Customer says they have already paid':
       (p.promise_date?('Reminders paused until '+esc(p.promise_date)):('Reminders paused until '+esc(p.hold_until)));
     promise='<div class="card promise"><b>&#9208; '+head+'</b>'+
-      (p.said?'<div style="margin-top:8px;color:#d8c58a">&ldquo;'+esc(p.said)+'&rdquo;'+(p.when?(' &middot; '+esc(p.when)):'')+'</div>':'')+'</div>';
+      (p.said?'<div style="margin-top:8px;color:#8a6300">&ldquo;'+esc(p.said)+'&rdquo;'+(p.when?(' &middot; '+esc(p.when)):'')+'</div>':'')+'</div>';
   }
   let bills=d.open_bills.map(b=>'<div class="bill"><div>'+esc(b.invoice)+
     (b.overdue_days>0?(' <span class="od">'+b.overdue_days+'d</span>'):'')+
-    '</div><div>&#8377;'+esc(b.amount)+'</div></div>').join('')||'<div style="color:#9fb7a6">No open bills.</div>';
-  // Calling: dial the LOCAL 10-digit number (strip the 91 country code) so the
-  // dialer does not mangle it. WhatsApp messaging keeps the 91 elsewhere.
-  let tel=(d.whatsapp||'').replace(/[^0-9]/g,'');
-  if(tel.length===12 && tel.slice(0,2)==='91') tel=tel.slice(2);
-  else if(tel.length===13 && tel.slice(0,3)==='091') tel=tel.slice(3);
+    '</div><div>&#8377;'+esc(b.amount)+'</div></div>').join('')||'<div style="color:var(--muted)">No open bills.</div>';
+  const tel=telNum(d.whatsapp);
   const call=tel?('<a class="callbtn" href="tel:'+esc(tel)+'">&#128222; Call '+esc(d.name)+'</a>'):'';
   let recent='';
   if(d.recent&&d.recent.length){
@@ -422,8 +497,7 @@ async function party(id){
       d.recent.map(m=>'<div class="msg">&ldquo;'+esc(m.text)+'&rdquo;'+(m.when?('<span>'+esc(m.when)+'</span>'):'')+'</div>').join('')+'</div>';
   }
   app.innerHTML=
-   '<header><button class="back" onclick="home()">&#8592; Back</button>'+
-     '<div class="n">'+esc(d.name)+'</div><div class="s">'+esc(d.whatsapp||'no number')+'</div></header>'+
+   headerHtml(d.name, d.whatsapp||'no number', true)+
    '<div class="wrap">'+
    '<div class="kpis"><div class="kpi"><div class="v">&#8377;'+esc(d.outstanding)+'</div><div class="l">Outstanding</div></div>'+
      '<div class="kpi"><div class="v">'+(d.reminders_on?'ON':'OFF')+'</div><div class="l">Reminders</div></div></div>'+

@@ -3134,6 +3134,9 @@ function flash(msg){{
   setTimeout(()=>{{f.classList.remove('on');}}, 4000);
 }}
 async function load(){{
+  // Never refresh while the owner is filling the confirm popup - re-rendering
+  // behind it closes the open date/account dropdown and loses their choice.
+  if(document.getElementById('cf').style.display==='flex') return;
   let prev = PREV_INFLIGHT;
   try{{
     const r = await fetch('/admin/payments/data?token='+encodeURIComponent(TOKEN));
@@ -3152,11 +3155,12 @@ async function load(){{
     prev.forEach(id=>{{ if(!now.has(id) && !failedNow.has(id)) posted++; }});
     if(posted>0) flash('\\u2713 '+posted+' payment'+(posted>1?'s':'')+' posted to Tally.');
   }}
-  PREV_INFLIGHT = new Set((DATA.pending||[]).filter(q=>q.status==='pending'||q.status==='confirmed').map(q=>q.id));
+  PREV_INFLIGHT = new Set((DATA.pending||[]).filter(q=>q.status==='confirmed'||q.status==='posting').map(q=>q.id));
   render();
 }}
 function statusChip(s){{
-  if(s==='confirmed') return '<span class="chip wait">Posting to Tally...</span>';
+  if(s==='confirmed') return '<span class="chip wait">Waiting to post</span>';
+  if(s==='posting')   return '<span class="chip wait">Posting to Tally...</span>';
   if(s==='failed')    return '<span class="chip bad">Failed</span>';
   return '';
 }}
@@ -3180,11 +3184,11 @@ function render(){{
       (q.status==='pending'||q.status==='failed'
         ? '<button class="mini" onclick=\\'enterPending('+JSON.stringify(q.id)+')\\'>Review &amp; post</button>'+
           '<button class="mini ghost" onclick=\\'cancelPending('+JSON.stringify(q.id)+')\\'>Remove</button>'
-        : '')+
+        : '<button class="mini ghost" onclick=\\'cancelPending('+JSON.stringify(q.id)+')\\'>Remove</button>')+
     '</div></div>'
   )).join('') : '<div class="empty">Nothing waiting to post. Reply PAID &lt;name&gt; on WhatsApp, or press Enter payment on a promise.</div>';
 
-  const posting = Q.filter(q=>q.status==='confirmed').length;
+  const posting = Q.filter(q=>q.status==='confirmed'||q.status==='posting').length;
   const cP = P.length?(' <span class="cnt">'+P.length+'</span>'):'';
   const cQ = Q.length?(' <span class="cnt">'+Q.length+'</span>'):'';
   const postingNote = posting?('<div class="postnote">&#8635; Posting '+posting+' receipt'+(posting>1?'s':'')+' to Tally...</div>'):'';

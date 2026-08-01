@@ -232,7 +232,9 @@ async def run_receipts_drain(config: dict, push_ledgers: bool = False) -> int:
         await _push_deposit_ledgers(config)
     posted = 0
     async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}) as http:
-        r = await http.get(f"{base}/tally/receipts/confirmed", params={
+        # CLAIM (not just read): each confirmed receipt flips to 'posting' and is
+        # returned once, so a lost report can never make us post it to Tally twice.
+        r = await http.post(f"{base}/tally/receipts/claim", json={
             "business_id": config['business_id'], "agent_token": config['agent_token']})
         if r.status_code != 200:
             return 0

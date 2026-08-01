@@ -53,6 +53,28 @@
   body.dark #whatsnewmodal .wncard { background: #17211b; }
   body.dark #whatsnewmodal h3 { color: #eef3ef; }
   body.dark #whatsnewmodal li { color: #ccd8d0; }
+  /* Interactive tour (coach marks) */
+  #tourbtn { background: #294d38; color: #fff; border: 0; border-radius: 8px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
+  #tourbtn:hover { background: #326049; }
+  #tourmask { position: fixed; inset: 0; z-index: 299; background: rgba(9,17,13,.62); display: none; }
+  #tourspot { position: fixed; z-index: 300; border-radius: 12px; box-shadow: 0 0 0 4px rgba(70,214,126,.9), 0 0 0 9999px rgba(9,17,13,.62); pointer-events: none; transition: all .22s cubic-bezier(.4,0,.2,1); display: none; }
+  #tourpop { position: fixed; z-index: 301; max-width: 330px; background: #fff; color: #16211b; border-radius: 16px; padding: 18px 18px 14px; box-shadow: 0 24px 60px rgba(0,0,0,.4); display: none; transition: left .22s cubic-bezier(.4,0,.2,1), top .22s cubic-bezier(.4,0,.2,1); }
+  #tourpop .tbar { height: 4px; border-radius: 4px; background: #e7ebe7; overflow: hidden; margin: -4px 0 12px; }
+  #tourpop .tbar > i { display: block; height: 100%; background: #0a7d33; border-radius: 4px; transition: width .25s ease; }
+  #tourpop .tstep { font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: #789; font-weight: 700; margin-bottom: 6px; }
+  #tourpop h4 { margin: 0 0 6px; font-size: 1.05rem; color: #14201a; }
+  #tourpop p { margin: 0 0 14px; font-size: .9rem; line-height: 1.5; color: #46554c; }
+  #tourpop .trow2 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  #tourpop .tskip { background: none; border: 0; color: #8a998f; font: inherit; font-size: .84rem; cursor: pointer; padding: 6px 2px; }
+  #tourpop .tnav { display: flex; gap: 8px; }
+  #tourpop .tnav button { border: 0; border-radius: 8px; padding: 8px 16px; font-weight: 700; font-size: .88rem; cursor: pointer; }
+  #tourpop .tback { background: #eef1ee; color: #46554c; }
+  #tourpop .tnext { background: #0a7d33; color: #fff; }
+  body.dark #tourpop { background: #17211b; color: #eef3ef; }
+  body.dark #tourpop h4 { color: #eef3ef; }
+  body.dark #tourpop p { color: #b9c6bd; }
+  body.dark #tourpop .tback { background: #24332b; color: #cfe0d5; }
+  body.dark #tourpop .tbar { background: #24332b; }
   .langtoggle { display: inline-flex; flex-shrink: 0; }
   .langtoggle button { border: 1px solid #EAEAEA; background: #F7F6F3; color: #787774; padding: 3px 12px; cursor: pointer; font-size: .78rem; font-weight: 600; }
   .langtoggle button:first-child { border-radius: 6px 0 0 6px; }
@@ -189,6 +211,7 @@
     <div id="topbar">
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
       <div style="display:flex;align-items:center;gap:10px">
+        <button id="tourbtn" onclick="startTour()" title="Take a quick tour of ASVA">? Tour</button>
         <button id="pagereload" onclick="reloadActive()" title="Refresh this page">&#8635; Reload</button>
         <button id="updchk" onclick="checkForUpdate()" title="Check for a new ASVA version">&#8681; Check update</button>
         <button id="phonebtn" onclick="openPhoneApp()" title="Open ASVA on your phone">&#128241; Phone app</button>
@@ -213,6 +236,21 @@
         <h3 id="wntitle">What's new</h3>
         <ul id="wnlist"></ul>
         <button class="pclose" onclick="document.getElementById('whatsnewmodal').style.display='none'">Got it</button>
+      </div>
+    </div>
+    <div id="tourmask"></div>
+    <div id="tourspot"></div>
+    <div id="tourpop">
+      <div class="tbar"><i id="tourbar"></i></div>
+      <div class="tstep" id="tourstep"></div>
+      <h4 id="tourtitle"></h4>
+      <p id="tourbody"></p>
+      <div class="trow2">
+        <button class="tskip" onclick="endTour()">Skip tour</button>
+        <div class="tnav">
+          <button class="tback" id="tourback" onclick="tourGo(-1)">Back</button>
+          <button class="tnext" id="tournext" onclick="tourGo(1)">Next</button>
+        </div>
       </div>
     </div>
     <div id="syncbar"><div class="fill"></div></div>
@@ -587,19 +625,29 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
   const cb = document.getElementById('autostart');
   cb.checked = await window.asva.getAutostart();
   cb.onchange = async () => { cb.checked = await window.asva.setAutostart(cb.checked); };
-  showWhatsNewIfUpdated();          // one-time "what's new" after an update
+  // On an update, show what's new. On a first-ever launch (nothing shown), run
+  // the guided tour so a new owner learns the app hands-on.
+  const shownWhatsNew = showWhatsNewIfUpdated();
+  if (!shownWhatsNew) maybeTour();
 })();
 
 // After an update installs and the new version launches, show a one-time
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.8.7': [
+    'Recording a payment into Tally is rock solid now: one tap, no double entries, and the form no longer refreshes while you fill it.',
+    'When a name matches several parties, reply with a number to pick the right one. Mistyped commands get a suggestion.',
+    'Phone app redesigned, cleaner, with a “Chase today” list and one-tap call.',
+    'Take a quick guided tour anytime from the “? Tour” button up top.',
+    'Clearer English lead replies and steadier reminders.',
+  ],
   '1.8.6': [
-    'Phone app now shows each party’s promise-to-pay and recent replies, with a tap-to-call button.',
-    'The who-to-chase list has search, sort and pages.',
-    'Enter a customer’s payment straight into Tally from a confirm popup.',
-    'Clearer language handling and a clickable renew link.',
-    'One-tap "Check for updates" and a "what’s new" note on every update.',
+    'New Payments tab: confirm a customer’s payment and post it into Tally in one tap.',
+    'When a name matches several parties, reply with a number to pick the right one.',
+    'Phone app redesigned, cleaner, with a “Chase today” list and one-tap call.',
+    'Take a quick guided tour anytime from the “? Tour” button up top.',
+    'Clearer language, a clickable renew link, and steadier reminders.',
   ],
   '1.8.5': [
     'Replies in your language (English or Hinglish), in the app and on WhatsApp.',
@@ -616,13 +664,85 @@ function showWhatsNewIfUpdated() {
     localStorage.setItem('asva_seen_version', v);
     if (!seen || seen === v) return;             // first run ever, or no change
     const notes = WHATS_NEW[v];
-    if (!notes || !notes.length) return;
+    if (!notes || !notes.length) return false;
     const list = notes.map(n => '<li>' + esc(n) + '</li>').join('');
     document.getElementById('wnlist').innerHTML = list;
     document.getElementById('wntitle').textContent = 'What’s new in ASVA ' + v;
     document.getElementById('whatsnewmodal').style.display = 'flex';
-  } catch (e) {}
+    return true;
+  } catch (e) { return false; }
 }
+
+// ── Interactive tour (coach marks) ─────────────────────────────────────────
+// A deep, clean walk-through: it actually OPENS each tab as it explains it, so
+// the owner sees the real screen behind the spotlight. Skippable, shown once,
+// and re-openable anytime from the "? Tour" button. Esc skips; arrows navigate.
+const TOUR = [
+  { t: 'Welcome to ASVA', b: 'This is your recovery control room. A quick guided tour, under a minute. You can skip anytime, and reopen it from the “? Tour” button up top.' },
+  { sel: '.nav[data-v="dash"]', view: 'dash', t: 'Dashboard', b: 'Everyone who owes you, with their bills and dues. This is where you start each day, see who to chase, and record a payment.' },
+  { sel: '.nav[data-v="reminders"]', view: 'reminders', t: 'Reminders', b: 'Choose who gets reminded, when, and in which language. Group parties into batches, add holidays and early-pay discounts. ASVA sends them for you from your own WhatsApp.' },
+  { sel: '.nav[data-v="payments"]', view: 'payments', t: 'Payments', b: 'When a customer says they paid, it appears here. Check the amount and the deposit account, then post the receipt straight into Tally in one tap. ASVA never posts on its own.' },
+  { sel: '.nav[data-v="analytics"]', view: 'analytics', t: 'Analytics', b: 'Your collections over time, ageing, and biggest debtors, at a glance.' },
+  { sel: '.nav[data-v="accounts"]', view: 'accounts', t: 'Accounts', b: 'Your UPI ids and bank details. These go on the reminders so customers can pay you easily.' },
+  { sel: '.nav[data-v="setup"]', view: 'setup', t: 'WhatsApp Setup', b: 'Connect your shop’s WhatsApp by scanning a QR here. Every bill and reminder goes from your own number.' },
+  { sel: '#reloadbtn', t: 'Tally refresh', b: 'Pull the very latest from Tally whenever you want. A full refresh takes about 2 minutes; your reminders keep working meanwhile.' },
+  { sel: '#phonebtn', t: 'ASVA on your phone', b: 'Scan a QR to open ASVA on your phone: your live dues, who to chase, and one-tap calling, anywhere.' },
+  { sel: '#updchk', t: 'Always up to date', b: 'ASVA updates itself. Tap here anytime to check for the newest version.' },
+  { t: 'On WhatsApp too', b: 'Send these to your ASVA number anytime:\n\nLIST — who owes you\nCHECK Ramesh — one party’s balance\nPAID Ramesh — record a payment\nREMIND Ramesh — nudge one party now\nPROMISES — who said they will pay\n\nSend HELP anytime. That’s it, you’re ready!' },
+];
+let tourI = 0;
+function startTour() { tourI = 0; document.getElementById('tourpop').style.display = 'block'; showTourStep(); }
+function tourGo(d) { tourI += d; if (tourI >= TOUR.length) { endTour(); return; } if (tourI < 0) tourI = 0; showTourStep(); }
+function endTour() {
+  localStorage.setItem('asva_tour_done', '1');
+  ['tourpop', 'tourspot', 'tourmask'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
+  try { show('dash'); } catch (e) {}
+}
+function showTourStep() {
+  const s = TOUR[tourI], spot = document.getElementById('tourspot'),
+    pop = document.getElementById('tourpop'), mask = document.getElementById('tourmask');
+  if (s.view) { try { show(s.view); } catch (e) {} }   // open the real tab behind the spotlight
+  document.getElementById('tourbar').style.width = Math.round(((tourI + 1) / TOUR.length) * 100) + '%';
+  document.getElementById('tourstep').textContent = 'Step ' + (tourI + 1) + ' of ' + TOUR.length;
+  document.getElementById('tourtitle').textContent = s.t;
+  document.getElementById('tourbody').textContent = s.b;
+  document.getElementById('tourback').style.visibility = tourI === 0 ? 'hidden' : 'visible';
+  document.getElementById('tournext').textContent = (tourI === TOUR.length - 1) ? 'Done' : 'Next';
+  const el = s.sel ? document.querySelector(s.sel) : null;
+  // Wait a tick so a just-switched view has laid out before we measure.
+  setTimeout(() => {
+    if (el) {
+      const r = el.getBoundingClientRect(), pad = 6;
+      mask.style.display = 'none';
+      spot.style.display = 'block';
+      spot.style.left = (r.left - pad) + 'px'; spot.style.top = (r.top - pad) + 'px';
+      spot.style.width = (r.width + pad * 2) + 'px'; spot.style.height = (r.height + pad * 2) + 'px';
+      pop.style.display = 'block';
+      const pw = Math.min(330, window.innerWidth - 24), ph = pop.offsetHeight || 190;
+      let left, top;
+      if (r.right < window.innerWidth * 0.5) { left = r.right + 18; top = Math.max(12, r.top - 8); }
+      else { left = Math.max(12, r.left); top = r.bottom + 16; }
+      if (left + pw > window.innerWidth - 12) left = window.innerWidth - 12 - pw;
+      if (top + ph > window.innerHeight - 12) top = Math.max(12, window.innerHeight - 12 - ph);
+      pop.style.left = left + 'px'; pop.style.top = top + 'px';
+    } else {
+      spot.style.display = 'none';
+      mask.style.display = 'block';
+      pop.style.display = 'block';
+      const pw = Math.min(360, window.innerWidth - 24), ph = pop.offsetHeight || 200;
+      pop.style.left = Math.max(12, (window.innerWidth - pw) / 2) + 'px';
+      pop.style.top = Math.max(24, (window.innerHeight - ph) / 2) + 'px';
+    }
+  }, s.view ? 90 : 0);
+}
+window.addEventListener('resize', () => { if (document.getElementById('tourpop').style.display === 'block') showTourStep(); });
+document.addEventListener('keydown', e => {
+  if (document.getElementById('tourpop').style.display !== 'block') return;
+  if (e.key === 'Escape') endTour();
+  else if (e.key === 'ArrowRight') tourGo(1);
+  else if (e.key === 'ArrowLeft') tourGo(-1);
+});
+function maybeTour() { if (!localStorage.getItem('asva_tour_done')) setTimeout(startTour, 600); }
 
 window.asva.onStatus((s) => {
   // ── Top bar: Tally sync freshness + reload-watch ──

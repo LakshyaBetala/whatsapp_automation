@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.8.6",
+  "version": "1.8.7",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "New Payments tab: see who says they have paid, then confirm the amount and account to post the receipt straight into Tally.\nPhone app now shows each party's promise-to-pay and recent replies, with a tap-to-call button.\nThe who-to-chase list has search, sort and pages.\nReminders can lead with a chosen UPI or your bank account, and always carry your bank details so customers stop asking.\nClearer language handling, a clickable renew link, and a what's-new note after every update."
+      "releaseNotes": "New Payments tab: confirm a customer's payment and post it straight into Tally in one tap (no more double entries).\nWhen a name matches several parties, reply with a number to pick the right one; mistyped commands get a suggestion.\nRedesigned phone app: cleaner, with a Chase-today list and one-tap call.\nTake a guided in-app tour anytime from the ? Tour button.\nClearer English lead replies and steadier reminders."
     },
     "files": [
       "main.js",

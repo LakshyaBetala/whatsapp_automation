@@ -139,14 +139,7 @@ async def push_deposit_ledgers(payload: DepositLedgersPayload):
     return {"stored": len(payload.ledgers or [])}
 
 
-@router.get("/receipts/confirmed")
-async def receipts_confirmed(business_id: uuid.UUID, agent_token: str):
-    """Owner-approved receipts the agent must write into Tally, oldest first.
-    The agent does the exact FIFO bill allocation against Tally's own open bills
-    at post time, so the backend only needs to hand over party + amount + deposit."""
-    db = _verify_token(business_id, agent_token)
-    from app.services import receipts_queue as rq
-    rows = rq.list_confirmed(db, str(business_id))
+def _receipt_out(rows: list) -> dict:
     return {"receipts": [{
         "id": r["id"],
         "party_ledger": r["party_ledger"],
@@ -155,6 +148,30 @@ async def receipts_confirmed(business_id: uuid.UUID, agent_token: str):
         "deposit_ledger": r.get("deposit_ledger") or "Cash",
         "receipt_date": str(r.get("receipt_date") or "")[:10],
     } for r in rows]}
+
+
+@router.get("/receipts/confirmed")
+async def receipts_confirmed(business_id: uuid.UUID, agent_token: str):
+    """Read-only peek at owner-approved receipts (does NOT claim them)."""
+    db = _verify_token(business_id, agent_token)
+    from app.services import receipts_queue as rq
+    return _receipt_out(rq.list_confirmed(db, str(business_id)))
+
+
+class ClaimPayload(BaseModel):
+    business_id: uuid.UUID
+    agent_token: str
+
+
+@router.post("/receipts/claim")
+async def receipts_claim(payload: ClaimPayload):
+    """The agent CLAIMS confirmed receipts for posting: they flip confirmed ->
+    posting and are returned once. A claimed (posting) receipt is never handed out
+    again, so a lost report never causes a double post into Tally. The agent then
+    posts each and reports posted/failed."""
+    db = _verify_token(payload.business_id, payload.agent_token)
+    from app.services import receipts_queue as rq
+    return _receipt_out(rq.claim_confirmed(db, str(payload.business_id)))
 
 
 class ReceiptReportPayload(BaseModel):

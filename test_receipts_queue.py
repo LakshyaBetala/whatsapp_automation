@@ -232,3 +232,40 @@ def test_deposit_ledgers_roundtrip_and_cash_fallback():
 
 def test_get_deposit_ledgers_defaults_to_cash_when_empty():
     assert rq.get_deposit_ledgers(FakeDB([{"id": "b1"}]), "b1") == ["Cash"]
+
+
+# ── double-post guards ────────────────────────────────────────────────────────
+def test_enqueue_dedups_open_receipt_for_same_client():
+    # Two entry points (PAID + "Enter payment") for the SAME party must not create
+    # two open receipts - the second updates the first (the double-post cause).
+    rows = [{"id": "p1", "business_id": "b1", "client_id": "c1", "status": "pending",
+             "amount": 5000.0, "deposit_ledger": "Cash"}]
+    db = FakeDB(rows)
+    out = rq.create_pending(db, "b1", client_id="c1", party_ledger="RAMESH",
+                            party_display="Ramesh", amount=4800, deposit_ledger="HDFC")
+    assert out["id"] == "p1"                       # updated the existing row
+    assert rows[0]["amount"] == 4800.0 and rows[0]["deposit_ledger"] == "HDFC"
+    assert len([r for r in rows if r["client_id"] == "c1"]) == 1   # still ONE row
+    assert db.inserted == []                       # nothing new inserted
+
+
+def test_enqueue_after_posted_creates_a_fresh_row():
+    # A posted receipt does not block a genuine second payment later.
+    rows = [{"id": "p1", "business_id": "b1", "client_id": "c1", "status": "posted",
+             "amount": 5000.0}]
+    db = FakeDB(rows)
+    out = rq.create_pending(db, "b1", client_id="c1", party_ledger="R",
+                            party_display="R", amount=1000)
+    assert out["status"] == "pending" and db.inserted            # a new row was made
+
+
+def test_claim_confirmed_flips_to_posting_once():
+    rows = [{"id": "p1", "business_id": "b1", "status": "confirmed", "amount": 1},
+            {"id": "p2", "business_id": "b1", "status": "confirmed", "amount": 2},
+            {"id": "p3", "business_id": "b1", "status": "pending", "amount": 3}]
+    db = FakeDB(rows)
+    claimed = rq.claim_confirmed(db, "b1")
+    assert {r["id"] for r in claimed} == {"p1", "p2"}
+    assert rows[0]["status"] == "posting" and rows[1]["status"] == "posting"
+    # a second claim returns nothing (already posting -> never posted twice)
+    assert rq.claim_confirmed(db, "b1") == []

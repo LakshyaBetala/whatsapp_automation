@@ -68,6 +68,28 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
     amt = money(amount)
     if amt <= 0:
         raise ValueError("amount must be positive")
+    rdate = receipt_date or _dt.datetime.now(IST).date().isoformat()
+    # Dedup: never keep two OPEN receipts for the same party. If the owner reaches
+    # the same payment from two places (PAID on WhatsApp AND "Enter payment" in
+    # the app), update the existing open row instead of creating a second one -
+    # this is what caused a payment to post to Tally twice.
+    if client_id:
+        try:
+            existing = (db.table("pending_receipts").select("id")
+                        .eq("business_id", business_id).eq("client_id", client_id)
+                        .in_("status", ["pending", "confirmed"])
+                        .order("created_at", desc=True).limit(1).execute()).data
+            if existing:
+                pid = existing[0]["id"]
+                patch = {"party_ledger": party_ledger,
+                         "party_display": party_display or party_ledger,
+                         "amount": float(amt), "deposit_ledger": deposit_ledger or "CASH",
+                         "receipt_date": rdate, "status": "pending"}
+                r = (db.table("pending_receipts").update(patch)
+                     .eq("id", pid).execute())
+                return (r.data or [{**patch, "id": pid}])[0]
+        except Exception:
+            log.debug("dedup check failed (business %s) - inserting fresh", business_id, exc_info=True)
     row = {
         "business_id": business_id,
         "client_id": client_id,
@@ -75,7 +97,7 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
         "party_display": party_display or party_ledger,
         "amount": float(amt),
         "deposit_ledger": deposit_ledger or "CASH",
-        "receipt_date": receipt_date or _dt.datetime.now(IST).date().isoformat(),
+        "receipt_date": rdate,
         "status": "pending",
     }
     try:
@@ -153,7 +175,7 @@ def list_for_owner(db, business_id: str) -> list[dict]:
     try:
         r = (db.table("pending_receipts").select("*")
              .eq("business_id", business_id)
-             .in_("status", ["pending", "confirmed", "failed"])
+             .in_("status", ["pending", "confirmed", "posting", "failed"])
              .order("created_at", desc=True).execute())
         return r.data or []
     except Exception:
@@ -170,6 +192,23 @@ def list_confirmed(db, business_id: str) -> list[dict]:
         return r.data or []
     except Exception:
         log.debug("list_confirmed failed (business %s)", business_id, exc_info=True)
+        return []
+
+
+def claim_confirmed(db, business_id: str) -> list[dict]:
+    """Atomically CLAIM the confirmed receipts for posting: flip confirmed ->
+    posting and return them. A 'posting' row is never handed out again, so even if
+    the agent's post succeeds but the follow-up report is lost, the next drain will
+    NOT post it a second time. This is the guard against a receipt hitting Tally
+    twice."""
+    try:
+        r = (db.table("pending_receipts")
+             .update({"status": "posting"})
+             .eq("business_id", business_id).eq("status", "confirmed")
+             .execute())
+        return r.data or []
+    except Exception:
+        log.exception("claim_confirmed failed (business %s)", business_id)
         return []
 
 
