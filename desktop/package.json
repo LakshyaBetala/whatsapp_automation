@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.8.9",
+  "version": "1.8.10",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "Steadier WhatsApp: a brief hiccup no longer logs you out or forces a new QR scan - it reconnects on its own (both the shop and the ASVA bot number).\nCustomer replies now actually reach ASVA, so 'paid' messages and payment screenshots land in the Payments tab automatically - amount read from the screenshot, matched to the customer by their number.\nReminders, bills and Send Now go out in the evening too (window 10am-8pm; Send Now and fresh bills go instantly).\nDaily digest: who-to-chase (up to 5) with phone numbers, plus a month-end 'collected this month'."
+      "releaseNotes": "Your shop's own WhatsApp number now never auto-replies to a customer. When a customer messages it, ASVA quietly checks whether that number is one of your customers and whether they still owe money, and only then reads a 'paid' message or payment screenshot, matches the amount to the party, and drops it into your Payments tab - telling you privately. Customers only ever hear from you, never a bot.\nThe ASVA assistant number (LIST, PAID, BILL) works exactly as before.\nAlso carries: steadier WhatsApp reconnect, evening send window with instant Send Now, and the who-to-chase daily summary."
     },
     "files": [
       "main.js",

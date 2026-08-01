@@ -635,6 +635,11 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.8.10': [
+    'Your shop WhatsApp never auto-replies to customers now. When a customer messages it, ASVA stays silent to them and only works behind the scenes.',
+    'It checks the number against your customers and their outstanding, then reads a “paid” message or payment screenshot straight into your Payments tab, and tells you privately.',
+    'Customers only ever hear from you, never from a bot. The ASVA assistant number (LIST, PAID, BILL) still works exactly as before.',
+  ],
   '1.8.9': [
     'Steadier WhatsApp: a brief hiccup no longer logs you out or asks for a new QR scan; it reconnects on its own.',
     'Customer replies actually reach ASVA now, so “paid” messages and payment screenshots land in your Payments tab automatically (amount read, matched by number).',

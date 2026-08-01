@@ -43,8 +43,10 @@ DOWNLOAD_FILE = f"{APP_BASE}/download/ASVA-Setup.exe"
 # The version of the installer being served, and a short honest changelog (newest
 # first). Shown on the download page ("you are downloading X") and the What's new
 # section. Bump DOWNLOAD_VERSION and prepend a row here on every shipped build.
-DOWNLOAD_VERSION = "1.8.9"
+DOWNLOAD_VERSION = "1.8.10"
 VERSIONS = [
+    ("1.8.10", "Your shop WhatsApp stays quiet with customers",
+     "Your shop's own WhatsApp number now never auto-replies to a customer. When someone messages it, ASVA quietly checks whether that number is one of your customers and whether they still owe you money, and only then reads a 'paid' message or a payment screenshot, matches the amount to that party, and drops it into your Payments tab, telling you privately. Your customers only ever hear from you, never from a bot. The ASVA assistant number (where you type LIST, PAID and BILL) keeps working exactly as before."),
     ("1.8.9", "Steadier WhatsApp, and payments capture themselves",
      "WhatsApp now rides out a brief hiccup on its own instead of logging out and asking for a new QR scan (both the shop number and the ASVA bot number). Customer replies now reach ASVA reliably, so when someone messages that they paid, or sends a payment screenshot, ASVA reads the amount, matches the customer by their number, and drops it into your Payments tab ready to post into Tally. Reminders, bills and Send Now also go out in the evening now, and the daily summary lists up to five people worth calling with their numbers, plus a month-end total collected."),
     ("1.8.8", "New customers sync on their own",

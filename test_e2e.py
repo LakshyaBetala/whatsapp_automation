@@ -136,13 +136,64 @@ def test_owner_text_bill_creates_bill_and_client(monkeypatch):
     assert fake.inserts["bills"][0]["source"] == "manual"
 
 
-def test_shop_channel_stranger_greeting_gets_customer_help(monkeypatch):
-    """On the SHOP number a stranger greeting still gets the customer help (not
-    the owner-only line) - the two channels stay distinct."""
+def test_shop_channel_never_replies_to_a_stranger(monkeypatch):
+    """HARD RULE: the SHOP (customer-facing) number NEVER auto-replies. A stranger
+    who is not one of this shop's customers is noted and ignored in silence - no
+    greeting, no menu, no owner-only line."""
     _patch(monkeypatch, {"businesses": [], "clients": []})
     from app.services import bot
     reply = _run(bot.handle("910000000000", "HI", channel="shop"))
-    assert "HISAB" in reply.upper()
+    assert reply == ""
+
+
+def test_shop_channel_never_runs_owner_commands(monkeypatch):
+    """Owner commands (LIST/PAID/...) belong to the bot number. Even the owner's
+    own number, if it messages the SHOP number, gets no owner menu - the shop
+    number is customer-facing and silent."""
+    _patch(monkeypatch, {"businesses": [BIZ], "clients": []})
+    from app.services import bot
+    reply = _run(bot.handle(OWNER, "LIST", channel="shop"))
+    assert reply == ""
+
+
+def test_shop_channel_known_customer_with_dues_captures_silently(monkeypatch):
+    """A KNOWN customer who still owes money: their reply is captured silently
+    (feeds the owner's Payments tab / nudges the owner) and the customer is NOT
+    replied to."""
+    client = {"id": "c1", "name": "Ramesh", "business_id": "biz1",
+              "tally_ledger_name": "Ramesh"}
+    _patch(monkeypatch, {"businesses": [], "clients": [client],
+                         "bills": [{"outstanding": 500, "status": "pending"}]})
+    from app.services import bot
+    calls = []
+
+    async def _fake_capture(c, t, *, media_b64=None, media_type="image/jpeg"):
+        calls.append((c.get("id"), t))
+        return True
+
+    monkeypatch.setattr(bot.replies, "capture_reply", _fake_capture)
+    reply = _run(bot.handle("919000000001", "PAID 500", channel="shop"))
+    assert reply == ""                       # customer never gets a reply
+    assert calls == [("c1", "PAID 500")]     # but capture ran
+
+
+def test_shop_channel_known_customer_with_no_dues_is_ignored(monkeypatch):
+    """A known customer with nothing outstanding is ignored - capture does not
+    run, and (of course) nothing is replied to them."""
+    client = {"id": "c1", "name": "Ramesh", "business_id": "biz1",
+              "tally_ledger_name": "Ramesh"}
+    _patch(monkeypatch, {"businesses": [], "clients": [client], "bills": []})
+    from app.services import bot
+    calls = []
+
+    async def _fake_capture(c, t, *, media_b64=None, media_type="image/jpeg"):
+        calls.append((c.get("id"), t))
+        return True
+
+    monkeypatch.setattr(bot.replies, "capture_reply", _fake_capture)
+    reply = _run(bot.handle("919000000001", "PAID 500", channel="shop"))
+    assert reply == ""
+    assert calls == []                       # no outstanding -> capture skipped
 
 
 if __name__ == "__main__":

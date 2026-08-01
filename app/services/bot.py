@@ -210,6 +210,82 @@ def _match_row(db, table: str, select: str, from_number: str):
     return None
 
 
+def _client_outstanding(db, business_id: str, client_id: str) -> Decimal:
+    """Total a customer still owes (open bills only). Gates shop-side capture:
+    ASVA acts on a customer's reply only when money is actually due. Best-effort;
+    any error reads as 'nothing due', so we stay silent rather than misfire."""
+    try:
+        rows = (db.table("bills").select("outstanding")
+                .eq("business_id", business_id).eq("client_id", client_id)
+                .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+    except Exception:
+        return Decimal(0)
+    return sum((Decimal(str(b.get("outstanding") or 0)) for b in rows), Decimal(0))
+
+
+async def _handle_shop_inbound(
+    db, from_number: str, text: str,
+    media_b64: str | None, media_type: str,
+) -> str:
+    """Everything the shop's OWN (customer-facing) WhatsApp is allowed to do.
+
+    HARD RULE: it NEVER replies to the customer. The shop number exists to SEND
+    bills and reminders; when a customer writes back, ASVA must not answer in the
+    owner's voice. So this only:
+      1. notes the sender's number,
+      2. matches it to one of THIS shop's customers (clients table),
+      3. checks that customer still has an outstanding balance,
+      4. and only then runs reply-capture - a PAID message or a payment
+         screenshot goes straight to the owner's Payments tab (amount matched to
+         the party by their number), a promise-to-pay pauses that party's
+         reminders, and the OWNER (never the customer) is nudged.
+
+    Anyone we don't recognise, or a known customer with nothing due, is ignored
+    in silence. Owner commands (LIST/PAID/BILL/...) run ONLY on the bot number,
+    never here. Always returns "" so the customer receives no auto-reply.
+    """
+    text = (text or "").strip()
+    upper = text.upper()
+    client = _match_row(
+        db, "clients", "id, name, business_id, tally_ledger_name", from_number)
+    if not client:
+        log.info("Shop inbound from unknown number %s: ignored (no reply)", from_number)
+        return ""
+
+    # Silent number-protection: honour an explicit opt-out even with nothing due.
+    # Pauses this party's reminders and nudges the owner; the customer is NOT
+    # replied to (the reply is discarded). Keeps the shop's number safe.
+    low = text.lower()
+    if upper in ("STOP", "UNSUBSCRIBE", "OPTOUT") or any(
+        p in low for p in ("band kar", "mat bhej", "reminder band", "stop reminder", "unsubscribe")
+    ):
+        try:
+            await _handle_customer_optout(client, from_number)
+        except Exception:
+            log.exception("shop opt-out failed for %s", client.get("name"))
+        return ""
+
+    # The reply-capture features run ONLY for a matched customer who owes money.
+    if _client_outstanding(db, client["business_id"], client["id"]) <= 0:
+        log.info("Shop inbound from %s: no outstanding, ignored", client.get("name"))
+        return ""
+
+    if settings.enable_promise_capture:
+        try:
+            await replies.capture_reply(
+                client, text, media_b64=media_b64, media_type=media_type)
+        except Exception:
+            log.exception("shop reply-capture failed for %s", client.get("name"))
+    elif upper.startswith("PAID"):
+        # Capture disabled: still route a keyword PAID to the owner (reply discarded).
+        try:
+            await _handle_paid_customer(client)
+        except Exception:
+            log.exception("legacy paid-customer failed for %s", client.get("name"))
+
+    return ""   # the shop number NEVER replies to a customer
+
+
 async def handle(
     from_number: str,
     text: str,
@@ -226,9 +302,19 @@ async def handle(
             "bot" (the ASVA assistant number, which is strictly owner-only).
 
     Returns:
-        Reply text to send back (via AiSensy or log in dev mode).
+        Reply text to send back (via AiSensy or log in dev mode). On the SHOP
+        (customer-facing) channel this is ALWAYS "" - that number never replies.
     """
     db = require_db()
+
+    # ── The SHOP number is customer-facing and NEVER replies ──────────────
+    # It only notes the sender, matches them to this shop's customers, and (for a
+    # known customer who still owes money) silently feeds a paid message /
+    # screenshot / promise into the owner's Payments tab and nudges the owner.
+    # Owner commands live on the bot number only. See _handle_shop_inbound.
+    if channel == "shop":
+        return await _handle_shop_inbound(db, from_number, text, media_b64, media_type)
+
     upper = text.upper().strip()
 
     # ── Identify sender: owner or customer? ───────────────────────────
