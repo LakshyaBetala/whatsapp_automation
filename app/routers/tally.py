@@ -529,6 +529,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     "party_name": v.party_name,
                     "amount": v.amount,
                     "receipt_date": v.date,
+                    "client_id": client_id,   # link by id (rename-proof), migration 033
                 }).execute()
 
                 # Find oldest open TALLY bills. WhatsApp-made bills (source

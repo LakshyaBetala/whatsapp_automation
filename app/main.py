@@ -31,6 +31,13 @@ async def lifespan(_: FastAPI):
         log.warning("Supabase not configured - running in degraded/local mode.")
     if not settings.aisensy_configured:
         log.warning("AiSensy not configured - WhatsApp sends will be logged, not sent.")
+    # Central error capture: swallowed exceptions land in alert_log (+ Sentry if
+    # SENTRY_DSN is set), so a silent failure is still visible in the ops center.
+    try:
+        from app.services import errorlog
+        errorlog.install()
+    except Exception:
+        log.warning("error capture not installed", exc_info=True)
     scheduler.start()
     try:
         yield

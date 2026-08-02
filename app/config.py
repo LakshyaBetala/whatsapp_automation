@@ -161,6 +161,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_pass: str = ""                    # Gmail APP password
+    sentry_dsn: str = ""                   # optional: set to send swallowed errors to Sentry
     # Thresholds for what counts as "needs attention".
     offline_alert_min: int = 20            # shop agent silent this long = offline
     wa_down_alert_min: int = 15            # a WhatsApp session down this long

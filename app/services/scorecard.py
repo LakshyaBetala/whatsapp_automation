@@ -159,9 +159,17 @@ def build_scorecard(db, business_id: str, client: dict, *,
     except Exception:
         pass
 
-    # ── Real receipts booked in Tally (matched by ledger name) ────────
+    # ── Real receipts booked in Tally ────────────────────────────────
+    # Prefer the id link (rename-proof, migration 033); fall back to the party
+    # name only for any historical receipt not yet linked by id.
     receipts = []
-    if ledger:
+    try:
+        receipts = (db.table("tally_receipts").select("amount, receipt_date")
+                    .eq("business_id", business_id).eq("client_id", cid)
+                    .order("receipt_date", desc=True).execute()).data or []
+    except Exception:
+        receipts = []
+    if not receipts and ledger:
         try:
             receipts = (db.table("tally_receipts").select("amount, receipt_date")
                         .eq("business_id", business_id).eq("party_name", ledger)

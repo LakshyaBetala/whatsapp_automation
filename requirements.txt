@@ -15,3 +15,7 @@ weasyprint==63.1
 
 # UPI QR codes attached to reminders
 qrcode[pil]==8.0
+
+# Optional error tracking. The app runs fine without it (errorlog.py degrades to
+# the alert_log DB path); set SENTRY_DSN to turn Sentry on.
+sentry-sdk==2.39.0
