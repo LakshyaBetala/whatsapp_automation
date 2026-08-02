@@ -157,9 +157,8 @@ header.nav{position:sticky;top:0;z-index:50;background:rgba(249,248,245,.82);
 .nav .row{display:flex;align-items:center;gap:20px;height:64px}
 .logo{display:flex;align-items:center;gap:9px;color:var(--ink);font-weight:900;
   font-size:1.25rem;letter-spacing:-.03em}
-.logo .mark{width:30px;height:30px;background:var(--accent);border:1px solid var(--hair);
-  border-radius:9px;display:grid;place-items:center;font-weight:900;color:#fff;
-  box-shadow:0 2px 8px rgba(12,26,16,.14);font-size:.95rem}
+.logo .mark{width:30px;height:30px;object-fit:contain;display:block;
+  background:none;border:0;box-shadow:none}
 .navlinks{display:flex;align-items:center;gap:4px;margin-left:auto}
 .navlinks a{color:var(--ink);font-weight:600;font-size:.94rem;padding:6px 11px;border-radius:8px;
   border-bottom:2px solid transparent}
@@ -437,7 +436,7 @@ def _nav(active: str) -> str:
   ASVA is <b>free for every shop till 15 September</b>. Limited spots.
   <span class="go">Start free &rarr;</span></span></a>
 <header class="nav"><div class="wrap"><div class="row">
-  <a class="logo" href="/"><span class="mark">A</span>ASVA</a>
+  <a class="logo" href="/"><img class="mark" src="/logo.png" alt="ASVA logo" width="30" height="30">ASVA</a>
   <nav class="navlinks">{links}
     <a class="navcta" href="/download">Download app</a>
   </nav></div></div></header>"""
@@ -445,7 +444,7 @@ def _nav(active: str) -> str:
 
 def _footer() -> str:
     return f"""<footer class="ft"><div class="wrap"><div class="cols">
-  <div class="brand"><div class="logo"><span class="mark">A</span>ASVA</div>
+  <div class="brand"><div class="logo"><img class="mark" src="/logo.png" alt="ASVA logo" width="30" height="30">ASVA</div>
     <p>The recovery agent for Indian distributors on TallyPrime. {TAGLINE}</p>
     <p style="margin-top:8px;color:var(--faint);font-size:.85rem">An Almmatix product.</p></div>
   <div class="col"><div class="h">Product</div>
@@ -1316,7 +1315,7 @@ def export_static(dest_dir: str, *, base: str = "https://tryasva.com",
             written.append("og.png")
         # Favicon (square, built from the logo). Ship it so the browser tab shows
         # the ASVA mark instead of a blank default.
-        for fn in ("favicon.png", "favicon.svg"):
+        for fn in ("favicon.png", "favicon.svg", "logo.png"):
             for cand in (os.path.join("app/static", fn), fn):
                 if os.path.exists(cand):
                     try:
@@ -1447,6 +1446,14 @@ def favicon_svg():
         if os.path.exists(p):
             return FileResponse(p, media_type="image/svg+xml")
     raise HTTPException(status_code=404, detail="no favicon")
+
+
+@router.get("/logo.png")
+def logo_image():
+    for p in ("app/static/logo.png", "logo.png", "pdf/og_logo.png"):
+        if os.path.exists(p):
+            return FileResponse(p, media_type="image/png")
+    raise HTTPException(status_code=404, detail="no logo")
 
 
 @router.get("/og.png")
