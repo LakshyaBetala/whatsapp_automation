@@ -90,6 +90,7 @@ _KNOWN_CMDS = [
     "PAID", "LIST", "HISAB", "CHECK", "STOP", "START", "TERMS", "REMIND",
     "PROMISES", "CHASE", "EXCLUDE", "INCLUDE", "BILL", "RECOVERED", "TEAM",
     "SUPPORT", "HELP", "MENU", "BAND", "SOOCHI", "CHALU", "SHURU", "YAAD",
+    "CASH", "FORECAST", "CARD", "REPORTCARD",
 ]
 # Verbs that take a party name, so the suggestion can show a real example.
 _CMD_TAKES_NAME = {"PAID", "CHECK", "STOP", "START", "TERMS", "REMIND", "CHASE",
@@ -450,6 +451,14 @@ async def handle(
         # ── RECOVERED - the proof: money ASVA helped bring back ───────
         if upper in ("RECOVERED", "RECOVERY", "WAPASI", "KITNA AAYA"):
             return await _handle_recovered(business_id, lang=lang)
+
+        # ── CASH / FORECAST - money likely to come in this week ───────
+        if upper in ("CASH", "FORECAST", "AAVAK", "AAWAK", "AANE WALA"):
+            return await _handle_forecast(business_id, lang=lang)
+
+        # ── CARD / REPORTCARD - the monthly recovery report card ─────
+        if upper in ("CARD", "REPORTCARD", "REPORT CARD"):
+            return await _handle_report_card(business, lang=lang)
 
         # ── DIGEST 9PM / DIGEST TIME 21 - set the daily summary time ──
         dt_match = re.match(r"DIGEST(?:\s+TIME)?\s+(\d{1,2})\s*(AM|PM)?$", upper)
@@ -1213,6 +1222,44 @@ async def _handle_recovered(business_id: str, *, lang: str = "english") -> str:
         delta = i18n.t(lang, "recovered_delta", last=inr(p["recovered_last_month"]))
     return i18n.t(lang, "recovered", this=inr(p["recovered_this_month"]),
                   out=out, month=p["month"], delta=delta)
+
+
+async def _handle_forecast(business_id: str, *, lang: str = "english") -> str:
+    """CASH / FORECAST - money likely to arrive in the next 7 days. Turns ASVA
+    into a cash-flow view: promised (customer said paid / gave a date) + bills
+    coming due this week, with nothing double-counted."""
+    from app.services import forecast
+    db = require_db()
+    en = lang == "english"
+    f = forecast.cash_in_forecast(db, business_id)
+    if (f.get("total") or 0) <= 0:
+        return ("Nothing is expected in the next 7 days yet.\n"
+                "As customers promise a date or bills come due, it will show here.\n\n"
+                "Send LIST to see who owes you." if en else
+                "Agle 7 din mein abhi kuch expected nahi.\n"
+                "Jaise customer date dega ya bill due hoga, yahan dikhega.\n\n"
+                "LIST bhejein - kaun kitna baaki hai dekhne ke liye.")
+    head = forecast.forecast_line(f, en=en)
+    counts = []
+    if f.get("promised_count"):
+        counts.append((f"{f['promised_count']} promised" if en
+                       else f"{f['promised_count']} ne promise kiya"))
+    if f.get("due_count"):
+        counts.append((f"{f['due_count']} due this week" if en
+                       else f"{f['due_count']} is hafte due"))
+    detail = ("\n" + ", ".join(counts)) if counts else ""
+    tail = ("\n\nSend PROMISES to see who promised, or LIST for everyone." if en
+            else "\n\nPROMISES bhejein - kisne promise kiya; ya LIST sabke liye.")
+    return head + detail + tail
+
+
+async def _handle_report_card(business: dict, *, lang: str = "english") -> str:
+    """CARD / REPORTCARD - the monthly recovery report card on demand (same one
+    that auto-sends on the last day of the month)."""
+    from app.services import report_card
+    db = require_db()
+    return report_card.build_card(
+        db, business["id"], business.get("business_name") or "", en=(lang == "english"))
 
 
 async def _handle_check(business_id: str, client_name: str, *, lang: str = "english") -> str:

@@ -228,14 +228,23 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
     except Exception:
         log.exception("Worth-a-call list failed - digest continues")
 
-    # ── Month-end (last day of the month): how much came back this month ─
+    # ── Cash coming in (forecast): the daily cash-flow line ───────────
+    try:
+        from app.services import forecast
+        fline = forecast.forecast_line(forecast.cash_in_forecast(db, business_id), en=True)
+        if fline:
+            action_lines += "\n\n" + fline
+    except Exception:
+        log.exception("Cash-in forecast failed - digest continues")
+
+    # ── Month-end (last day of the month): the full Recovery Report Card ─
     if _is_month_end(today):
         try:
-            pf = proof.build_proof(db, business_id, today)
-            action_lines += (f"\n\nTHIS MONTH ({pf.get('month', '')})\n"
-                             f"Collected: {inr(pf.get('recovered_this_month') or 0)}")
+            from app.services import report_card
+            action_lines += "\n\n" + report_card.build_card(
+                db, business_id, business.get("business_name") or "", en=True, today=today)
         except Exception:
-            log.exception("Month-end summary failed - digest continues")
+            log.exception("Month-end report card failed - digest continues")
 
     # ── Build template params ─────────────────────────────────────────
     biz_name = business.get("business_name") or "Business"
