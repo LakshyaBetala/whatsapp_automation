@@ -635,6 +635,11 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.9.0': [
+    'Steadier WhatsApp: it answers a phone’s re-send request instead of retrying in a loop that used to drop the connection, so the link holds and needs far fewer re-scans.',
+    'Safety net: if two customers had the same phone number, a payment now goes to whichever one actually owes money, and nothing crashes.',
+    'The Payments tab always loads, and a leftover or test party can always be deleted cleanly.',
+  ],
   '1.8.10': [
     'Your shop WhatsApp never auto-replies to customers now. When a customer messages it, ASVA stays silent to them and only works behind the scenes.',
     'It checks the number against your customers and their outstanding, then reads a “paid” message or payment screenshot straight into your Payments tab, and tells you privately.',

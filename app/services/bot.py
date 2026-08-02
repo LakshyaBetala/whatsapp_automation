@@ -223,6 +223,27 @@ def _client_outstanding(db, business_id: str, client_id: str) -> Decimal:
     return sum((Decimal(str(b.get("outstanding") or 0)) for b in rows), Decimal(0))
 
 
+def _clients_by_number(db, from_number: str) -> list[dict]:
+    """ALL clients whose WhatsApp number matches (exact first, else last-10).
+    Normally one row; returns several only when two parties were saved with the
+    same number (a demo/dedup mistake). Returning the full list lets the caller
+    pick the right party instead of assuming exactly one and crashing."""
+    sel = "id, name, business_id, tally_ledger_name, reminders_enabled"
+    try:
+        rows = (db.table("clients").select(sel).eq("whatsapp_number", from_number)
+                .order("created_at").execute()).data or []
+        if rows:
+            return rows
+        last10 = _last10(from_number)
+        if last10:
+            rows = (db.table("clients").select(sel).like("whatsapp_number", f"%{last10}")
+                    .order("created_at").execute()).data or []
+        return rows
+    except Exception:
+        log.exception("client-by-number lookup failed for %s", from_number)
+        return []
+
+
 async def _handle_shop_inbound(
     db, from_number: str, text: str,
     media_b64: str | None, media_type: str,
@@ -246,29 +267,35 @@ async def _handle_shop_inbound(
     """
     text = (text or "").strip()
     upper = text.upper()
-    client = _match_row(
-        db, "clients", "id, name, business_id, tally_ledger_name", from_number)
-    if not client:
+    candidates = _clients_by_number(db, from_number)
+    if not candidates:
         log.info("Shop inbound from unknown number %s: ignored (no reply)", from_number)
         return ""
 
     # Silent number-protection: honour an explicit opt-out even with nothing due.
-    # Pauses this party's reminders and nudges the owner; the customer is NOT
-    # replied to (the reply is discarded). Keeps the shop's number safe.
+    # Pauses reminders for EVERY party on this number and nudges the owner; the
+    # customer is NOT replied to (the reply is discarded). Keeps the number safe.
     low = text.lower()
     if upper in ("STOP", "UNSUBSCRIBE", "OPTOUT") or any(
         p in low for p in ("band kar", "mat bhej", "reminder band", "stop reminder", "unsubscribe")
     ):
-        try:
-            await _handle_customer_optout(client, from_number)
-        except Exception:
-            log.exception("shop opt-out failed for %s", client.get("name"))
+        for c in candidates:
+            try:
+                await _handle_customer_optout(c, from_number)
+            except Exception:
+                log.exception("shop opt-out failed for %s", c.get("name"))
         return ""
 
     # The reply-capture features run ONLY for a matched customer who owes money.
-    if _client_outstanding(db, client["business_id"], client["id"]) <= 0:
-        log.info("Shop inbound from %s: no outstanding, ignored", client.get("name"))
+    # If two parties share this number (a demo/dedup mistake), the payment
+    # belongs to whoever actually has an outstanding - pick that one, never crash.
+    owing = [(c, _client_outstanding(db, c["business_id"], c["id"])) for c in candidates]
+    owing = [(c, amt) for c, amt in owing if amt > 0]
+    if not owing:
+        log.info("Shop inbound from %s: no outstanding, ignored", candidates[0].get("name"))
         return ""
+    owing.sort(key=lambda t: t[1], reverse=True)   # the party who owes the most
+    client = owing[0][0]
 
     if settings.enable_promise_capture:
         try:

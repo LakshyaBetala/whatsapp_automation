@@ -122,6 +122,33 @@ let lastCloseCode = null;
 let lastProgressAt = Date.now();  // last time the connection made ANY progress
 let restartTimer = null;
 
+// ── Message cache for getMessage() ──────────────────────────────────────
+// When a recipient's device can't decrypt a message, WhatsApp asks the sender
+// to re-send it (a "retry receipt"); poll updates need it too. If we can't
+// answer, Baileys retries decryption in a loop that surfaces as code=500
+// badSession and drops the link (the exact repeated-disconnect symptom).
+// Caching what we send + receive lets getMessage() answer instantly. Bounded
+// so it never grows without limit.
+const MSG_CACHE_MAX = 1500;
+const msgStore = new Map();   // message id -> WAMessageContent
+function cacheMsg(id, content) {
+    if (!id || !content) return;
+    if (msgStore.size >= MSG_CACHE_MAX) {          // trim oldest ~10% in one pass
+        let n = Math.ceil(MSG_CACHE_MAX * 0.1);
+        for (const k of msgStore.keys()) { msgStore.delete(k); if (--n <= 0) break; }
+    }
+    msgStore.set(id, content);
+}
+// A tiny NodeCache-compatible shim so Baileys can throttle its own decryption
+// retries (msgRetryCounterCache), which also curbs the 500-loop.
+function mkCache() {
+    const m = new Map();
+    return { get: (k) => m.get(k), set: (k, v) => m.set(k, v),
+             del: (k) => m.delete(k), flushAll: () => m.clear(),
+             keys: () => Array.from(m.keys()) };
+}
+const msgRetryCounterCache = mkCache();
+
 // Exactly ONE pending restart, ever. Duplicate timers = two sockets on the
 // same session = they kick each other in an endless 440-conflict loop
 // (phone shows "linked", service shows disconnected forever).
@@ -259,7 +286,8 @@ async function handleInbound(msg) {
         console.log(`Inbound from ${sender}${via}: "${text.slice(0, 40)}" -> backend ${resp.status}, reply ${reply.length} chars`);
         if (reply.length > 0) {
             try {
-                await sock.sendMessage(jid, { text: reply });
+                const sent = await sock.sendMessage(jid, { text: reply });
+                if (sent && sent.key) cacheMsg(sent.key.id, sent.message);
                 console.log(`Replied to ${sender} (${reply.length} chars)`);
             } catch (e) { console.error(`Failed to reply to ${sender}:`, (e && e.message) || e); }
         }
@@ -297,6 +325,15 @@ async function start() {
             keepAliveIntervalMs: 25000,
             connectTimeoutMs: 30000,
             defaultQueryTimeoutMs: 60000,
+            // Answer WhatsApp's re-send/poll requests + throttle decrypt retries:
+            // the pair that stops the code=500 badSession disconnect loop.
+            getMessage: async (key) => {
+                try { return msgStore.get(key && key.id) || undefined; }
+                catch (e) { return undefined; }
+            },
+            msgRetryCounterCache,
+            retryRequestDelayMs: 350,
+            maxMsgRetryCount: 5,
             auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
         });
 
@@ -408,6 +445,11 @@ async function start() {
 
         sock.ev.on('messages.upsert', async (ev) => {
             if (myGen !== gen) return;
+            // Cache every message (any type) so getMessage() can answer a later
+            // re-send/poll request and avoid the decrypt-retry disconnect loop.
+            for (const msg of ev.messages) {
+                if (msg && msg.key && msg.message) cacheMsg(msg.key.id, msg.message);
+            }
             if (ev.type !== 'notify') return;
             for (const msg of ev.messages) await handleInbound(msg);
         });
@@ -494,18 +536,20 @@ app.post('/api/wa/send', async (req, res) => {
             jid = r[0].jid;
         } catch (e) { console.warn(`Number check failed for ${d} (sending anyway):`, e.message); }
 
+        let sent;
         if (pdf_base64) {
-            await sock.sendMessage(jid, {
+            sent = await sock.sendMessage(jid, {
                 document: Buffer.from(pdf_base64, 'base64'),
                 mimetype: 'application/pdf', fileName: pdf_name || 'invoice.pdf', caption: message,
             });
         } else if (media_base64) {
-            await sock.sendMessage(jid, {
+            sent = await sock.sendMessage(jid, {
                 image: Buffer.from(media_base64, 'base64'), caption: message,
             });
         } else {
-            await sock.sendMessage(jid, { text: message });
+            sent = await sock.sendMessage(jid, { text: message });
         }
+        if (sent && sent.key) cacheMsg(sent.key.id, sent.message);
         res.json({ success: true, message: 'Message sent successfully' });
     } catch (error) {
         console.error('Error sending message:', error.message);

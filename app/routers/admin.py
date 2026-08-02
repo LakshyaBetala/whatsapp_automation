@@ -2226,13 +2226,30 @@ async def admin_party_delete(payload: PartyDeletePayload):
     if tally_bill.data:
         raise HTTPException(status_code=400,
                             detail="This party has Tally bills - cannot delete here.")
-    # Detach audit messages, then delete bills, then the party itself.
+    # Clear everything that points at this party FIRST, so a stale open receipt,
+    # a promise-to-pay hold, or past replies can neither linger as orphans nor
+    # block the delete. These tables key on client_id with no FK, so a plain
+    # delete is safe; each is best-effort so one hiccup never aborts the whole
+    # cleanup (this is the failsafe: a party ALWAYS deletes cleanly).
+    for tbl in ("pending_receipts", "payment_promises", "inbound_messages"):
+        try:
+            db.table(tbl).delete().eq("client_id", payload.client_id).execute()
+        except Exception:
+            log.warning("cleanup of %s failed for party %s (continuing)",
+                        tbl, payload.client_id, exc_info=True)
+    # Detach audit messages (keep them for history), then delete bills + party.
     try:
         db.table("messages").update({"client_id": None}).eq("client_id", payload.client_id).execute()
     except Exception:
         log.exception("Detaching messages failed for party %s (continuing)", payload.client_id)
-    db.table("bills").delete().eq("business_id", biz["id"]).eq("client_id", payload.client_id).execute()
-    db.table("clients").delete().eq("id", payload.client_id).execute()
+    try:
+        db.table("bills").delete().eq("business_id", biz["id"]).eq("client_id", payload.client_id).execute()
+        db.table("clients").delete().eq("id", payload.client_id).execute()
+    except Exception:
+        log.exception("Party delete failed for %s", payload.client_id)
+        raise HTTPException(status_code=400, detail=(
+            "Could not delete this party. If it still shows a pending payment or a "
+            "paused reminder, clear that first, then try again."))
     return {"ok": True, "deleted": party.get("name") or payload.client_id}
 
 
@@ -3328,27 +3345,42 @@ async def admin_payments_data(token: str = Query(...)):
         for b in ob:
             owed[b["client_id"]] = owed.get(b["client_id"], Decimal(0)) + Decimal(str(b.get("outstanding") or 0))
 
+    # Build both lists defensively: one malformed row (a null amount, a missing
+    # ledger from an odd import, a duplicate-number party) must NEVER 500 the
+    # whole tab - the owner would see "Could not load" with no way forward. Skip
+    # the bad row, keep the rest.
     promises_out = []
     for p in prs:
-        cid = p["client_id"]
-        nm = names.clean_display(cname.get(cid) or "") or "A customer"
-        out = owed.get(cid, Decimal(0))
-        promises_out.append({
-            "client_id": cid,
-            "name": nm,
-            "head": _promise_head(p, nm, en),
-            "said": p.get("raw_text") or "",
-            "outstanding": float(out),
-            "outstanding_line": (f"Outstanding {_inr(out)}" if en else f"Baaki {_inr(out)}") if out > 0 else "",
-        })
+        try:
+            cid = p.get("client_id")
+            if not cid:
+                continue
+            nm = names.clean_display(cname.get(cid) or "") or "A customer"
+            out = owed.get(cid, Decimal(0))
+            promises_out.append({
+                "client_id": cid,
+                "name": nm,
+                "head": _promise_head(p, nm, en),
+                "said": p.get("raw_text") or "",
+                "outstanding": float(out),
+                "outstanding_line": (f"Outstanding {_inr(out)}" if en else f"Baaki {_inr(out)}") if out > 0 else "",
+            })
+        except Exception:
+            log.warning("skipping a malformed promise row (business %s)", bid, exc_info=True)
 
-    pending = rq.list_for_owner(db, bid)
-    pending_out = [{
-        "id": r["id"], "party_ledger": r["party_ledger"],
-        "party_display": r.get("party_display"), "amount": float(r["amount"]),
-        "deposit_ledger": r.get("deposit_ledger") or "Cash", "status": r.get("status"),
-        "receipt_date": str(r.get("receipt_date") or "")[:10], "error": r.get("error"),
-    } for r in pending]
+    pending_out = []
+    for r in rq.list_for_owner(db, bid):
+        try:
+            led = r.get("party_ledger") or r.get("party_display") or "Customer"
+            pending_out.append({
+                "id": r.get("id"), "party_ledger": led,
+                "party_display": r.get("party_display") or led,
+                "amount": float(r.get("amount") or 0),
+                "deposit_ledger": r.get("deposit_ledger") or "Cash", "status": r.get("status"),
+                "receipt_date": str(r.get("receipt_date") or "")[:10], "error": r.get("error"),
+            })
+        except Exception:
+            log.warning("skipping a malformed receipt row (business %s)", bid, exc_info=True)
 
     return {
         "promises": promises_out,

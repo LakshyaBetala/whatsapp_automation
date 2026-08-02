@@ -196,6 +196,29 @@ def test_shop_channel_known_customer_with_no_dues_is_ignored(monkeypatch):
     assert calls == []                       # no outstanding -> capture skipped
 
 
+def test_shop_channel_two_parties_same_number_does_not_crash(monkeypatch):
+    """FAILSAFE: two parties saved with the SAME number must not crash. ASVA
+    detects both, routes the payment to the one who owes, captures exactly once,
+    and still never replies."""
+    c1 = {"id": "c1", "name": "Party One", "business_id": "biz1",
+          "tally_ledger_name": "Party One"}
+    c2 = {"id": "c2", "name": "Party Two", "business_id": "biz1",
+          "tally_ledger_name": "Party Two"}
+    _patch(monkeypatch, {"businesses": [], "clients": [c1, c2],
+                         "bills": [{"outstanding": 500, "status": "pending"}]})
+    from app.services import bot
+    calls = []
+
+    async def _fake_capture(c, t, *, media_b64=None, media_type="image/jpeg"):
+        calls.append(c.get("id"))
+        return True
+
+    monkeypatch.setattr(bot.replies, "capture_reply", _fake_capture)
+    reply = _run(bot.handle("919000000001", "PAID 500", channel="shop"))
+    assert reply == ""
+    assert len(calls) == 1                    # captured once, not once-per-duplicate
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-q"]))
