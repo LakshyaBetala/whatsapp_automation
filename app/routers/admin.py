@@ -2640,6 +2640,27 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     _ph = c.get("whatsapp_number") or ""
     pphone_display = _ph[2:] if (len(_ph) == 12 and _ph.startswith("91")) else _ph
 
+    # ── Reliability scorecard (intra-shop, accurate) ──────────────────
+    # Built only from provable data (terms-adjusted days past due, recorded
+    # promise outcomes, real receipts). Explainable: the reasons are shown.
+    from app.services import scorecard as _sc
+    scorecard_html = ""
+    try:
+        sc = _sc.build_scorecard(db, biz["id"], c, today=today)
+        _sc_reasons = "".join(f"<li>{esc(r)}</li>" for r in sc.get("reasons", []))
+        _sc_extra = ""
+        if sc.get("total_recovered", 0) > 0:
+            _sc_extra = (f'<div class="hint" style="margin-top:6px">Paid so far: '
+                         f'<b>{_inr(sc["total_recovered"])}</b></div>')
+        scorecard_html = (
+            f'<div class="card" style="margin-bottom:18px;border-left:4px solid {sc["color"]}">'
+            f'<div style="font-weight:700;color:{sc["color"]}">{sc["badge"]} '
+            f'Reliability: {esc(sc["grade_label"])}</div>'
+            f'<ul class="hint" style="margin:6px 0 0 18px;padding:0">{_sc_reasons}</ul>'
+            f'{_sc_extra}</div>')
+    except Exception:
+        log.exception("scorecard render failed for %s (party page continues)", client_id)
+
     body = f"""
 <a href="/admin?token={token}&lang={lang}" class="back">&#8592; Dashboard</a>
 <h1>{esc(c['name'])}</h1>
@@ -2652,6 +2673,8 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
   <div class="card kpi"><div class="n">{cd_val or '-'}</div><div class="l">Credit days</div></div>
   <div class="card kpi"><div class="n" style="font-size:1rem;color:{next_color}">{next_label}</div><div class="l">Agla reminder</div></div>
 </div>
+
+{scorecard_html}
 
 {promise_html}
 

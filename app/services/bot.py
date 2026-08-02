@@ -90,11 +90,12 @@ _KNOWN_CMDS = [
     "PAID", "LIST", "HISAB", "CHECK", "STOP", "START", "TERMS", "REMIND",
     "PROMISES", "CHASE", "EXCLUDE", "INCLUDE", "BILL", "RECOVERED", "TEAM",
     "SUPPORT", "HELP", "MENU", "BAND", "SOOCHI", "CHALU", "SHURU", "YAAD",
-    "CASH", "FORECAST", "CARD", "REPORTCARD",
+    "CASH", "FORECAST", "CARD", "REPORTCARD", "SCORE", "SCORECARD",
 ]
 # Verbs that take a party name, so the suggestion can show a real example.
 _CMD_TAKES_NAME = {"PAID", "CHECK", "STOP", "START", "TERMS", "REMIND", "CHASE",
-                   "EXCLUDE", "INCLUDE", "BAND", "CHALU", "SHURU", "YAAD", "SOOCHI"}
+                   "EXCLUDE", "INCLUDE", "BAND", "CHALU", "SHURU", "YAAD", "SOOCHI",
+                   "SCORE", "SCORECARD"}
 
 
 def _suggest_command(text: str, lang: str) -> str:
@@ -509,6 +510,11 @@ async def handle(
         check_match = re.match(r"CHECK\s+(.+)", upper)
         if check_match:
             return await _handle_check(business_id, check_match.group(1).strip(), lang=lang)
+
+        # ── SCORE <name> - the party's reliability scorecard ─────────
+        score_match = re.match(r"(?:SCORE|SCORECARD)\s+(.+)", upper)
+        if score_match:
+            return await _handle_score(business_id, score_match.group(1).strip(), lang=lang)
 
         # ── TERMS <name> <days> - set a party's credit period ────────
         terms_match = re.match(r"TERMS\s+(.+?)\s+(\d{1,3})$", upper)
@@ -1222,6 +1228,19 @@ async def _handle_recovered(business_id: str, *, lang: str = "english") -> str:
         delta = i18n.t(lang, "recovered_delta", last=inr(p["recovered_last_month"]))
     return i18n.t(lang, "recovered", this=inr(p["recovered_this_month"]),
                   out=out, month=p["month"], delta=delta)
+
+
+async def _handle_score(business_id: str, client_name: str, *, lang: str = "english") -> str:
+    """SCORE <name> - the party's intra-shop reliability scorecard, on WhatsApp.
+    Uses the same forgiving name resolver as every other party command."""
+    from app.services import scorecard
+    db = require_db()
+    status, rows = _resolve_party(db, business_id, client_name, "id, name, tally_ledger_name")
+    if status != "one":
+        return _party_pick_msg(status, client_name, rows, lang,
+                               pick_key=business_id, verb="SCORE")
+    sc = scorecard.build_scorecard(db, business_id, rows[0])
+    return scorecard.scorecard_text(sc, rows[0].get("name") or "", en=(lang == "english"))
 
 
 async def _handle_forecast(business_id: str, *, lang: str = "english") -> str:
