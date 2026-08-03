@@ -552,10 +552,13 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     new_paid = b["paid_amount"] + pay_amt
                     new_status = "paid" if new_paid >= b["amount"] else "partial"
 
-                    db.table("bills").update({
-                        "paid_amount": new_paid,
-                        "status": new_status
-                    }).eq("id", b["id"]).execute()
+                    bill_update = {"paid_amount": new_paid, "status": new_status}
+                    if new_status == "paid":
+                        # True settlement date = the receipt's own date (the day the
+                        # money came), NOT now() - so days-to-pay is honest. Only
+                        # stamped when the bill is FULLY cleared (migration 034).
+                        bill_update["settled_at"] = str(v.date)
+                    db.table("bills").update(bill_update).eq("id", b["id"]).execute()
 
                     remaining_payment -= pay_amt
 

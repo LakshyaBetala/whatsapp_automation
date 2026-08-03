@@ -28,6 +28,17 @@ def email_configured() -> bool:
     return bool(s.smtp_host and s.smtp_user and s.smtp_pass and s.alert_email_to)
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """A verified TLS context, using the maintained certifi CA bundle when
+    available (a stale OS trust store otherwise fails with 'certificate expired').
+    Still fully verifying - we never disable cert checks."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def send_email(subject: str, body: str) -> bool:
     """Send one plain-text email to the operator. False if not configured or the
     send failed (never raises - alerting must not break the caller)."""
@@ -41,7 +52,7 @@ def send_email(subject: str, body: str) -> bool:
     msg.set_content(body)
     try:
         with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=20) as srv:
-            srv.starttls(context=ssl.create_default_context())
+            srv.starttls(context=_ssl_context())
             srv.login(s.smtp_user, s.smtp_pass)
             srv.send_message(msg)
         return True
@@ -85,8 +96,11 @@ def reconcile(db, problems: list[dict]) -> dict:
             continue
         sev = p.get("severity", "warn")
         did_mail = False
-        if sev in ("warn", "critical"):
-            did_mail = send_email(f"[ASVA {sev.upper()}] {p['title']}",
+        # Email ONLY critical health issues (backend/WhatsApp down, jobs stalled).
+        # Warnings are still recorded in alert_log + shown in the Command Center,
+        # just not mailed - so the inbox stays high-signal.
+        if sev == "critical":
+            did_mail = send_email(f"[ASVA CRITICAL] {p['title']}",
                                   (p.get("body") or p["title"]) +
                                   f"\n\nTime: {now}\nOpen your Command Center to check.")
         try:
