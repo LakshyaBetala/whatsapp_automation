@@ -35,7 +35,7 @@ def _biz_by_token(token: str) -> dict:
                     "discount_pct, plan, upi_vpa, upi_vpa_2, upi_vpa_3, whatsapp_number, reminder_cadence, "
                     "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
                     "overdue_repeat_days, overdue_max_repeats, reminder_batches, plan_expires_on, "
-                    "catchup_date, catchup_action")
+                    "catchup_date, catchup_action, wa_ready, wa_checked_at")
             .eq("agent_token", token).limit(1).execute())
     if not resp.data:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -945,6 +945,7 @@ async function sendNow(btn) {{
       body: JSON.stringify({{token: TOKEN, party: party}})}});
     const d = await r.json();
     btn.textContent = (r.ok && d.sent) ? '✓ Sent' : '✗ ' + (d.detail || 'Failed');
+    if (d.wa_down) alert(d.detail);   // strong, unmissable when WhatsApp is off
   }} catch (e) {{ btn.textContent = '✗ Failed'; }}
   setTimeout(() => {{ btn.disabled = false; btn.textContent = 'Send now'; }}, 4000);
 }}
@@ -1945,6 +1946,22 @@ async def admin_send_now(payload: SendNowPayload):
     party = (payload.party or "").strip()
     if not party:
         raise HTTPException(status_code=400, detail="party required")
+
+    # Strong pre-check: if the shop WhatsApp is known-disconnected (a recent
+    # negative heartbeat), don't quietly queue a send that will just sit there -
+    # tell the owner to reconnect first. Only trip on a FRESH negative reading so
+    # a stale/never-checked flag can't block a legitimate send.
+    if biz.get("wa_ready") is False and biz.get("wa_checked_at"):
+        from datetime import datetime, timezone
+        try:
+            ts = datetime.fromisoformat(str(biz["wa_checked_at"]).replace("Z", "+00:00"))
+            fresh = (datetime.now(timezone.utc) - ts).total_seconds() < 20 * 60
+        except (TypeError, ValueError):
+            fresh = False
+        if fresh:
+            return {"sent": False, "wa_down": True,
+                    "detail": "Your shop WhatsApp is not connected, so this reminder cannot go out. "
+                              "Open WhatsApp Setup, scan the QR to reconnect, then try Send now again."}
     business = {
         "id": biz["id"],
         "business_name": biz.get("business_name", ""),

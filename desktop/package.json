@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "Steadier WhatsApp: it now answers a phone's re-send request instead of retrying in a loop that dropped the connection, so the link holds through small hiccups and needs far fewer re-scans.\nStronger safety net: if two customers were saved with the same phone number, a payment goes to whichever one actually owes money, the Payments tab always loads, and a leftover or test party can always be deleted cleanly.\nAlso: your shop number stays silent with customers (it only captures payments and nudges you), the ASVA assistant number works as before."
+      "releaseNotes": "Bills you export from Tally now send reliably, and if one cannot go out ASVA tells you the exact reason instead of failing quietly.\nFixing a customer's name or number in Tally updates the same customer, so no more duplicate entries with split dues.\nNew Help button: every screen and every WhatsApp command explained, always one tap away, plus a clearer guided tour and a finish-setup checklist.\nIf your shop WhatsApp is disconnected, a bold warning now shows on every screen and Send now tells you to reconnect. Full dark mode and a fully English or Hindi app."
     },
     "files": [
       "main.js",

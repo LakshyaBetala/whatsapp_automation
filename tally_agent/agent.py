@@ -501,7 +501,12 @@ async def run_watch(config: dict):
             try:
                 if new_pdf:
                     log_and_print(f"[{stamp}] New bill PDF detected - sending to the party now.")
-                new_bills, payments = await _deliver_new_bills(config, company, pdf_dir, stamp)
+                # A freshly-exported PDF may be for a bill dated a few weeks back
+                # (owner exporting an older invoice), so widen the voucher lookup
+                # to 30 days on a button press; the routine beat stays light.
+                d, t = (30, 90.0) if new_pdf else (10, 45.0)
+                new_bills, payments = await _deliver_new_bills(config, company, pdf_dir, stamp,
+                                                               days=d, timeout=t)
                 if due_sync and not new_pdf:
                     log_and_print(f"[{stamp}] Tally checked - {new_bills} new bill(s) sent, {payments} payment(s).")
                 last_sync = asyncio.get_event_loop().time()
@@ -556,19 +561,24 @@ async def run_watch(config: dict):
         await asyncio.sleep(folder_poll)
 
 
-async def _deliver_new_bills(config: dict, company: str, pdf_dir: str, stamp: str) -> tuple[int, int]:
-    """One light watch tick: read the last 3 days of vouchers from Tally (SHORT
-    timeout), attach any exported PDFs, and POST to /tally/sync. Posts on EVERY
-    tick even with zero vouchers, because the backend stamps the 'Tally
-    connected' heartbeat on every /sync call - so the dashboard status reflects
-    reality as long as this loop is alive. Returns (new_bills, payments)."""
+async def _deliver_new_bills(config: dict, company: str, pdf_dir: str, stamp: str,
+                             days: int = 10, timeout: float = 45.0) -> tuple[int, int]:
+    """One light watch tick: read the last `days` days of vouchers from Tally,
+    attach any exported PDFs, and POST to /tally/sync. Posts on EVERY tick even
+    with zero vouchers, because the backend stamps the 'Tally connected'
+    heartbeat on every /sync call - so the dashboard status reflects reality as
+    long as this loop is alive. Returns (new_bills, payments).
+
+    `days` defaults to 10 (up from 3) so a bill exported while the watcher was
+    briefly off, or one dated a few days back, is still picked up on the routine
+    beat. The new-PDF path widens it further (see run_watch). A short timeout
+    keeps the light check from ever hanging the tick; the heavy refresh keeps the
+    full 180s."""
     today = date.today()
-    frm = (today - timedelta(days=2)).strftime('%Y%m%d')
-    # Short timeout (45s): the light check must never hang the tick. The heavy
-    # refresh keeps the full 180s.
+    frm = (today - timedelta(days=max(1, days))).strftime('%Y%m%d')
     xml = await fetch_and_parse(
         config, tally_xml.build_voucher_register_query(company, frm, today.strftime('%Y%m%d')),
-        timeout=45.0)
+        timeout=timeout)
     r = tally_xml.parse_vouchers(xml)
     vouchers = _vouchers_payload(r['sales'], r['receipts'])
     _attach_tally_pdfs(vouchers, pdf_dir)
@@ -589,18 +599,31 @@ async def _deliver_new_bills(config: dict, company: str, pdf_dir: str, stamp: st
     result = await send_to_backend(config['backend_url'], '/tally/sync', config['agent_token'], payload)
     new_bills = result.get('new_bills', 0)
     payments = result.get('receipts_processed', 0)
-    # Move sent bills' PDFs into <folder>/sent so the pickup folder stays clean.
+
+    # Tell the owner exactly what happened to each exported bill, and never let a
+    # PDF sit in the folder silently: delivered PDFs move to /sent, and PDFs we
+    # could NOT send (no number, party not in ASVA, too old) move to /skipped WITH
+    # the reason logged - so 'I exported it but nothing sent' is always explained.
     delivered = set(result.get('delivered') or [])
-    if delivered and pdf_dir and pdf_srcs:
-        sent_dir = os.path.join(pdf_dir, 'sent')
+    skipped = {s.get('voucher'): s.get('reason') for s in (result.get('pdf_skipped') or [])}
+
+    def _move(vnum: str, subdir: str) -> None:
+        src = pdf_srcs.get(vnum)
+        if not (src and pdf_dir and os.path.exists(src)):
+            return
+        dest_dir = os.path.join(pdf_dir, subdir)
         try:
-            os.makedirs(sent_dir, exist_ok=True)
-            for vnum in delivered:
-                src = pdf_srcs.get(vnum)
-                if src and os.path.exists(src):
-                    shutil.move(src, os.path.join(sent_dir, os.path.basename(src)))
+            os.makedirs(dest_dir, exist_ok=True)
+            shutil.move(src, os.path.join(dest_dir, os.path.basename(src)))
         except Exception as e:
-            log_and_print(f"PDF cleanup skipped: {e}", is_error=True)
+            log_and_print(f"Could not move PDF for {vnum}: {e}", is_error=True)
+
+    for vnum in delivered:
+        log_and_print(f"Bill {vnum} sent on WhatsApp.")
+        _move(vnum, 'sent')
+    for vnum, reason in skipped.items():
+        log_and_print(f"Bill {vnum} was NOT sent: {reason}", is_error=True)
+        _move(vnum, 'skipped')
     return new_bills, payments
 
 
@@ -700,15 +723,19 @@ async def run_apply_outstanding(config: dict):
         # Keep customer numbers current in the backend (source of truth = Tally).
         # Reuses the masters we already fetched above - no extra Tally read.
         "contacts": [
-            {"name": d["name"], "whatsapp_number": d.get("whatsapp_number")}
+            {"name": d["name"], "whatsapp_number": d.get("whatsapp_number"),
+             "tally_guid": d.get("tally_guid")}
             for d in debtors if d.get("whatsapp_number")
         ],
         # Full debtor list so the backend can AUTO-CREATE parties added in Tally
-        # after the one-time import (name, number, credit terms, group). Without
-        # this, a new customer + their bill never appear in ASVA.
+        # after the one-time import (name, number, credit terms, group), and match
+        # by tally_guid so a renamed/edited party updates the SAME customer instead
+        # of forking into a duplicate. Without this, a new customer + their bill
+        # never appear in ASVA.
         "parties": [
             {"name": d["name"], "whatsapp_number": d.get("whatsapp_number"),
-             "credit_days": d.get("credit_days"), "tally_group": d.get("tally_group")}
+             "credit_days": d.get("credit_days"), "tally_group": d.get("tally_group"),
+             "tally_guid": d.get("tally_guid")}
             for d in debtors
         ],
     }

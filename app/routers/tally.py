@@ -16,6 +16,7 @@ class TallyDebtor(BaseModel):
     tally_group: str = ""
     whatsapp_number: Optional[str] = None  # agent extracts from Tally ledger/address
     credit_days: Optional[int] = None      # Tally BillCreditPeriod or shop default
+    tally_guid: Optional[str] = None       # Tally's stable ledger id (rename-proof)
 
 
 def _normalize_phone(raw: Optional[str]) -> Optional[str]:
@@ -96,6 +97,47 @@ def _sync_company_name(db, business_id, company_name: str) -> None:
             log.info("Business %s renamed from Tally: %s", business_id, name)
     except Exception:
         log.exception("Company-name sync failed (continuing)")
+
+
+def _resolve_client(db, clients_by_ledger: dict, clients_by_guid: dict,
+                    name: str, guid: Optional[str]):
+    """Find the client for a Tally party by its stable GUID first, then by name.
+
+    This is the permanent duplicate fix: Tally's GUID never changes when a shop
+    renames a party or edits their number, so:
+      1. GUID match -> the SAME client, even under a new name; propagate the
+         rename onto the row (name + tally_ledger_name) so bills still match.
+      2. No GUID match but name matches -> a legacy row from before GUIDs were
+         stored; backfill the GUID so every future rename matches by GUID.
+      3. Neither -> None (the caller creates a fresh client).
+    Keeps both lookup maps consistent so later bill matching (by ledger name)
+    sees the updated name. Returns the client dict or None."""
+    guid = (guid or "").strip() or None
+    name = (name or "").strip()
+    if guid and guid in clients_by_guid:
+        c = clients_by_guid[guid]
+        if name and c.get("tally_ledger_name") != name:
+            old = c.get("tally_ledger_name")
+            try:
+                db.table("clients").update(
+                    {"tally_ledger_name": name, "name": name}).eq("id", c["id"]).execute()
+            except Exception:
+                log.exception("client rename update failed for %s", c["id"])
+            if old and clients_by_ledger.get(old) is c:
+                clients_by_ledger.pop(old, None)
+            c["tally_ledger_name"] = name
+            c["name"] = name
+            clients_by_ledger[name] = c
+        return c
+    c = clients_by_ledger.get(name)
+    if c and guid and not c.get("tally_guid"):
+        try:
+            db.table("clients").update({"tally_guid": guid}).eq("id", c["id"]).execute()
+            c["tally_guid"] = guid
+            clients_by_guid[guid] = c
+        except Exception:
+            log.exception("client guid backfill failed for %s", c["id"])
+    return c
 
 
 def _verify_token(business_id: uuid.UUID, agent_token: str):
@@ -283,13 +325,13 @@ async def import_outstanding(payload: TallyImportPayload):
     fy_start = _fy_start()
 
     # ── Prefetch existing state (2 paged queries) ─────────────────────
+    all_clients = _fetch_all(lambda: db.table("clients")
+                             .select("id, tally_ledger_name, whatsapp_number, credit_days, tally_guid")
+                             .eq("business_id", biz))
     existing_clients = {
-        c["tally_ledger_name"]: c
-        for c in _fetch_all(lambda: db.table("clients")
-                            .select("id, tally_ledger_name, whatsapp_number, credit_days")
-                            .eq("business_id", biz))
-        if c.get("tally_ledger_name")
+        c["tally_ledger_name"]: c for c in all_clients if c.get("tally_ledger_name")
     }
+    clients_by_guid = {c["tally_guid"]: c for c in all_clients if c.get("tally_guid")}
     existing_obs = {
         b["tally_voucher_number"]
         for b in _fetch_all(lambda: db.table("bills")
@@ -310,7 +352,10 @@ async def import_outstanding(payload: TallyImportPayload):
             elif debtor.opening_balance == 0:
                 zero_balances += 1
 
-            existing = existing_clients.get(debtor.name)
+            # Match by stable GUID first (rename-proof), then name; backfills the
+            # GUID onto legacy rows and propagates a Tally rename to the same row.
+            existing = _resolve_client(db, existing_clients, clients_by_guid,
+                                       debtor.name, debtor.tally_guid)
             if existing is None:
                 row = {
                     "business_id": biz,
@@ -318,6 +363,7 @@ async def import_outstanding(payload: TallyImportPayload):
                     "tally_ledger_name": debtor.name,
                     "tally_group": debtor.tally_group,
                     "whatsapp_number": phone,
+                    "tally_guid": (debtor.tally_guid or "").strip() or None,
                     # A recovery tool exists to chase debtors, so new imports
                     # default to reminders ON. The daily cap + pacing prevent a
                     # day-one blast; the owner can pause any party.
@@ -355,6 +401,10 @@ async def import_outstanding(payload: TallyImportPayload):
             clients_created += len(resp.data or [])
         except Exception as e:
             errors.append(f"Bulk client insert failed for {len(chunk)} rows: {str(e)}")
+
+    # Renames applied above may have re-keyed existing_clients; make sure the
+    # OB lookup below can find every party by its current name.
+    ledger_to_id.update({name: c["id"] for name, c in existing_clients.items()})
 
     # ── Bulk insert opening-balance bills (chunked) ───────────────────
     ob_rows = []
@@ -416,6 +466,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     unmatched_parties = []
     errors = []
     delivered = []   # voucher numbers actually sent - the agent cleans these PDFs up
+    pdf_skipped = []  # exported PDFs we did NOT send + the reason (owner feedback)
 
     # ── Prefetch: clients, existing bills, applied receipts ──────────
     clients_by_ledger = {
@@ -445,6 +496,10 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
             client = clients_by_ledger.get(v.party_name)
             if not client:
                 unmatched_parties.append(v.party_name)
+                if v.pdf_base64:
+                    pdf_skipped.append({"voucher": v.voucher_number,
+                                        "reason": f"customer '{v.party_name}' is not in ASVA yet - "
+                                                  f"press Reload data, then re-export the bill"})
                 continue
             client_id = client["id"]
 
@@ -494,9 +549,25 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                 # exported while the watcher was down/offline still goes out when
                 # it recovers - but old FY invoices at first onboarding don't.
                 # pdf_url doubles as the "already delivered" marker.
+                # A PDF is attached ONLY when the owner physically exported this
+                # bill into the pickup folder - always a deliberate act - so we
+                # deliver it whenever it can go, and tell the owner the exact
+                # reason when it can't (no number / too old / already sent). The
+                # 35-day window (was 10) keeps the whole FY replay from blasting
+                # historic invoices at first onboarding while still letting a bill
+                # the owner exported weeks ago go out.
                 already_sent = bool(bill_row.get("pdf_url"))
-                fresh = invoice_date >= date.today() - timedelta(days=10)
-                if v.pdf_base64 and not already_sent and fresh and client.get("whatsapp_number"):
+                fresh = invoice_date >= date.today() - timedelta(days=35)
+                if v.pdf_base64 and already_sent:
+                    pass  # sent before - silent, not a problem to report
+                elif v.pdf_base64 and not client.get("whatsapp_number"):
+                    pdf_skipped.append({"voucher": v.voucher_number,
+                                        "reason": "this customer has no WhatsApp number in Tally - "
+                                                  "add their mobile in Tally, then re-export"})
+                elif v.pdf_base64 and not fresh:
+                    pdf_skipped.append({"voucher": v.voucher_number,
+                                        "reason": "bill is older than 35 days - not sent automatically"})
+                elif v.pdf_base64 and not already_sent and fresh and client.get("whatsapp_number"):
                     # Upload to Storage for the dashboard link (best-effort), but
                     # DELIVER using the base64 we already hold - so a storage
                     # hiccup can never stop the send. Mark delivered BEFORE the
@@ -588,6 +659,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
         "receipts_processed": receipts_processed,
         "unmatched_parties": unmatched_parties,
         "delivered": delivered,
+        "pdf_skipped": pdf_skipped,
         "errors": errors
     }
 
@@ -603,6 +675,7 @@ class TallyOpenBill(BaseModel):
 class TallyContact(BaseModel):
     name: str                              # tally ledger name
     whatsapp_number: Optional[str] = None  # agent-extracted number (field/alias/address)
+    tally_guid: Optional[str] = None       # stable ledger id (rename-proof)
 
 
 class TallyParty(BaseModel):
@@ -612,6 +685,7 @@ class TallyParty(BaseModel):
     whatsapp_number: Optional[str] = None
     credit_days: Optional[int] = None
     tally_group: Optional[str] = None
+    tally_guid: Optional[str] = None       # stable ledger id (rename-proof)
 
 
 def _sync_contacts(db, biz: str, contacts: list, clients_by_ledger: dict) -> int:
@@ -671,13 +745,13 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     biz_row = db.table("businesses").select("plan").eq("id", biz).limit(1).execute()
     plan_name = biz_row.data[0]["plan"] if biz_row.data else "starter"
 
+    _all_clients = _fetch_all(lambda: db.table("clients")
+                              .select("id, tally_ledger_name, name, whatsapp_number, language, tally_guid")
+                              .eq("business_id", biz))
     clients_by_ledger = {
-        c["tally_ledger_name"]: c
-        for c in _fetch_all(lambda: db.table("clients")
-                            .select("id, tally_ledger_name, name, whatsapp_number, language")
-                            .eq("business_id", biz))
-        if c.get("tally_ledger_name")
+        c["tally_ledger_name"]: c for c in _all_clients if c.get("tally_ledger_name")
     }
+    clients_by_guid = {c["tally_guid"]: c for c in _all_clients if c.get("tally_guid")}
     clients_by_id = {c["id"]: c for c in clients_by_ledger.values()}
 
     # ── Auto-create parties added in Tally AFTER the one-time import ──────
@@ -690,7 +764,15 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     if payload.parties:
         new_rows = []
         for p in payload.parties:
-            if not p.name or p.name in clients_by_ledger:
+            if not p.name:
+                continue
+            # Resolve by GUID first: this propagates a Tally rename onto the SAME
+            # client and backfills the GUID onto legacy rows - so a renamed party
+            # is NEVER re-created as a duplicate. Only genuinely new parties fall
+            # through to creation.
+            existing = _resolve_client(db, clients_by_ledger, clients_by_guid,
+                                       p.name, p.tally_guid)
+            if existing is not None:
                 continue
             cd = p.credit_days if (p.credit_days and 1 <= p.credit_days <= 365) else None
             row = {
@@ -699,6 +781,7 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
                 "tally_ledger_name": p.name,
                 "tally_group": p.tally_group,
                 "whatsapp_number": _normalize_phone(p.whatsapp_number),
+                "tally_guid": (p.tally_guid or "").strip() or None,
                 "reminders_enabled": True,
             }
             if cd:
@@ -711,6 +794,8 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
                     if c.get("tally_ledger_name"):
                         clients_by_ledger[c["tally_ledger_name"]] = c
                         clients_by_id[c["id"]] = c
+                        if c.get("tally_guid"):
+                            clients_by_guid[c["tally_guid"]] = c
                         created_parties += 1
             except Exception:
                 log.exception("auto-create of new Tally parties failed (business %s)", biz)

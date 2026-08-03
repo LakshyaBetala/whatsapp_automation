@@ -373,6 +373,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .jobs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
  .job{font-size:.78rem;background:#17211b;border:1px solid #24332a;border-radius:9999px;padding:4px 11px;color:#9db8a8}
  .job.stale{border-color:#5c2c2c;color:#ff6a5c}
+ .job.off{opacity:.55}
  .traf{display:flex;align-items:flex-end;gap:3px;height:96px;background:#17211b;border:1px solid #24332a;border-radius:12px;padding:12px}
  .bar{flex:1;display:flex;flex-direction:column-reverse;min-width:6px}
  .bar .s{background:#2f8f52}.bar .f{background:#e2574c}
@@ -743,8 +744,12 @@ async function loadHealth(){
       sysCard('●','Database','Up','ok')+
       sysCard('●','Bot WhatsApp',bot[0],bot[1])+
       sysCard('✉','Email alerts',em[0],em[1]);
-    document.getElementById('jobs').innerHTML=(d.jobs||[]).map(j=>
-      '<span class="job'+(j.stale?' stale':'')+'">'+esc(j.name)+' · '+ago(j.mins_ago)+(j.stale?' (stalled)':'')+'</span>').join('')
+    document.getElementById('jobs').innerHTML=(d.jobs||[]).map(j=>{
+      var off = (j.enabled===false);
+      var cls = j.stale?' stale':(off?' off':'');
+      var tail = j.stale?' (stalled)':(off?' (off here)':'');
+      return '<span class="job'+cls+'">'+esc(j.name)+' · '+ago(j.mins_ago)+tail+'</span>';
+    }).join('')
       || '<span class="muted">No job runs recorded yet.</span>';
     const t=d.totals||{};
     const K=[['businesses','Shops',''],['online','Online','good'],

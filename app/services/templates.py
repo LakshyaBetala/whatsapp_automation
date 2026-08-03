@@ -80,10 +80,11 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
     ("invoice", Lang.hi): {
         "aisensy_name": "invoice_delivery_hi",
         "body": (
-            "Hi {client}, your bill from {business}:\n"
-            "{invoice_number} - {amount} ({date})\n"
-            "Pay via UPI: {upi_link}\n"
-            "PDF attached. Thank you."
+            "Namaste {client} ji,\n"
+            "{business} ki taraf se aapka bill:\n\n"
+            "Bill {invoice_number} - {amount} ({date})\n"
+            "UPI se pay karein: {upi_link}\n\n"
+            "Bill PDF saath mein hai. Dhanyavaad."
         ),
     },
     ("invoice", Lang.gu): {

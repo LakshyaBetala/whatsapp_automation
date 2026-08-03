@@ -197,11 +197,15 @@ def build_groups_query(company: str = "") -> str:
 
 
 def build_masters_query(company: str = "") -> str:
-    """All ledgers with balances + contact + credit-period fields in one shot."""
+    """All ledgers with balances + contact + credit-period fields in one shot.
+
+    GUID is Tally's own stable per-ledger id: it never changes when the shop
+    renames the party or edits their number, so ASVA matches on it to update the
+    SAME customer instead of creating a duplicate (the 'Thilak vs Thialk' bug)."""
     return _collection_query('Ledger', [
         'Name', 'Parent', 'OpeningBalance', 'ClosingBalance',
         'LedgerWhatsApp', 'LedgerMobile', 'LedgerPhone', 'LedgerContact', 'Address',
-        'BillCreditPeriod',
+        'BillCreditPeriod', 'GUID',
     ], company)
 
 
@@ -574,6 +578,9 @@ def parse_masters(xml_text: str, debtor_groups: Set[str]) -> List[Dict[str, Any]
             'current_outstanding': -closing,  # today's balance (informational)
             'whatsapp_number': _phone_from_ledger(led),
             'credit_days': parse_credit_days(led.findtext('BILLCREDITPERIOD', '')),
+            # Tally's stable id for this ledger - survives a rename/number edit,
+            # so the backend updates the same customer instead of duplicating.
+            'tally_guid': (led.findtext('GUID', '') or '').strip() or None,
         })
     return debtors
 

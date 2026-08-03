@@ -887,14 +887,9 @@ async def _confirm_photo_bill(business: dict) -> str:
         amount_fmt = inr(Decimal(str(pb["amount"])))
         vpa = business.get("upi_vpa")
         pay_link = upi.upi_link(vpa, business.get("business_name", ""), Decimal(str(pb["amount"])), invoice_number) if vpa else ""
-        body = (
-            f"Namaste {client['name']} ji! 🙏\n"
-            f"{business.get('business_name', '')} ki taraf se aapka bill.\n\n"
-            f"Bill number: {invoice_number}\n"
-            f"Amount: {amount_fmt}\n\n"
-            + (f"UPI se payment: {pay_link}\n\n" if pay_link else "")
-            + "Bill ki photo saath attach hai. Dhanyavaad!"
-        )
+        english = str(business.get("msg_language") or "").lower() == "english"
+        body = _manual_bill_body(client["name"], business.get("business_name", ""),
+                                 invoice_number, amount_fmt, pay_link, english, photo=True)
         result = await whatsapp.send_message(
             business_id=business_id,
             to_number=phone,
@@ -917,6 +912,30 @@ async def _confirm_photo_bill(business: dict) -> str:
         f"{sent_note}\n\n"
         f"Reminders will run automatically."
     )
+
+
+def _manual_bill_body(client_name: str, business_name: str, invoice_number: str,
+                      amount_fmt: str, pay_link: str, english: bool, photo: bool) -> str:
+    """Customer message for an owner-added bill (photo or text), in ONE language:
+    pure English when the shop is set to English, otherwise pure Hinglish. Keeps
+    an English shop from sending a Hinglish line (and vice versa)."""
+    if english:
+        lines = [f"Hello {client_name},",
+                 f"Your new bill from {business_name}.", "",
+                 f"Bill number: {invoice_number}",
+                 f"Amount: {amount_fmt}", ""]
+        if pay_link:
+            lines += [f"Pay via UPI: {pay_link}", ""]
+        lines.append("The bill photo is attached. Thank you!" if photo else "Thank you!")
+        return "\n".join(lines)
+    lines = [f"Namaste {client_name} ji! 🙏",
+             f"{business_name} ki taraf se aapka bill.", "",
+             f"Bill number: {invoice_number}",
+             f"Amount: {amount_fmt}", ""]
+    if pay_link:
+        lines += [f"UPI se payment: {pay_link}", ""]
+    lines.append("Bill ki photo saath attach hai. Dhanyavaad!" if photo else "Dhanyavaad!")
+    return "\n".join(lines)
 
 
 async def _handle_text_bill(business: dict, rest: str) -> str:
@@ -987,14 +1006,9 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
     if phone:
         vpa = business.get("upi_vpa")
         pay_link = upi.upi_link(vpa, business.get("business_name", ""), amount, invoice_number) if vpa else ""
-        body = (
-            f"Namaste {client['name']} ji! 🙏\n"
-            f"{business.get('business_name', '')} ki taraf se aapka bill.\n\n"
-            f"Bill number: {invoice_number}\n"
-            f"Amount: {amount_fmt}\n\n"
-            + (f"UPI se payment: {pay_link}\n\n" if pay_link else "")
-            + "Dhanyavaad!"
-        )
+        english = str(business.get("msg_language") or "").lower() == "english"
+        body = _manual_bill_body(client["name"], business.get("business_name", ""),
+                                 invoice_number, amount_fmt, pay_link, english, photo=False)
         result = await whatsapp.send_message(
             business_id=business_id,
             to_number=phone,

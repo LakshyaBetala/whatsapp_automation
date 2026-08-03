@@ -35,6 +35,28 @@ _JOB_MAX_QUIET_MIN = {
 }
 
 
+def _job_enabled(name: str) -> bool:
+    """Is this scheduler job actually turned on for THIS deployment?
+
+    job_heartbeats is a single shared table across every deployment that talks to
+    the same Supabase (host + each shop). A job the host does not run (e.g. the
+    host has ENABLE_OUTBOX_SEND=false because shops drain their own queue) leaves
+    a stale row that another box last stamped - which must NOT raise a "job
+    stopped running" alert on the host. So staleness is only judged for jobs
+    enabled here; anything else is reported as 'off', never 'stalled'. Unknown
+    jobs default to enabled so a genuinely dead job is never hidden."""
+    flag = {
+        "reminder_sweep": settings.enable_reminder_sweep,
+        "eod_digest": settings.enable_eod_digest,
+        "reminder_checkpoint": settings.enable_reminder_checkpoint and settings.enable_reminder_sweep,
+        "promise_followup": settings.enable_promise_capture and settings.enable_reminder_sweep,
+        "subscription_check": settings.enable_subscription_check,
+        "monitor": settings.enable_monitor,
+        "outbox_sweep": settings.enable_outbox_send,
+    }
+    return bool(flag.get(name, True))
+
+
 def _paged(query_fn, size: int = 1000) -> list:
     rows, start = [], 0
     while True:
@@ -133,8 +155,12 @@ def build_health(db) -> dict:
     for j in (db.table("job_heartbeats").select("*").execute().data or []):
         mins = _mins_since(_parse_ts(j.get("last_run_at")), now)
         limit = _JOB_MAX_QUIET_MIN.get(j["job_name"], 1500)
+        enabled = _job_enabled(j["job_name"])
         jobs.append({"name": j["job_name"], "mins_ago": mins, "ok": bool(j.get("ok")),
-                     "stale": mins > limit, "detail": j.get("detail")})
+                     # Only a job that runs HERE can be "stalled"; a job disabled on
+                     # this deployment is reported 'off', never as a stuck scheduler.
+                     "enabled": enabled, "stale": enabled and mins > limit,
+                     "detail": j.get("detail")})
 
     # Per-business health rows.
     rows = []

@@ -53,6 +53,22 @@
   body.dark #whatsnewmodal .wncard { background: #17211b; }
   body.dark #whatsnewmodal h3 { color: #eef3ef; }
   body.dark #whatsnewmodal li { color: #ccd8d0; }
+  #helpmodal { display: none; position: fixed; inset: 0; z-index: 210; background: rgba(0,0,0,.5); align-items: center; justify-content: center; }
+  #helpmodal .helpcard { background: #fff; border-radius: 14px; padding: 22px 24px; max-width: 560px; width: 92%; max-height: 84vh; overflow-y: auto; text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.35); }
+  #helpmodal h3 { margin: 0 0 6px; font-size: 1.2rem; color: #14201a; }
+  #helpmodal h4 { margin: 18px 0 8px; font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; color: #0a7d33; }
+  #helpmodal .hrow { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid #eef0ec; font-size: .9rem; line-height: 1.5; }
+  #helpmodal .hrow:last-child { border-bottom: 0; }
+  #helpmodal .hk { flex: 0 0 128px; font-weight: 700; color: #14201a; }
+  #helpmodal .hk code { background: #eef3ec; border: 1px solid #d7e3d7; border-radius: 5px; padding: 1px 6px; font-family: 'SF Mono','Consolas',monospace; font-size: .82rem; color: #0a5d28; }
+  #helpmodal .hv { color: #3a4a41; }
+  #helpmodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 9px 20px; border-radius: 8px; cursor: pointer; margin-top: 18px; }
+  body.dark #helpmodal .helpcard { background: #17211b; }
+  body.dark #helpmodal h3 { color: #eef3ef; }
+  body.dark #helpmodal .hrow { border-bottom-color: #24332b; }
+  body.dark #helpmodal .hk { color: #eef3ef; }
+  body.dark #helpmodal .hk code { background: #12241a; border-color: #2c5c42; color: #8fdca9; }
+  body.dark #helpmodal .hv { color: #b9c6bd; }
   /* Interactive tour (coach marks) */
   #tourbtn { background: #294d38; color: #fff; border: 0; border-radius: 8px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
   #tourbtn:hover { background: #326049; }
@@ -99,6 +115,21 @@
   #updatebtn:active { transform: scale(.97); }
   .banner { padding: 10px 16px; font-size: .92rem; display: none; }
   .banner.warn { display: block; background: #FBF3DB; color: #956400; border-bottom: 1px solid #efdfa8; }
+  /* App-wide notice bar: WhatsApp-down (critical) or finish-setup (warn). */
+  #gnotice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; padding: 11px 16px; font-size: .92rem; flex-shrink: 0; border-bottom: 1px solid transparent; }
+  #gnotice.crit { background: #5a1e1a; color: #ffe6e2; border-bottom-color: #7a2a24; }
+  #gnotice.warn { background: #FBF3DB; color: #7a5200; border-bottom-color: #efdfa8; }
+  #gnotice b { font-weight: 700; }
+  #gnotice .gmsg { flex: 1 1 260px; line-height: 1.45; }
+  #gnotice .gbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+  #gnotice button { border: 0; border-radius: 7px; padding: 7px 13px; font-size: .85rem; font-weight: 700; cursor: pointer; }
+  #gnotice.crit button { background: #fff; color: #5a1e1a; }
+  #gnotice.crit button.ghost { background: transparent; color: #ffd9d3; border: 1px solid #a5544c; }
+  #gnotice.warn button { background: #0a7d33; color: #fff; }
+  #gnotice.warn button.done { background: transparent; color: #7a5200; border: 1px solid #d8c374; }
+  #gnotice .gchk { display: inline-flex; gap: 5px; align-items: center; margin-right: 6px; font-size: .86rem; }
+  #gnotice .gchk .m { font-weight: 700; }
+  #gnotice .gchk.on { opacity: .6; }
   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #F7F6F3; color: #787774; font-size: 1.05rem; text-align: center; padding: 24px; }
   .overlay.hide { display: none; }
 
@@ -214,8 +245,9 @@
     <div id="topbar">
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
       <div style="display:flex;align-items:center;gap:10px">
+        <button id="helpbtn" onclick="openHelp()" title="All features and WhatsApp commands">&#9432; Help</button>
         <button id="tourbtn" onclick="startTour()" title="Take a quick tour of ASVA">? Tour</button>
-        <button id="pagereload" onclick="reloadActive()" title="Refresh this page">&#8635; Reload</button>
+        <button id="pagereload" onclick="reloadActive()" title="Refresh this page">&#8635; Refresh view</button>
         <button id="updchk" onclick="checkForUpdate()" title="Check for a new ASVA version">&#8681; Check update</button>
         <button id="phonebtn" onclick="openPhoneApp()" title="Open ASVA on your phone">&#128241; Phone app</button>
         <div class="langtoggle">
@@ -241,6 +273,13 @@
         <button class="pclose" onclick="document.getElementById('whatsnewmodal').style.display='none'">Got it</button>
       </div>
     </div>
+    <div id="helpmodal" onclick="if(event.target===this)this.style.display='none'">
+      <div class="pcard helpcard">
+        <h3 id="helptitle">Help - everything ASVA can do</h3>
+        <div id="helpbody"></div>
+        <button class="pclose" id="helpclose" onclick="document.getElementById('helpmodal').style.display='none'">Got it</button>
+      </div>
+    </div>
     <div id="tourmask"></div>
     <div id="tourspot"></div>
     <div id="tourpop">
@@ -263,6 +302,7 @@
       <span id="updatemsg">A new version of ASVA is ready.</span>
       <button id="updatebtn" onclick="applyUpdate()">Restart to update</button>
     </div>
+    <div id="gnotice" style="display:none"></div>
     <div id="maincontent">
     <div class="view on" id="v-dash">
       <div class="col">
@@ -314,7 +354,7 @@
         <div class="srow"><span class="dot" id="s-backend"></span><div class="mid"><div class="sname">ASVA server (reminders + dashboard)</div><div class="stext" id="st-backend">checking...</div></div><button onclick="runDiag()">Check</button></div>
         <div class="srow"><span class="dot" id="s-whatsapp"></span><div class="mid"><div class="sname">Shop WhatsApp</div><div class="stext" id="st-whatsapp">checking...</div></div><button onclick="restart('whatsapp')">Restart</button></div>
         <div class="srow"><span class="dot ok"></span><div class="mid"><div class="sname">Tally watcher</div><div class="stext">Running - new Tally bills reach WhatsApp in ~2 min.</div></div><button onclick="restart('watcher')">Restart</button></div>
-        <label class="auto"><input type="checkbox" id="autostart"> Windows chalu hote hi ASVA apne aap khul jaye</label>
+        <label class="auto"><input type="checkbox" id="autostart"> <span id="autostartlbl">Open ASVA automatically when Windows starts</span></label>
         <div style="margin-top:6px"><button class="diagbtn" id="diagbtn" onclick="runDiag()">Check connection and find the problem</button></div>
         <div id="diagresults"></div>
         <div style="margin-top:14px"><button class="diagbtn" id="cocbtn" onclick="openCompanyPicker()">Change Tally company</button></div>
@@ -332,11 +372,65 @@ let CONFIG = null, loaded = {}, lastRenderedSync = null;
 function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
 
 // ── Dark / light theme (persisted on this laptop) ─────────────────────────
+// The pages inside each tab are served by the backend (their own light-only
+// CSS), so the shell's body.dark class can't reach them. We inject this dark
+// sheet INTO each webview instead - remapping the warm-monochrome light palette
+// (page #F7F6F3, cards #fff, borders #EAEAEA, text #2F3437/#787774) to the same
+// dark tones the shell uses, while keeping the green primary + coloured chips.
+const WEBVIEW_DARK_CSS = `
+  :root { color-scheme: dark; }
+  html, body { background:#0f1512 !important; color:#dfe8e2 !important; }
+  .bar, .subhead, header, .sticky { background:#0f1512 !important; }
+  /* Surfaces: cards, tables, inputs, generic buttons */
+  .tablewrap, .usage, .subtabs, .modalbox, .msgprev, .statuscard, .card, .box,
+  table, thead, tbody, tr, td, .partycard, .sectionbox, .panel, .well,
+  input, select, textarea, button {
+    background-color:#16221b !important; color:#dfe8e2 !important;
+    border-color:#2c4536 !important;
+  }
+  th { background:#14201a !important; color:#9fb7a6 !important; border-color:#2c4536 !important; }
+  td { border-color:#223228 !important; }
+  tbody tr:hover td, tr:hover td { background:#1b2a21 !important; }
+  nav.topnav { background:#14201a !important; border-color:#2c4536 !important; }
+  .topnav a { color:#cfe0d5 !important; }
+  .topnav a:hover { background:#1e2c23 !important; }
+  h1,h2,h3,h4,b,strong { color:#eef3ef !important; }
+  a { color:#7fe0a6 !important; }
+  input::placeholder, textarea::placeholder { color:#7d9488 !important; }
+  ::-webkit-scrollbar-thumb { background:#2c4536 !important; }
+  /* Keep the green primary + its variants readable on dark */
+  #save, .topnav a.on, .subtabs button.on, .cbsend, .ufill, .btn-apply,
+  [style*="background:#0a7d33"], [style*="background: #0a7d33"] {
+    background-color:#0a7d33 !important; color:#fff !important; border-color:#0a7d33 !important;
+  }
+  #save:hover, .cbsend:hover { background-color:#0c9a3f !important; }
+  .ubar { background:#24332b !important; }
+  /* Catch plain-white inline surfaces that classes miss */
+  [style*="background:#fff"], [style*="background: #fff"],
+  [style*="background:#ffffff"], [style*="background: #ffffff"] {
+    background-color:#16221b !important;
+  }
+`;
+
+async function applyWebviewTheme(w) {
+  if (!w || !w.insertCSS) return;
+  const dark = localStorage.getItem('asva_theme') === 'dark';
+  try {
+    if (dark && !w._darkKey) {
+      w._darkKey = await w.insertCSS(WEBVIEW_DARK_CSS);
+    } else if (!dark && w._darkKey) {
+      await w.removeInsertedCSS(w._darkKey);
+      w._darkKey = null;
+    }
+  } catch (e) { /* webview not ready yet - re-applied on dom-ready */ }
+}
+
 function applyTheme() {
   const dark = localStorage.getItem('asva_theme') === 'dark';
   document.body.classList.toggle('dark', dark);
   const b = document.getElementById('themebtn');
   if (b) b.textContent = dark ? 'Light' : 'Dark';
+  document.querySelectorAll('webview').forEach(applyWebviewTheme);
 }
 function toggleTheme() {
   localStorage.setItem('asva_theme', localStorage.getItem('asva_theme') === 'dark' ? 'light' : 'dark');
@@ -451,6 +545,54 @@ function applyLangButtons() {
   if (hi) hi.classList.toggle('on', !en);
   if (e) e.classList.toggle('on', en);
 }
+
+// Translate the app's OWN chrome (nav, top bar, status panel) to match the EN/HI
+// toggle, so the app never mixes languages with itself. The tab CONTENTS reload
+// with ?lang separately (setLang); this is only the shell around them.
+function _navText(v, main, sub) {
+  const b = document.querySelector('.nav[data-v="' + v + '"]');
+  if (b) b.innerHTML = esc(main) + '<small>' + esc(sub) + '</small>';
+}
+function _setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
+function defaultReloadLabel() {
+  const en = currentLang() === 'english';
+  return en ? 'Get latest from Tally<small>Fresh parties &amp; bills</small>'
+            : 'Tally se laayein<small>Fresh party aur bill</small>';
+}
+function applyChromeLang() {
+  const en = currentLang() === 'english';
+  if (en) {
+    _navText('dash', 'Dashboard', 'Parties, dues and bills');
+    _navText('reminders', 'Reminders', 'Time, language and holidays');
+    _navText('payments', 'Payments', 'Who paid, confirm to Tally');
+    _navText('analytics', 'Analytics', 'Your business numbers');
+    _navText('accounts', 'Accounts', 'UPI and bank details');
+    _navText('setup', 'WhatsApp Setup', 'Connect your number');
+    _setText('helpbtn', 'ⓘ Help'); _setText('tourbtn', '? Tour');
+    _setText('pagereload', '↻ Refresh view'); _setText('updchk', '⬇ Check update');
+    _setText('phonebtn', '📱 Phone app');
+    _setText('autostartlbl', 'Open ASVA automatically when Windows starts');
+    _setText('diagbtn', 'Check connection and find the problem');
+    _setText('cocbtn', 'Change Tally company');
+  } else {
+    _navText('dash', 'Dashboard', 'Party, baaki aur bill');
+    _navText('reminders', 'Reminders', 'Time, bhasha aur chhutti');
+    _navText('payments', 'Payments', 'Kaun paid, Tally mein daalein');
+    _navText('analytics', 'Analytics', 'Aapke business ke numbers');
+    _navText('accounts', 'Accounts', 'UPI aur bank details');
+    _navText('setup', 'WhatsApp Setup', 'Apna number jodein');
+    _setText('helpbtn', 'ⓘ Madad'); _setText('tourbtn', '? Tour');
+    _setText('pagereload', '↻ View refresh'); _setText('updchk', '⬇ Update check');
+    _setText('phonebtn', '📱 Phone app');
+    _setText('autostartlbl', 'Windows chalu hote hi ASVA apne aap khul jaye');
+    _setText('diagbtn', 'Connection check karein aur problem dhoondein');
+    _setText('cocbtn', 'Tally company badlein');
+  }
+  // Reload button keeps its live label while a refresh is running; otherwise
+  // reset it to the localized default.
+  const rb = document.getElementById('reloadbtn');
+  if (rb && !awaitingSync) rb.innerHTML = defaultReloadLabel();
+}
 // Show the QR + link that opens this shop's read-only phone app. The token in
 // the URL links the phone to the SAME live data as this desktop app.
 function openPhoneApp() {
@@ -466,9 +608,84 @@ function openPhoneApp() {
   if (m) m.style.display = 'flex';
 }
 
+// ── Help: every feature + every WhatsApp command, always one tap away ─────
+// This is the in-app reference so nothing is hidden behind memory. Bilingual,
+// follows the EN/HI toggle. Kept as data so it stays easy to extend.
+function openHelp() {
+  const en = currentLang() === 'english';
+  const T = en ? {
+    title: 'Help - everything ASVA can do',
+    tabs: 'THE SCREENS',
+    cmds: 'RUN ASVA FROM WHATSAPP (message your ASVA number)',
+    tip: 'Tip: you never have to memorise these - send HELP to your ASVA number anytime and it lists them back to you.',
+    close: 'Got it',
+    tabRows: [
+      ['Dashboard', 'Every party, how much they owe, and how many days late. Red = overdue.'],
+      ['Reminders', 'Set the send time, language, and skip Sundays/holidays. Runs daily on its own. Press "Send now" to nudge one party immediately.'],
+      ['Payments', 'Customer payments land here automatically. Check the amount, then Confirm to Tally in one tap.'],
+      ['Analytics', 'Your business numbers: outstanding, recovered this month, oldest dues.'],
+      ['Accounts', 'Your UPI ID and bank details. Added once, it rides on every reminder as a pay link.'],
+      ['WhatsApp Setup', 'Scan the QR to link your shop WhatsApp. Bills and reminders go from your own number.'],
+      ['Get latest from Tally', 'Pulls fresh parties and bills from Tally now (takes 2-3 min). Left sidebar.'],
+      ['Phone app', 'Scan a QR to open ASVA on your phone (view only): live dues and one-tap call.'],
+      ['Change Tally company / Start with Windows', 'Both are inside Status (bottom-left).'],
+    ],
+    cmdRows: [
+      ['LIST', 'See everyone who owes you, biggest first.'],
+      ['PAID <name>', 'Record that a party paid; ASVA asks the amount and posts it to Tally.'],
+      ['BILL <name> <amount>', 'Make a bill on the spot and send it to that customer.'],
+      ['CASH', 'How much money is expected to come in over the next few days.'],
+      ['CARD', 'Your recovery report card - how well collections went.'],
+      ['SCORE <name>', 'How reliably that customer pays (New / Reliable / Watch / Slow).'],
+      ['DIGEST 9PM', 'Set when your daily summary arrives (any hour).'],
+      ['TEAM <question>', 'Reach a real person on the ASVA team for help.'],
+      ['HELP', 'Lists every command back to you, anytime.'],
+    ],
+  } : {
+    title: 'Help - ASVA kya-kya kar sakta hai',
+    tabs: 'SCREENS',
+    cmds: 'WHATSAPP SE ASVA CHALAYEIN (apne ASVA number par message karein)',
+    tip: 'Tip: inhe yaad rakhna zaroori nahi - apne ASVA number par HELP bhejein, saare command wapas list ho jaate hain.',
+    close: 'Theek hai',
+    tabRows: [
+      ['Dashboard', 'Har party, kitna baaki, kitne din late. Laal = overdue.'],
+      ['Reminders', 'Send time, bhasha, aur Sunday/chhutti skip set karein. Roz apne aap chalta hai. "Send now" se ek party ko turant nudge.'],
+      ['Payments', 'Customer payments yahan apne aap aate hain. Amount check karein, phir ek tap Confirm to Tally.'],
+      ['Analytics', 'Aapke business ke numbers: outstanding, is mahine recover hua, sabse purana baaki.'],
+      ['Accounts', 'Aapki UPI ID aur bank details. Ek baar daalein, har reminder mein pay link ban ke lagta hai.'],
+      ['WhatsApp Setup', 'QR scan karke shop WhatsApp jodein. Bill aur reminder aapke apne number se jaate hain.'],
+      ['Get latest from Tally', 'Tally se fresh party aur bill abhi laata hai (2-3 min). Baayein sidebar mein.'],
+      ['Phone app', 'QR scan karke ASVA apne phone par kholein (sirf dekhne): live baaki aur ek-tap call.'],
+      ['Tally company badlein / Windows ke saath chalu', 'Dono Status (neeche baayein) ke andar hain.'],
+    ],
+    cmdRows: [
+      ['LIST', 'Kaun-kaun baaki hai, sabse bada pehle.'],
+      ['PAID <naam>', 'Party ne pay kiya record karein; ASVA amount poochta hai aur Tally mein daalta hai.'],
+      ['BILL <naam> <amount>', 'Turant bill banayein aur us customer ko bhejein.'],
+      ['CASH', 'Agle kuch dino mein kitna paisa aane ki ummeed hai.'],
+      ['CARD', 'Aapka recovery report card - collection kaisa raha.'],
+      ['SCORE <naam>', 'Woh customer kitna theek se pay karta hai (New / Reliable / Watch / Slow).'],
+      ['DIGEST 9PM', 'Roz ka summary kab aaye woh set karein (koi bhi ghanta).'],
+      ['TEAM <sawaal>', 'ASVA team ke asli insaan se madad lein.'],
+      ['HELP', 'Saare command kabhi bhi wapas list karta hai.'],
+    ],
+  };
+  const rows = (arr, isCmd) => arr.map(([k, v]) =>
+    '<div class="hrow"><div class="hk">' + (isCmd ? '<code>' + esc(k) + '</code>' : esc(k)) +
+    '</div><div class="hv">' + esc(v) + '</div></div>').join('');
+  document.getElementById('helptitle').textContent = T.title;
+  document.getElementById('helpclose').textContent = T.close;
+  document.getElementById('helpbody').innerHTML =
+    '<h4>' + esc(T.tabs) + '</h4>' + rows(T.tabRows, false) +
+    '<h4>' + esc(T.cmds) + '</h4>' + rows(T.cmdRows, true) +
+    '<div class="hv" style="margin-top:14px;font-size:.85rem;opacity:.85">' + esc(T.tip) + '</div>';
+  document.getElementById('helpmodal').style.display = 'flex';
+}
+
 function setLang(l) {
   localStorage.setItem('asva_lang', l);
   applyLangButtons();
+  applyChromeLang();
   // Save it on the SERVER too, so the WhatsApp assistant answers the owner in the
   // same language as the app ("chosen in the app, reflected in chat"). Fire and
   // forget - the local UI already switched.
@@ -506,6 +723,9 @@ function hardenWebview(w) {
     setTimeout(recover, 5000);                    // backend probably still booting
   });
   w.addEventListener('did-finish-load', () => { _failTries[w.id] = 0; });
+  // Inserted CSS is dropped on every navigation/reload, so re-apply the dark
+  // sheet each time the page is ready (this is what themes the tab content).
+  w.addEventListener('dom-ready', () => { w._darkKey = null; applyWebviewTheme(w); });
 }
 function hardenAllWebviews() {
   document.querySelectorAll('webview').forEach(hardenWebview);
@@ -540,7 +760,6 @@ function reloadActive() {
 // Top-bar / sidebar "Reload data": force an immediate Tally refresh, then reload
 // the webviews once the sync lands (so the dashboard re-renders with fresh data).
 let awaitingSync = false, syncBaseline = null, lastSyncedAtSeen = null;
-const RELOAD_LABEL = 'Tally refresh<small>Fresh data from Tally</small>';
 function setReloadLabel(html) {
   const b = document.getElementById('reloadbtn');
   if (b) b.innerHTML = html;
@@ -557,12 +776,12 @@ async function reloadData() {
   try { res = await window.asva.tallyReload(); } catch (e) {}
   if (res && res.ok === false && res.cooldown) {
     setReloadLabel(res.detail || 'Try again in a few minutes');
-    setTimeout(() => setReloadLabel(RELOAD_LABEL), 4000);
+    setTimeout(() => setReloadLabel(defaultReloadLabel()), 4000);
     return;
   }
   awaitingSync = true; syncBaseline = lastSyncedAtSeen;
   setReloadLabel('Getting data from Tally...');
-  setTimeout(() => { if (awaitingSync) { awaitingSync = false; setReloadLabel(RELOAD_LABEL); } }, 180000);
+  setTimeout(() => { if (awaitingSync) { awaitingSync = false; setReloadLabel(defaultReloadLabel()); } }, 180000);
 }
 async function asvaRelink() {
   if (!confirm('Get a fresh QR? The old link will be removed and you scan once again.')) return;
@@ -592,12 +811,57 @@ function renderQr(boxId, ready, reachable, qr, label) {
   }
 }
 function waText(ready, reachable) {
-  if (ready) return 'Connected. Messages can go.';
-  if (reachable) return 'Not linked yet. Scan the QR in WhatsApp Setup.';
-  return 'Starting...';
+  const en = currentLang() === 'english';
+  if (ready) return en ? 'Connected. Messages can go.' : 'Connected. Message ja sakte hain.';
+  if (reachable) return en ? 'Not linked yet. Scan the QR in WhatsApp Setup.' : 'Abhi link nahi. WhatsApp Setup mein QR scan karein.';
+  return en ? 'Starting...' : 'Chalu ho raha hai...';
+}
+function openFixIt() {
+  const p = document.getElementById('statuspanel');
+  if (p) p.classList.add('show');
+  try { runDiag(); } catch (e) {}
+}
+function finishSetup() { localStorage.setItem('asva_setup_done', '1'); }
+// App-wide notice: WhatsApp-down is CRITICAL (blocks all sending) and always
+// shows while disconnected; otherwise a one-time "finish setup" checklist until
+// the essentials (WhatsApp linked + first Tally sync) are in and the owner
+// dismisses it. This is the persistent "are you set up?" signal.
+function renderGNotice(s) {
+  const el = document.getElementById('gnotice');
+  if (!el) return;
+  const en = currentLang() === 'english';
+  const waOk = !!s.whatsapp, synced = !!s.lastSyncedAt;
+  if (!waOk) {
+    el.className = 'crit'; el.style.display = 'flex';
+    el.innerHTML =
+      '<div class="gmsg"><b>' +
+      (en ? 'Shop WhatsApp is not connected.' : 'Shop WhatsApp connect nahi hai.') + '</b> ' +
+      (en ? 'Reminders and bills cannot go out until you re-link it.'
+          : 'Jab tak dobara link nahi karte, reminder aur bill nahi jaayenge.') + '</div>' +
+      '<div class="gbtns">' +
+      '<button onclick="show(\'setup\')">' + (en ? 'Connect now' : 'Abhi connect karein') + '</button>' +
+      '<button class="ghost" onclick="openFixIt()">' + (en ? 'Fix it' : 'Theek karein') + '</button></div>';
+    return;
+  }
+  if (localStorage.getItem('asva_setup_done')) { el.style.display = 'none'; return; }
+  const chk = (ok, t) => '<span class="gchk ' + (ok ? 'on' : '') + '"><span class="m">' +
+    (ok ? '✓' : '•') + '</span>' + esc(t) + '</span>';
+  el.className = 'warn'; el.style.display = 'flex';
+  el.innerHTML =
+    '<div class="gmsg"><b>' + (en ? 'Finish setup:' : 'Setup poora karein:') + '</b> ' +
+    chk(true, en ? 'WhatsApp linked' : 'WhatsApp linked') +
+    chk(synced, en ? 'Tally data' : 'Tally data') +
+    chk(false, en ? 'UPI' : 'UPI') + chk(false, en ? 'Reminders' : 'Reminder') + '</div>' +
+    '<div class="gbtns">' +
+    (synced ? '' : '<button onclick="reloadData()">' + (en ? 'Get Tally data' : 'Tally data laayein') + '</button>') +
+    '<button onclick="show(\'accounts\')">' + (en ? 'Add UPI' : 'UPI daalein') + '</button>' +
+    '<button onclick="show(\'reminders\')">' + (en ? 'Set reminders' : 'Reminder set karein') + '</button>' +
+    '<button class="done" onclick="finishSetup();renderGNotice(window._lastStatus||{})">' +
+    (en ? 'Done' : 'Ho gaya') + '</button></div>';
 }
 
 applyLangButtons();
+applyChromeLang();
 applyTheme();
 // ── Multi-company: each Tally company has its own token/data; switching
 // simply points every page at that company's URLs. ──
@@ -639,6 +903,14 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.9.1': [
+    'Bills you export from Tally now send reliably, even one dated a few days back. If a bill can’t go out, ASVA tells you the exact reason (for example, the customer has no WhatsApp number) instead of failing quietly.',
+    'Fixing a customer’s spelling or changing their number in Tally now updates the same customer, so you no longer get two entries for one party with their dues split.',
+    'New Help button (top right): every screen explained and every WhatsApp command with an example, always one tap away.',
+    'A clearer guided tour that shows you exactly what to do on each screen, and a “finish setup” checklist so you always know what’s left.',
+    'If your shop WhatsApp is not connected, a bold warning now shows on every screen, and “Send now” tells you to reconnect instead of failing silently. One-tap “Fix it” runs a connection check.',
+    'The whole app now follows your English / Hindi choice, dark mode covers every screen, and messages stay in one language (English stays English, Hindi stays natural Hinglish).',
+  ],
   '1.9.0': [
     'Steadier WhatsApp: it answers a phone’s re-send request instead of retrying in a loop that used to drop the connection, so the link holds and needs far fewer re-scans.',
     'Safety net: if two customers had the same phone number, a payment now goes to whichever one actually owes money, and nothing crashes.',
@@ -711,27 +983,30 @@ function showWhatsNewIfUpdated() {
 // they DO each thing, not just read. Short on purpose (the old tour was too much
 // at once). Bilingual (en / hi = Hinglish).
 const TOUR = [
-  { en: { t: 'Welcome to ASVA', b: 'ASVA gets your udhaar back on its own. 7 quick taps - under a minute.' },
-    hi: { t: 'ASVA mein swagat', b: 'ASVA aapka udhaar apne aap wapas laata hai. 7 chhote tap - ek minute.' } },
+  { en: { t: 'Welcome to ASVA', b: 'I will show you exactly what to do to start getting your udhaar back. Just a few quick taps - you can leave anytime with Skip.' },
+    hi: { t: 'ASVA mein swagat', b: 'Main aapko theek-theek bataunga ki udhaar wapas laane ke liye kya karna hai. Bas kuch tap - kabhi bhi Skip kar sakte hain.' } },
   { sel: '.nav[data-v="dash"]', view: 'dash', tap: true,
-    en: { t: 'Who owes you', b: 'Everyone who owes, how much, for how long.', h: 'Your turn: tap Dashboard →' },
-    hi: { t: 'Kiska paisa baaki', b: 'Kis-kis ka, kitna, kitne din se.', h: 'Aapki baari: Dashboard tap karein →' } },
-  { sel: '.nav[data-v="reminders"]', view: 'reminders', tap: true,
-    en: { t: 'Set reminders', b: 'Pick the time and language, and skip Sundays / holidays. Set once - it runs daily on its own.', h: 'Your turn: tap Reminders →' },
-    hi: { t: 'Reminder set karein', b: 'Time aur bhasha chunein, Sunday / chhutti skip karein. Ek baar set - roz apne aap.', h: 'Aapki baari: Reminders tap karein →' } },
-  { sel: '.nav[data-v="accounts"]', view: 'accounts', tap: true,
-    en: { t: 'Add your UPI', b: 'Paste it once. It rides on every reminder so customers pay in one tap.', h: 'Your turn: tap Accounts →' },
-    hi: { t: 'Apna UPI daalein', b: 'Ek baar daalein. Har reminder mein lagta hai - customer ek tap mein pay kare.', h: 'Aapki baari: Accounts tap karein →' } },
+    en: { t: '1. Dashboard - who owes you', b: 'This is your main screen: every party, how much they owe, and how many days late. Red means overdue. This is where you decide who to chase.', h: 'Your turn: tap Dashboard →' },
+    hi: { t: '1. Dashboard - kiska paisa baaki', b: 'Yeh aapki main screen hai: har party, kitna baaki, kitne din late. Laal matlab overdue. Yahin se decide karein kiska peecha karna hai.', h: 'Aapki baari: Dashboard tap karein →' } },
   { sel: '.nav[data-v="setup"]', view: 'setup', tap: true,
-    en: { t: 'Connect WhatsApp', b: 'Scan the QR once, like WhatsApp Web. Messages go from YOUR number.', h: 'Your turn: tap WhatsApp Setup →' },
-    hi: { t: 'WhatsApp jodein', b: 'QR ek baar scan karein, WhatsApp Web ki tarah. Message aapke number se jaate hain.', h: 'Aapki baari: WhatsApp Setup tap karein →' } },
+    en: { t: '2. Connect WhatsApp (do this first)', b: 'On your shop phone open WhatsApp → Linked devices → Link a device → scan the QR shown here. Do this once. Every bill and reminder then goes from YOUR own number.', h: 'Your turn: tap WhatsApp Setup →' },
+    hi: { t: '2. WhatsApp jodein (pehle yeh)', b: 'Apne shop phone par WhatsApp kholein → Linked devices → Link a device → yahan dikha QR scan karein. Ek baar. Phir har bill aur reminder AAPKE apne number se jaata hai.', h: 'Aapki baari: WhatsApp Setup tap karein →' } },
+  { sel: '.nav[data-v="accounts"]', view: 'accounts', tap: true,
+    en: { t: '3. Add your UPI', b: 'Paste your UPI ID (like yourname@okaxis) and tap Save. From now it appears as a one-tap pay link inside every reminder, so customers can pay instantly.', h: 'Your turn: tap Accounts →' },
+    hi: { t: '3. Apna UPI daalein', b: 'Apni UPI ID (jaise yourname@okaxis) paste karein aur Save dabaayein. Ab yeh har reminder mein ek-tap pay link ban ke aata hai, customer turant pay kar sakta hai.', h: 'Aapki baari: Accounts tap karein →' } },
+  { sel: '.nav[data-v="reminders"]', view: 'reminders', tap: true,
+    en: { t: '4. Set reminders once', b: 'Choose the send time (say 10 AM), pick English or Hinglish, and turn OFF Sundays and holidays. Tap Save. After that reminders go out every day on their own - you do nothing.', h: 'Your turn: tap Reminders →' },
+    hi: { t: '4. Reminder ek baar set karein', b: 'Send time chunein (jaise subah 10), English ya Hinglish chunein, aur Sunday/chhutti OFF karein. Save dabaayein. Iske baad reminder roz apne aap jaate hain - aapko kuch nahi karna.', h: 'Aapki baari: Reminders tap karein →' } },
   { sel: '.nav[data-v="payments"]', view: 'payments', tap: true,
-    en: { t: 'When they pay', b: 'It shows up here. Check the amount → one tap into Tally. You always confirm.', h: 'Your turn: tap Payments →' },
-    hi: { t: 'Jab paisa aaye', b: 'Yahan dikhta hai. Amount check → ek tap Tally mein. Confirm aap karte hain.', h: 'Aapki baari: Payments tap karein →' } },
+    en: { t: '5. When a customer pays', b: 'Payments appear here on their own. Check the amount is right, then tap Confirm to Tally - it posts the receipt in one tap. Nothing ever posts without your confirm.', h: 'Your turn: tap Payments →' },
+    hi: { t: '5. Jab customer pay kare', b: 'Payments yahan apne aap aate hain. Amount sahi hai check karein, phir Confirm to Tally dabaayein - ek tap mein receipt post ho jaata hai. Aapke confirm ke bina kuch post nahi hota.', h: 'Aapki baari: Payments tap karein →' } },
+  { sel: '#helpbtn', tap: true,
+    en: { t: '6. All features + commands', b: 'This Help button always lists everything ASVA can do and every WhatsApp command (LIST, PAID, BILL and more) with an example. Open it anytime you forget something.', h: 'Your turn: tap Help →' },
+    hi: { t: '6. Saare features + commands', b: 'Yeh Help button hamesha ASVA ke saare kaam aur har WhatsApp command (LIST, PAID, BILL wagairah) example ke saath dikhata hai. Kuch bhool jaayein to kabhi bhi kholein.', h: 'Aapki baari: Help tap karein →' } },
   { sel: '#phonebtn', tap: true,
-    en: { t: 'ASVA on your phone', b: 'Live dues and one-tap call, wherever you are.', h: 'Your turn: tap Phone app →' },
-    hi: { t: 'Phone par ASVA', b: 'Live baaki aur ek tap call, aap kahin bhi ho.', h: 'Aapki baari: Phone app tap karein →' } },
-  { en: { t: 'Run it from WhatsApp', b: 'No need to open this app. Message your ASVA number: send LIST to see who owes. Send HELP for all commands - you never memorise them.' },
+    en: { t: '7. ASVA on your phone', b: 'Tap this to scan a QR and open ASVA on your own phone (view only): live dues and one-tap call, wherever you are.', h: 'Your turn: tap Phone app →' },
+    hi: { t: '7. Phone par ASVA', b: 'Isse QR scan karke ASVA apne phone par kholein (sirf dekhne ke liye): live baaki aur ek-tap call, aap kahin bhi ho.', h: 'Aapki baari: Phone app tap karein →' } },
+  { en: { t: 'Run it from WhatsApp too', b: 'You do not even need to open this app. Message your ASVA number: send LIST to see who owes, PAID to record a payment, BILL to make a bill. Send HELP for all commands - you never memorise them.' },
     hi: { t: 'WhatsApp se chalayein', b: 'App kholna zaroori nahi. Apne ASVA number par LIST bhejein - kaun baaki hai. HELP bhejein - saare commands, yaad rakhna nahi padta.' } },
   { en: { t: 'Done!', b: 'You are ready. Stuck? Send TEAM + your question on WhatsApp - a real person helps. Reopen this from “? Tour” anytime.' },
     hi: { t: 'Ho gaya!', b: 'Aap taiyaar. Atak gaye? WhatsApp par TEAM + sawaal bhejein - asli insaan madad karega. Dobara: upar “? Tour”.' } },
@@ -770,7 +1045,13 @@ function showTourStep() {
   // Wait a tick so a just-switched view has laid out before we measure.
   setTimeout(() => {
     if (el) {
-      // Hands-on: let the owner ADVANCE by tapping the highlighted button.
+      // Keep the highlighted control on screen so the spotlight is never off in
+      // a corner the owner has to hunt for.
+      try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+      // Hands-on: let the owner ADVANCE by tapping the highlighted button. Every
+      // tap target is a NAVIGATION button (open a tab), never a Send button, so
+      // the tour can never fire a real message to a customer. Next is always
+      // available too, so no one is ever trapped waiting on a tap.
       if (s.tap) {
         const fn = () => { setTimeout(() => tourGo(1), 120); };
         el.addEventListener('click', fn, { once: true });
@@ -835,7 +1116,7 @@ window.asva.onStatus((s) => {
   // Manual "Tally refresh" completion: stop the wait + re-render when it lands.
   if (awaitingSync && s.lastSyncedAt && s.lastSyncedAt !== syncBaseline) {
     awaitingSync = false;
-    setReloadLabel(RELOAD_LABEL);
+    setReloadLabel(defaultReloadLabel());
     reloadAll();
   }
   // Dynamic data loading: whenever a NEWER sync lands (from any source), re-
@@ -852,11 +1133,12 @@ window.asva.onStatus((s) => {
   document.getElementById('st-whatsapp').textContent = waText(s.whatsapp, s.whatsappReachable);
   renderQr('qr-shop', s.whatsapp, s.whatsappReachable, s.whatsappQr, 'shop');
 
+  // App-wide WhatsApp-down / finish-setup notice (replaces the old dash-only
+  // banner so the critical message is seen on every tab, not just Dashboard).
+  window._lastStatus = s;
+  renderGNotice(s);
   const banner = document.getElementById('dashbanner');
-  if (!s.whatsapp) {
-    banner.className = 'banner warn';
-    banner.innerHTML = 'Shop WhatsApp is not connected - reminders cannot go. Scan the QR in "WhatsApp Setup".';
-  } else { banner.className = 'banner'; }
+  if (banner) banner.className = 'banner';
 
   const ov = document.getElementById('dashov');
   if (s.backend) {
