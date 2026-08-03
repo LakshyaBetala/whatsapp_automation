@@ -2957,7 +2957,7 @@ async def admin_setup(token: str = Query(...), lang: str = Query("english")):
 
 <div class="card" style="margin-top:20px;max-width:560px">
  <label>1. UPI ID (reminder me QR + link isi ka jayega)</label>
- <input id="upi" value="{upi_cur}" placeholder="e.g. rupeshrtc@oksbi">
+ <input id="upi" value="{upi_cur}" placeholder="e.g. yourshop@okhdfcbank">
  <label>2. Message language</label>
  <div class="seg" id="lang" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
    <button type="button" data-v="hinglish" class="on" style="border:0;padding:9px 16px;cursor:pointer">Hinglish</button>
@@ -3531,17 +3531,17 @@ async def admin_accounts(token: str = Query(...), lang: str = Query("english")):
 <div class="muted">{b['business_name']}</div>
 <div class="card" style="margin-top:20px;max-width:560px">
  <label>UPI ID 1 (Default - reminder me QR + link isi ka jayega)</label>
- <input id="upi" value="{val('upi_vpa')}" placeholder="e.g. rupeshrtc@oksbi">
+ <input id="upi" value="{val('upi_vpa')}" placeholder="e.g. yourshop@okhdfcbank">
  
  <label>UPI ID 2 (Optional)</label>
- <input id="upi2" value="{val('upi_vpa_2')}" placeholder="e.g. rupeshrtc2@okaxis">
+ <input id="upi2" value="{val('upi_vpa_2')}" placeholder="e.g. yourshop@oksbi">
  
  <label>UPI ID 3 (Optional)</label>
- <input id="upi3" value="{val('upi_vpa_3')}" placeholder="e.g. rupeshrtc3@okicici">
+ <input id="upi3" value="{val('upi_vpa_3')}" placeholder="e.g. yourshop@okaxis">
  <div class="hint" style="margin-top:8px">UPI set hai to har reminder me pay-link + QR apne aap lagta hai.</div>
  
  <label style="margin-top:20px">Bank account name</label>
- <input id="ban" value="{val('bank_account_name')}" placeholder="RISHAB TRADING COMPANY">
+ <input id="ban" value="{val('bank_account_name')}" placeholder="Your business name">
  <label>Account number</label>
  <input id="acc" value="{val('bank_account_no')}" placeholder="0000 0000 0000">
  <label>IFSC</label>
