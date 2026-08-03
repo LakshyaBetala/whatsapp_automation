@@ -63,7 +63,10 @@
   #tourpop .tbar > i { display: block; height: 100%; background: #0a7d33; border-radius: 4px; transition: width .25s ease; }
   #tourpop .tstep { font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: #789; font-weight: 700; margin-bottom: 6px; }
   #tourpop h4 { margin: 0 0 6px; font-size: 1.05rem; color: #14201a; }
-  #tourpop p { margin: 0 0 14px; font-size: .9rem; line-height: 1.5; color: #46554c; }
+  #tourpop p { margin: 0 0 12px; font-size: .9rem; line-height: 1.5; color: #46554c; }
+  #tourhint { display: none; margin: 0 0 14px; font-size: .9rem; font-weight: 700; color: #0a7d33;
+    background: #eaf7ee; border: 1px solid #cfeeda; border-radius: 10px; padding: 8px 12px; }
+  body.dark #tourhint { color: #7fe0a6; background: #163024; border-color: #24503a; }
   #tourpop .trow2 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   #tourpop .tskip { background: none; border: 0; color: #8a998f; font: inherit; font-size: .84rem; cursor: pointer; padding: 6px 2px; }
   #tourpop .tnav { display: flex; gap: 8px; }
@@ -245,6 +248,7 @@
       <div class="tstep" id="tourstep"></div>
       <h4 id="tourtitle"></h4>
       <p id="tourbody"></p>
+      <div id="tourhint"></div>
       <div class="trow2">
         <button class="tskip" onclick="endTour()">Skip tour</button>
         <div class="tnav">
@@ -702,46 +706,44 @@ function showWhatsNewIfUpdated() {
 // Tour copy in both languages (follows the EN/HI toggle) - short, plain words
 // for a 20 to 70 year old shop owner. WhatsApp is covered in detail because that
 // is how most owners will use ASVA day to day.
+// Hands-on tour: ONE idea per step, plain words, and a "Your turn" cue (h).
+// Steps with tap:true advance when the owner taps the highlighted button - so
+// they DO each thing, not just read. Short on purpose (the old tour was too much
+// at once). Bilingual (en / hi = Hinglish).
 const TOUR = [
-  { en: { t: 'Welcome to ASVA', b: 'ASVA helps you get your udhaar (outstanding) back on its own. This quick tour takes under a minute. Tap Next to see each part. You can press Skip anytime.' },
-    hi: { t: 'ASVA mein aapka swagat', b: 'ASVA aapka udhaar apne aap wapas laata hai. Yeh chhota tour ek minute se kam ka hai. Aage badhne ke liye Next dabayein. Kabhi bhi Skip kar sakte hain.' } },
-  { sel: '.nav[data-v="dash"]', view: 'dash',
-    en: { t: '1. Dashboard', b: 'Har roz yahin se shuru karein. This shows everyone who owes you, how much, and for how long. Tap any party to see their bills.' },
-    hi: { t: '1. Dashboard', b: 'Har roz yahin se shuru karein. Yahan dikhta hai kis-kis ka paisa baaki hai, kitna, aur kitne din se. Kisi bhi party par tap karke uske bill dekhein.' } },
-  { sel: '.nav[data-v="reminders"]', view: 'reminders',
-    en: { t: '2. Reminders', b: 'ASVA sends polite payment reminders for you, from your own WhatsApp number. Here you choose the time, the language, and holidays. You do nothing daily; it runs on its own.' },
-    hi: { t: '2. Reminders', b: 'ASVA aapki taraf se, aapke hi WhatsApp number se vinamra payment reminder bhejta hai. Yahan aap time, bhasha aur chhutti chunte hain. Roz kuch nahi karna, sab apne aap chalta hai.' } },
-  { sel: '.nav[data-v="payments"]', view: 'payments',
-    en: { t: '3. Payments', b: 'When a customer pays, it comes here. Check the amount and which account (Cash or bank), then tap once to put the receipt into Tally. ASVA never enters anything on its own; you always confirm.' },
-    hi: { t: '3. Payments', b: 'Jab customer paisa deta hai, wo yahan aata hai. Amount aur account (Cash ya bank) check karke, ek tap mein receipt Tally mein daal dein. ASVA khud kuch nahi daalta; confirm aap karte hain.' } },
-  { sel: '.nav[data-v="analytics"]', view: 'analytics',
-    en: { t: '4. Analytics', b: 'Your business numbers in simple form: how much came back, who owes the most, and how old the dues are.' },
-    hi: { t: '4. Analytics', b: 'Aapke business ke numbers aasaan tarike se: kitna wapas aaya, sabse zyada kiska baaki hai, aur dues kitne purane hain.' } },
-  { sel: '.nav[data-v="accounts"]', view: 'accounts',
-    en: { t: '5. Accounts', b: 'Put your UPI id and bank details here once. ASVA adds them to the reminders so customers can pay you easily.' },
-    hi: { t: '5. Accounts', b: 'Apna UPI id aur bank details yahan ek baar daal dein. ASVA inhe reminder mein laga deta hai taaki customer aasaani se pay kar sake.' } },
-  { sel: '.nav[data-v="setup"]', view: 'setup',
-    en: { t: '6. WhatsApp Setup', b: 'Connect your shop WhatsApp by scanning the QR here, just like WhatsApp Web. Every message goes from your own number, so customers see you, not a stranger.' },
-    hi: { t: '6. WhatsApp Setup', b: 'Yahan QR scan karke apna dukaan wala WhatsApp jodein, bilkul WhatsApp Web ki tarah. Har message aapke apne number se jaata hai, isliye customer ko aap dikhte hain, koi anjaan nahi.' } },
-  { sel: '#reloadbtn',
-    en: { t: 'Tally refresh', b: 'Press this to pull the newest data from Tally. It takes about 2 minutes; your reminders keep working meanwhile.' },
-    hi: { t: 'Tally refresh', b: 'Tally se sabse naya data laane ke liye ye dabayein. Isme takreeban 2 minute lagte hain; tab tak reminder chalte rehte hain.' } },
-  { sel: '#phonebtn',
-    en: { t: 'ASVA on your phone', b: 'Scan this to open ASVA on your phone: live dues, who to chase, and one-tap call, wherever you are.' },
-    hi: { t: 'Phone par ASVA', b: 'Ise scan karke apne phone par ASVA kholein: live baaki, kisko chase karna hai, aur ek tap mein call, aap kahin bhi ho.' } },
-  // WhatsApp is the heart of ASVA for most owners - two clear steps.
-  { en: { t: 'You can run ASVA from WhatsApp', b: 'You do not have to open this app for everything. Just message your ASVA WhatsApp number like you chat with anyone. Type a command, ASVA replies in seconds.' },
-    hi: { t: 'ASVA ko WhatsApp se chalayein', b: 'Har cheez ke liye ye app kholna zaroori nahi. Bas apne ASVA WhatsApp number par message karein, jaise kisi se chat karte hain. Command likhein, ASVA seconds mein jawab deta hai.' } },
-  { en: { t: 'Simple WhatsApp commands', b: 'LIST - who owes you\nCHECK Ramesh - one party’s balance\nPAID Ramesh - a customer paid\nREMIND Ramesh - remind one party now\nPROMISES - who said they will pay\n\nDo not remember all this. Just send HELP and ASVA shows the full list.' },
-    hi: { t: 'Aasaan WhatsApp commands', b: 'LIST - kiska paisa baaki hai\nCHECK Ramesh - ek party ka balance\nPAID Ramesh - customer ne pay kiya\nREMIND Ramesh - ek party ko abhi reminder\nPROMISES - kisne kaha paise denge\n\nSab yaad rakhne ki zaroorat nahi. Bas HELP bhejein, ASVA poori list dikha deta hai.' } },
-  { en: { t: 'That’s it!', b: 'You are ready. If you ever get stuck, send TEAM with your question on WhatsApp and a real person helps you. Reopen this tour anytime from the “? Tour” button.' },
-    hi: { t: 'Bas ho gaya!', b: 'Aap taiyaar hain. Kabhi atak jaayein to WhatsApp par TEAM likhkar apna sawaal bhejein, ek asli insaan aapki madad karega. Ye tour kabhi bhi upar “? Tour” se dobara khol sakte hain.' } },
+  { en: { t: 'Welcome to ASVA', b: 'ASVA gets your udhaar back on its own. 7 quick taps - under a minute.' },
+    hi: { t: 'ASVA mein swagat', b: 'ASVA aapka udhaar apne aap wapas laata hai. 7 chhote tap - ek minute.' } },
+  { sel: '.nav[data-v="dash"]', view: 'dash', tap: true,
+    en: { t: 'Who owes you', b: 'Everyone who owes, how much, for how long.', h: 'Your turn: tap Dashboard →' },
+    hi: { t: 'Kiska paisa baaki', b: 'Kis-kis ka, kitna, kitne din se.', h: 'Aapki baari: Dashboard tap karein →' } },
+  { sel: '.nav[data-v="reminders"]', view: 'reminders', tap: true,
+    en: { t: 'Set reminders', b: 'Pick the time and language, and skip Sundays / holidays. Set once - it runs daily on its own.', h: 'Your turn: tap Reminders →' },
+    hi: { t: 'Reminder set karein', b: 'Time aur bhasha chunein, Sunday / chhutti skip karein. Ek baar set - roz apne aap.', h: 'Aapki baari: Reminders tap karein →' } },
+  { sel: '.nav[data-v="accounts"]', view: 'accounts', tap: true,
+    en: { t: 'Add your UPI', b: 'Paste it once. It rides on every reminder so customers pay in one tap.', h: 'Your turn: tap Accounts →' },
+    hi: { t: 'Apna UPI daalein', b: 'Ek baar daalein. Har reminder mein lagta hai - customer ek tap mein pay kare.', h: 'Aapki baari: Accounts tap karein →' } },
+  { sel: '.nav[data-v="setup"]', view: 'setup', tap: true,
+    en: { t: 'Connect WhatsApp', b: 'Scan the QR once, like WhatsApp Web. Messages go from YOUR number.', h: 'Your turn: tap WhatsApp Setup →' },
+    hi: { t: 'WhatsApp jodein', b: 'QR ek baar scan karein, WhatsApp Web ki tarah. Message aapke number se jaate hain.', h: 'Aapki baari: WhatsApp Setup tap karein →' } },
+  { sel: '.nav[data-v="payments"]', view: 'payments', tap: true,
+    en: { t: 'When they pay', b: 'It shows up here. Check the amount → one tap into Tally. You always confirm.', h: 'Your turn: tap Payments →' },
+    hi: { t: 'Jab paisa aaye', b: 'Yahan dikhta hai. Amount check → ek tap Tally mein. Confirm aap karte hain.', h: 'Aapki baari: Payments tap karein →' } },
+  { sel: '#phonebtn', tap: true,
+    en: { t: 'ASVA on your phone', b: 'Live dues and one-tap call, wherever you are.', h: 'Your turn: tap Phone app →' },
+    hi: { t: 'Phone par ASVA', b: 'Live baaki aur ek tap call, aap kahin bhi ho.', h: 'Aapki baari: Phone app tap karein →' } },
+  { en: { t: 'Run it from WhatsApp', b: 'No need to open this app. Message your ASVA number: send LIST to see who owes. Send HELP for all commands - you never memorise them.' },
+    hi: { t: 'WhatsApp se chalayein', b: 'App kholna zaroori nahi. Apne ASVA number par LIST bhejein - kaun baaki hai. HELP bhejein - saare commands, yaad rakhna nahi padta.' } },
+  { en: { t: 'Done!', b: 'You are ready. Stuck? Send TEAM + your question on WhatsApp - a real person helps. Reopen this from “? Tour” anytime.' },
+    hi: { t: 'Ho gaya!', b: 'Aap taiyaar. Atak gaye? WhatsApp par TEAM + sawaal bhejein - asli insaan madad karega. Dobara: upar “? Tour”.' } },
 ];
 function tourLang() { return (typeof currentLang === 'function' && currentLang() === 'hinglish') ? 'hi' : 'en'; }
 let tourI = 0;
+let _tourTap = null;   // {el, fn} of the current "tap to advance" listener, if any
+function _clearTourTap() { if (_tourTap) { try { _tourTap.el.removeEventListener('click', _tourTap.fn); } catch (e) {} _tourTap = null; } }
 function startTour() { tourI = 0; document.getElementById('tourpop').style.display = 'block'; showTourStep(); }
 function tourGo(d) { tourI += d; if (tourI >= TOUR.length) { endTour(); return; } if (tourI < 0) tourI = 0; showTourStep(); }
 function endTour() {
+  _clearTourTap();
   localStorage.setItem('asva_tour_done', '1');
   ['tourpop', 'tourspot', 'tourmask'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
   try { show('dash'); } catch (e) {}
@@ -756,14 +758,24 @@ function showTourStep() {
   document.getElementById('tourstep').textContent = (hi ? 'Kadam ' : 'Step ') + (tourI + 1) + (hi ? ' / ' : ' of ') + TOUR.length;
   document.getElementById('tourtitle').textContent = c.t;
   document.getElementById('tourbody').textContent = c.b;
+  const hintEl = document.getElementById('tourhint');
+  if (c.h) { hintEl.textContent = c.h; hintEl.style.display = 'block'; }
+  else { hintEl.style.display = 'none'; }
   document.getElementById('tourback').style.visibility = tourI === 0 ? 'hidden' : 'visible';
   document.getElementById('tourback').textContent = hi ? 'Peeche' : 'Back';
   document.querySelector('#tourpop .tskip').textContent = hi ? 'Tour band karein' : 'Skip tour';
   document.getElementById('tournext').textContent = (tourI === TOUR.length - 1) ? (hi ? 'Ho gaya' : 'Done') : (hi ? 'Aage' : 'Next');
   const el = s.sel ? document.querySelector(s.sel) : null;
+  _clearTourTap();   // drop any previous step's tap-to-advance listener
   // Wait a tick so a just-switched view has laid out before we measure.
   setTimeout(() => {
     if (el) {
+      // Hands-on: let the owner ADVANCE by tapping the highlighted button.
+      if (s.tap) {
+        const fn = () => { setTimeout(() => tourGo(1), 120); };
+        el.addEventListener('click', fn, { once: true });
+        _tourTap = { el, fn };
+      }
       const r = el.getBoundingClientRect(), pad = 6;
       mask.style.display = 'none';
       spot.style.display = 'block';
