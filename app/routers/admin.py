@@ -804,6 +804,8 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
 
 <div class="count"><b>{parties_n:,}</b> parties &middot; <b>{owing_n:,}</b> owe money now &middot; <b>&#8377;{total_out:,.0f}</b> outstanding</div>
 
+<div id="todaycard" style="display:none;margin:10px 0 6px;border:1px solid #EAEAEA;border-radius:10px;padding:12px 14px;background:#fbfbfa"></div>
+
 <div class="subtabs">
  <button class="on" data-sub="tally">Tally bills ({tally_n:,})</button>
  <button data-sub="nontally">Non-Tally bills ({nontally_n:,})</button>
@@ -1091,6 +1093,36 @@ async function doImportNumbers() {{
   }} catch (e) {{ btn.disabled = false; btn.textContent = 'Fill numbers'; alert('Could not import. Please try again.'); }}
 }}
 document.getElementById('imp_go').onclick = doImportNumbers;
+
+// ── Problem #1: one calm "Needs you today" card. Only shows what actually needs
+// the owner (payments to post, paid-claims to check, parties with no number).
+// Nothing pending -> "All clear". Pure add-on: reads existing endpoints.
+function goPayments() {{ location.href = '/admin/payments?token=' + encodeURIComponent(TOKEN); }}
+async function buildToday() {{
+  const el = document.getElementById('todaycard'); if (!el) return;
+  let rows = [];
+  try {{
+    const [p, mn] = await Promise.all([
+      fetch('/admin/payments/data?token=' + encodeURIComponent(TOKEN)).then(r => r.json()).catch(() => ({{}})),
+      fetch('/admin/missing-numbers?token=' + encodeURIComponent(TOKEN)).then(r => r.json()).catch(() => ({{}})),
+    ]);
+    const pend = (p.pending || []).length, prom = (p.promises || []).length, miss = mn.count || 0;
+    if (pend) rows.push(['<b>' + pend + '</b> payment' + (pend > 1 ? 's' : '') + ' ready to post to Tally', 'goPayments()']);
+    if (prom) rows.push(['<b>' + prom + '</b> customer' + (prom > 1 ? 's' : '') + ' said they paid, review', 'goPayments()']);
+    if (miss) rows.push(['<b>' + miss + '</b> owe money but have no WhatsApp number', 'openImportNumbers()']);
+  }} catch (e) {{}}
+  el.style.display = 'block';
+  if (!rows.length) {{
+    el.innerHTML = '<b>All clear.</b> Nothing needs you right now. ASVA is chasing on its own.';
+    return;
+  }}
+  el.innerHTML = '<div style="font-weight:700;margin-bottom:6px">Needs you today</div>' + rows.map(function (r) {{
+    return '<div style="padding:7px 0;border-top:1px solid #f0efec;display:flex;justify-content:space-between;align-items:center;gap:10px">'
+      + '<span>' + r[0] + '</span>'
+      + '<button style="background:#0a7d33;color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer" onclick="' + r[1] + '">Open</button></div>';
+  }}).join('');
+}}
+buildToday();
 
 // ── Create a new non-Tally party, then jump to its page to add bills ──
 function openAddParty() {{
