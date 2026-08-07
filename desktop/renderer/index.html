@@ -73,7 +73,22 @@
   #tourbtn { background: #294d38; color: #fff; border: 0; border-radius: 8px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
   #tourbtn:hover { background: #326049; }
   #tourmask { position: fixed; inset: 0; z-index: 299; background: rgba(9,17,13,.62); display: none; }
-  #tourspot { position: fixed; z-index: 300; border-radius: 12px; box-shadow: 0 0 0 4px rgba(70,214,126,.9), 0 0 0 9999px rgba(9,17,13,.62); pointer-events: none; transition: all .22s cubic-bezier(.4,0,.2,1); display: none; }
+  #tourspot { position: fixed; z-index: 300; border-radius: 12px; box-shadow: 0 0 0 4px rgba(70,214,126,.9), 0 0 0 9999px rgba(9,17,13,.62); pointer-events: none; transition: left .22s cubic-bezier(.4,0,.2,1), top .22s cubic-bezier(.4,0,.2,1), width .22s cubic-bezier(.4,0,.2,1), height .22s cubic-bezier(.4,0,.2,1); display: none; animation: asvaSpotPulse 1.7s ease-in-out infinite; }
+  @keyframes asvaSpotPulse { 0%,100% { box-shadow: 0 0 0 4px rgba(70,214,126,.9), 0 0 0 9999px rgba(9,17,13,.62); } 50% { box-shadow: 0 0 0 8px rgba(70,214,126,.42), 0 0 0 9999px rgba(9,17,13,.62); } }
+  @keyframes asvaPopIn { from { opacity: 0; transform: translateY(4px) scale(.97); } to { opacity: 1; transform: none; } }
+  #tourcaret { position: absolute; width: 0; height: 0; display: none; }
+  #tourpop[data-side="right"] #tourcaret { display: block; left: -9px; border-top: 9px solid transparent; border-bottom: 9px solid transparent; border-right: 9px solid #fff; }
+  #tourpop[data-side="left"] #tourcaret { display: block; right: -9px; border-top: 9px solid transparent; border-bottom: 9px solid transparent; border-left: 9px solid #fff; }
+  #tourpop[data-side="below"] #tourcaret { display: block; top: -9px; border-left: 9px solid transparent; border-right: 9px solid transparent; border-bottom: 9px solid #fff; }
+  #tourpop[data-side="above"] #tourcaret { display: block; bottom: -9px; border-left: 9px solid transparent; border-right: 9px solid transparent; border-top: 9px solid #fff; }
+  body.dark #tourpop[data-side="right"] #tourcaret { border-right-color: #17211b; }
+  body.dark #tourpop[data-side="left"] #tourcaret { border-left-color: #17211b; }
+  body.dark #tourpop[data-side="below"] #tourcaret { border-bottom-color: #17211b; }
+  body.dark #tourpop[data-side="above"] #tourcaret { border-top-color: #17211b; }
+  #tourpop .tskips { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+  #tourpop .tskipsec { background: none; border: 0; color: #0a7d33; font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; padding: 3px 2px; }
+  #tourpop .tskipsec:hover { text-decoration: underline; }
+  body.dark #tourpop .tskipsec { color: #7fe0a6; }
   #tourpop { position: fixed; z-index: 301; max-width: 330px; background: #fff; color: #16211b; border-radius: 16px; padding: 18px 18px 14px; box-shadow: 0 24px 60px rgba(0,0,0,.4); display: none; transition: left .22s cubic-bezier(.4,0,.2,1), top .22s cubic-bezier(.4,0,.2,1); }
   #tourpop .tbar { height: 4px; border-radius: 4px; background: #e7ebe7; overflow: hidden; margin: -4px 0 12px; }
   #tourpop .tbar > i { display: block; height: 100%; background: #0a7d33; border-radius: 4px; transition: width .25s ease; }
@@ -89,6 +104,9 @@
   #tourpop .tnav button { border: 0; border-radius: 8px; padding: 8px 16px; font-weight: 700; font-size: .88rem; cursor: pointer; }
   #tourpop .tback { background: #eef1ee; color: #46554c; }
   #tourpop .tnext { background: #0a7d33; color: #fff; }
+  #tourpop .tnext.ghost { background: none; color: #8a998f; font-weight: 500; }
+  #tourhint.done { color: #0a7d33; background: #e6f6ec; border-color: #a9d8b8; }
+  body.dark #tourhint.done { color: #8fe6ac; background: #17351f; border-color: #2c5c42; }
   body.dark #tourpop { background: #17211b; color: #eef3ef; }
   body.dark #tourpop h4 { color: #eef3ef; }
   body.dark #tourpop p { color: #b9c6bd; }
@@ -283,13 +301,17 @@
     <div id="tourmask"></div>
     <div id="tourspot"></div>
     <div id="tourpop">
+      <div id="tourcaret"></div>
       <div class="tbar"><i id="tourbar"></i></div>
       <div class="tstep" id="tourstep"></div>
       <h4 id="tourtitle"></h4>
       <p id="tourbody"></p>
       <div id="tourhint"></div>
       <div class="trow2">
-        <button class="tskip" onclick="endTour()">Skip tour</button>
+        <div class="tskips">
+          <button class="tskip" onclick="endTour()">Skip tour</button>
+          <button class="tskipsec" id="tourskipsec" onclick="tourSkipSection()">Skip section →</button>
+        </div>
         <div class="tnav">
           <button class="tback" id="tourback" onclick="tourGo(-1)">Back</button>
           <button class="tnext" id="tournext" onclick="tourGo(1)">Next</button>
@@ -620,15 +642,12 @@ function openHelp() {
     tip: 'Tip: you never have to memorise these - send HELP to your ASVA number anytime and it lists them back to you.',
     close: 'Got it',
     tabRows: [
-      ['Dashboard', 'Every party, how much they owe, and how many days late. Red = overdue.'],
-      ['Reminders', 'Set the send time, language, and skip Sundays/holidays. Runs daily on its own. Press "Send now" to nudge one party immediately.'],
-      ['Payments', 'Customer payments land here automatically. Check the amount, then Confirm to Tally in one tap.'],
-      ['Analytics', 'Your business numbers: outstanding, recovered this month, oldest dues.'],
-      ['Accounts', 'Your UPI ID and bank details. Added once, it rides on every reminder as a pay link.'],
-      ['WhatsApp Setup', 'Scan the QR to link your shop WhatsApp. Bills and reminders go from your own number.'],
-      ['Get latest from Tally', 'Pulls fresh parties and bills from Tally now (takes 2-3 min). Left sidebar.'],
-      ['Phone app', 'Scan a QR to open ASVA on your phone (view only): live dues and one-tap call.'],
-      ['Change Tally company / Start with Windows', 'Both are inside Status (bottom-left).'],
+      ['Dashboard', 'Who owes you, how much, how late.'],
+      ['Reminders', 'Set time, language, holidays. Runs daily on its own.'],
+      ['Payments', 'Confirm customer payments into Tally in one tap.'],
+      ['Accounts', 'Your UPI + bank. Adds a pay link to every reminder.'],
+      ['WhatsApp Setup', 'Link your shop WhatsApp.'],
+      ['Phone app', 'Open ASVA on your phone (view only).'],
     ],
     cmdRows: [
       ['LIST', 'See everyone who owes you, biggest first.'],
@@ -648,15 +667,12 @@ function openHelp() {
     tip: 'Tip: inhe yaad rakhna zaroori nahi - apne ASVA number par HELP bhejein, saare command wapas list ho jaate hain.',
     close: 'Theek hai',
     tabRows: [
-      ['Dashboard', 'Har party, kitna baaki, kitne din late. Laal = overdue.'],
-      ['Reminders', 'Send time, bhasha, aur Sunday/chhutti skip set karein. Roz apne aap chalta hai. "Send now" se ek party ko turant nudge.'],
-      ['Payments', 'Customer payments yahan apne aap aate hain. Amount check karein, phir ek tap Confirm to Tally.'],
-      ['Analytics', 'Aapke business ke numbers: outstanding, is mahine recover hua, sabse purana baaki.'],
-      ['Accounts', 'Aapki UPI ID aur bank details. Ek baar daalein, har reminder mein pay link ban ke lagta hai.'],
-      ['WhatsApp Setup', 'QR scan karke shop WhatsApp jodein. Bill aur reminder aapke apne number se jaate hain.'],
-      ['Get latest from Tally', 'Tally se fresh party aur bill abhi laata hai (2-3 min). Baayein sidebar mein.'],
-      ['Phone app', 'QR scan karke ASVA apne phone par kholein (sirf dekhne): live baaki aur ek-tap call.'],
-      ['Tally company badlein / Windows ke saath chalu', 'Dono Status (neeche baayein) ke andar hain.'],
+      ['Dashboard', 'Kaun baaki, kitna, kitne din se.'],
+      ['Reminders', 'Time, bhasha, chhutti set karein. Roz apne aap chalta hai.'],
+      ['Payments', 'Customer payment ek tap mein Tally mein confirm karein.'],
+      ['Accounts', 'Aapka UPI + bank. Har reminder mein pay link lagta hai.'],
+      ['WhatsApp Setup', 'Apna shop WhatsApp jodein.'],
+      ['Phone app', 'ASVA apne phone par kholein (sirf dekhne).'],
     ],
     cmdRows: [
       ['LIST', 'Kaun-kaun baaki hai, sabse bada pehle.'],
@@ -903,6 +919,18 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.9.3': [
+    'A much clearer guided tour: it now walks you through every screen and feature and highlights exactly what it is explaining - the dashboard (balance, overdue, credit days, next reminder, batch, Send now), each customer’s page, reminders and batches, payments into Tally, analytics, the phone app and the WhatsApp assistant.',
+    'It sets you up in the right order (WhatsApp, then UPI, then reminders), the QR is never covered, and going Back no longer gets stuck.',
+    'Everything from 1.9.2 too: full non-Tally accounts (bills and payments by date), add or fix a customer’s number inside ASVA, and faster app updates.',
+  ],
+  '1.9.2': [
+    'A new hands-on setup exercise: the guided tour now waits and checks that each step is actually done before it moves on - connect WhatsApp, add your UPI, and send a test message to the ASVA assistant from your own number.',
+    'It even confirms your test message reached ASVA, so you know your WhatsApp assistant is working.',
+    'You can now add or fix a customer’s WhatsApp number right inside ASVA (for customers whose number was never saved in Tally) - just type the 10 digits.',
+    'Full non-Tally accounts: create a customer, add bills by date, record payments by date with a running payment log, edit or delete entries, and delete a party cleanly - with the same reminders and payment tracking as your Tally customers.',
+    'Simpler Help, and faster, more reliable app updates.',
+  ],
   '1.9.1': [
     'Bills you export from Tally now send reliably, even one dated a few days back. If a bill can’t go out, ASVA tells you the exact reason (for example, the customer has no WhatsApp number) instead of failing quietly.',
     'Fixing a customer’s spelling or changing their number in Tally now updates the same customer, so you no longer get two entries for one party with their dues split.',
@@ -982,103 +1010,287 @@ function showWhatsNewIfUpdated() {
 // Steps with tap:true advance when the owner taps the highlighted button - so
 // they DO each thing, not just read. Short on purpose (the old tour was too much
 // at once). Bilingual (en / hi = Hinglish).
+// Completion-GATED tour: an action step waits and CHECKS the owner actually did
+// the thing (WhatsApp connected / UPI saved / messaged the bot) before it moves
+// on - it never advances on a stray click. `verify(status, baseline)` reads the
+// live heartbeat (window._lastStatus, refreshed every 5s). {BOT}/{OWNER} are
+// filled from the heartbeat (the ASVA bot number + the owner's own number).
 const TOUR = [
-  { en: { t: 'Welcome to ASVA', b: 'I will show you exactly what to do to start getting your udhaar back. Just a few quick taps - you can leave anytime with Skip.' },
-    hi: { t: 'ASVA mein swagat', b: 'Main aapko theek-theek bataunga ki udhaar wapas laane ke liye kya karna hai. Bas kuch tap - kabhi bhi Skip kar sakte hain.' } },
-  { sel: '.nav[data-v="dash"]', view: 'dash', tap: true,
-    en: { t: '1. Dashboard - who owes you', b: 'This is your main screen: every party, how much they owe, and how many days late. Red means overdue. This is where you decide who to chase.', h: 'Your turn: tap Dashboard →' },
-    hi: { t: '1. Dashboard - kiska paisa baaki', b: 'Yeh aapki main screen hai: har party, kitna baaki, kitne din late. Laal matlab overdue. Yahin se decide karein kiska peecha karna hai.', h: 'Aapki baari: Dashboard tap karein →' } },
-  { sel: '.nav[data-v="setup"]', view: 'setup', tap: true,
-    en: { t: '2. Connect WhatsApp (do this first)', b: 'On your shop phone open WhatsApp → Linked devices → Link a device → scan the QR shown here. Do this once. Every bill and reminder then goes from YOUR own number.', h: 'Your turn: tap WhatsApp Setup →' },
-    hi: { t: '2. WhatsApp jodein (pehle yeh)', b: 'Apne shop phone par WhatsApp kholein → Linked devices → Link a device → yahan dikha QR scan karein. Ek baar. Phir har bill aur reminder AAPKE apne number se jaata hai.', h: 'Aapki baari: WhatsApp Setup tap karein →' } },
-  { sel: '.nav[data-v="accounts"]', view: 'accounts', tap: true,
-    en: { t: '3. Add your UPI', b: 'Paste your UPI ID (like yourname@okaxis) and tap Save. From now it appears as a one-tap pay link inside every reminder, so customers can pay instantly.', h: 'Your turn: tap Accounts →' },
-    hi: { t: '3. Apna UPI daalein', b: 'Apni UPI ID (jaise yourname@okaxis) paste karein aur Save dabaayein. Ab yeh har reminder mein ek-tap pay link ban ke aata hai, customer turant pay kar sakta hai.', h: 'Aapki baari: Accounts tap karein →' } },
-  { sel: '.nav[data-v="reminders"]', view: 'reminders', tap: true,
-    en: { t: '4. Set reminders once', b: 'Choose the send time (say 10 AM), pick English or Hinglish, and turn OFF Sundays and holidays. Tap Save. After that reminders go out every day on their own - you do nothing.', h: 'Your turn: tap Reminders →' },
-    hi: { t: '4. Reminder ek baar set karein', b: 'Send time chunein (jaise subah 10), English ya Hinglish chunein, aur Sunday/chhutti OFF karein. Save dabaayein. Iske baad reminder roz apne aap jaate hain - aapko kuch nahi karna.', h: 'Aapki baari: Reminders tap karein →' } },
-  { sel: '.nav[data-v="payments"]', view: 'payments', tap: true,
-    en: { t: '5. When a customer pays', b: 'Payments appear here on their own. Check the amount is right, then tap Confirm to Tally - it posts the receipt in one tap. Nothing ever posts without your confirm.', h: 'Your turn: tap Payments →' },
-    hi: { t: '5. Jab customer pay kare', b: 'Payments yahan apne aap aate hain. Amount sahi hai check karein, phir Confirm to Tally dabaayein - ek tap mein receipt post ho jaata hai. Aapke confirm ke bina kuch post nahi hota.', h: 'Aapki baari: Payments tap karein →' } },
-  { sel: '#helpbtn', tap: true,
-    en: { t: '6. All features + commands', b: 'This Help button always lists everything ASVA can do and every WhatsApp command (LIST, PAID, BILL and more) with an example. Open it anytime you forget something.', h: 'Your turn: tap Help →' },
-    hi: { t: '6. Saare features + commands', b: 'Yeh Help button hamesha ASVA ke saare kaam aur har WhatsApp command (LIST, PAID, BILL wagairah) example ke saath dikhata hai. Kuch bhool jaayein to kabhi bhi kholein.', h: 'Aapki baari: Help tap karein →' } },
-  { sel: '#phonebtn', tap: true,
-    en: { t: '7. ASVA on your phone', b: 'Tap this to scan a QR and open ASVA on your own phone (view only): live dues and one-tap call, wherever you are.', h: 'Your turn: tap Phone app →' },
-    hi: { t: '7. Phone par ASVA', b: 'Isse QR scan karke ASVA apne phone par kholein (sirf dekhne ke liye): live baaki aur ek-tap call, aap kahin bhi ho.', h: 'Aapki baari: Phone app tap karein →' } },
-  { en: { t: 'Run it from WhatsApp too', b: 'You do not even need to open this app. Message your ASVA number: send LIST to see who owes, PAID to record a payment, BILL to make a bill. Send HELP for all commands - you never memorise them.' },
-    hi: { t: 'WhatsApp se chalayein', b: 'App kholna zaroori nahi. Apne ASVA number par LIST bhejein - kaun baaki hai. HELP bhejein - saare commands, yaad rakhna nahi padta.' } },
-  { en: { t: 'Done!', b: 'You are ready. Stuck? Send TEAM + your question on WhatsApp - a real person helps. Reopen this from “? Tour” anytime.' },
-    hi: { t: 'Ho gaya!', b: 'Aap taiyaar. Atak gaye? WhatsApp par TEAM + sawaal bhejein - asli insaan madad karega. Dobara: upar “? Tour”.' } },
+  { en: { t: 'Welcome to ASVA', b: 'I will set you up step by step. Do each step - I check it and move on by myself. You can press Skip anytime.' },
+    hi: { t: 'ASVA mein swagat', b: 'Main aapko ek-ek karke set karunga. Har step karein - main check karke khud aage badhta hoon. Kabhi bhi Skip dabaayein.' } },
+
+  // ── SET UP FIRST (do-it, gated: auto-advance when actually done) ──
+  { view: 'setup', sel: '#qr-shop', verify: (s) => !!s.whatsapp,
+    en: { t: 'First, connect WhatsApp', b: 'On your shop phone: open WhatsApp, tap Linked devices, tap Link a device, then scan the QR on this screen. Every bill and reminder then goes from YOUR own number.',
+          do: 'Scan the QR on screen', wait: 'Waiting for WhatsApp to connect…', ok: '✓ WhatsApp connected!' },
+    hi: { t: 'Sabse pehle WhatsApp jodein', b: 'Shop phone par: WhatsApp kholein, Linked devices, Link a device, phir is screen ka QR scan karein. Har bill aur reminder AAPKE apne number se jaayega.',
+          do: 'Screen ka QR scan karein', wait: 'WhatsApp connect hone ka intezaar…', ok: '✓ WhatsApp connect ho gaya!' } },
+
+  { view: 'accounts', verify: (s) => !!s.upi,
+    en: { t: 'Add your UPI (before reminders)', b: 'On this Accounts screen, type your UPI ID (like yourname@okaxis) and press Save. It then rides on every reminder as a one-tap pay link, so do this before setting reminders.',
+          do: 'Type your UPI and press Save', wait: 'Waiting for your UPI…', ok: '✓ UPI saved!' },
+    hi: { t: 'Apna UPI daalein (reminder se pehle)', b: 'Is Accounts screen par apni UPI ID (jaise yourname@okaxis) type karke Save dabaayein. Yeh har reminder me pay link ban ke lagta hai, isliye reminder se pehle karein.',
+          do: 'UPI type karke Save dabaayein', wait: 'UPI ka intezaar…', ok: '✓ UPI save ho gaya!' } },
+
+  { view: 'reminders', sel: '.nav[data-v="reminders"]',
+    en: { t: 'Set reminders + batches', b: 'Choose the send time and language, and build batches (a batch = its own time, language and UPI - assign parties to it). Skip Sundays/holidays on the calendar: a reminder due on a holiday automatically moves to the next working day. Set once, it runs daily on its own.' },
+    hi: { t: 'Reminder + batches set karein', b: 'Send time aur bhasha chunein, aur batches banayein (batch = apna time, bhasha, UPI - parties assign karein). Calendar me Sunday/chhutti skip karein: chhutti wale din ka reminder apne aap agle working day chala jaata hai. Ek baar set, roz apne aap.' } },
+
+  // ── LEARN: the Dashboard and its features (the heart of the app) ──
+  { view: 'dash', sel: '.nav[data-v="dash"]',
+    en: { t: 'Your Dashboard', b: 'Your main screen: every customer, what they owe, and who to chase. Let me point out each part.' },
+    hi: { t: 'Aapka Dashboard', b: 'Aapki main screen: har customer, kitna baaki, kiska peecha karein. Ab har hissa dikhata hoon.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.plink',
+    en: { t: 'Customer - tap for full page', b: 'Each row is one customer. Tap the name to open their page: every bill with dates, payments received, promise-to-pay pauses, a reliability score, and their exact reminder schedule.' },
+    hi: { t: 'Customer - poore page ke liye tap', b: 'Har row ek customer. Naam tap karein to unka page khulta hai: har bill date ke saath, payments, promise-to-pay pause, reliability score, aur poora reminder schedule.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.amt',
+    en: { t: 'Balance - what they owe', b: 'The money still pending from that customer right now.' },
+    hi: { t: 'Balance - kitna baaki', b: 'Is customer se abhi kitna paisa baaki hai.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.od',
+    en: { t: 'Overdue days', b: 'How many days past the due date. Red = overdue - chase these first.' },
+    hi: { t: 'Overdue din', b: 'Due date se kitne din upar. Laal = overdue - inhe pehle chase karein.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.termbtn',
+    en: { t: 'Credit days', b: 'How many days you give this customer before a bill is "due". Tap to change it - the due dates and the reminder schedule recompute automatically.' },
+    hi: { t: 'Credit days', b: 'Bill "due" hone se pehle is customer ko kitne din dete hain. Tap karke badlein - due date aur reminder schedule apne aap set ho jaate hain.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.rbadge',
+    en: { t: 'Next reminder', b: 'When ASVA will next message this customer - automatically, on its own. "OFF" means reminders are off for them.' },
+    hi: { t: 'Agla reminder', b: 'ASVA is customer ko agli baar kab message karega - apne aap. "OFF" matlab unke reminder band hain.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.cb',
+    en: { t: 'Reminder ON / OFF', b: 'This tick turns automatic reminders on or off for that customer. After changing several, press "Save list".' },
+    hi: { t: 'Reminder ON / OFF', b: 'Yeh tick us customer ke auto reminder on/off karta hai. Kai badlein to "Save list" dabaayein.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.bsel',
+    en: { t: 'Batch', b: 'Which batch this customer uses - deciding the language, send time and UPI on their reminders. Change it right here per customer.' },
+    hi: { t: 'Batch', b: 'Yeh customer kaunsa batch use karta hai - jo unke reminder ki bhasha, time aur UPI decide karta hai. Yahin per-customer badlein.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.sendbtn',
+    en: { t: 'Send now', b: 'Send that one customer a reminder immediately, without waiting for the schedule. You always stay in control of who gets messaged.' },
+    hi: { t: 'Send now', b: 'Us ek customer ko turant reminder bhejein, schedule ke bina. Kis ko message jaaye, control hamesha aapke paas.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.subtabs',
+    en: { t: 'Tally / Non-Tally / Do-not-chase', b: 'Switch between customers synced from Tally, ones you added in ASVA, and the do-not-chase list (parties you never want reminded).' },
+    hi: { t: 'Tally / Non-Tally / Do-not-chase', b: 'Tally se aaye, ASVA me khud jode, aur do-not-chase list (jinhe kabhi reminder nahi) ke beech switch karein.' } },
+
+  { view: 'dash', wv: 'wv-dash', wvsel: '.addparty',
+    en: { t: 'Add a non-Tally party', b: 'Add a customer you track only in ASVA: create them with a number, add bills by date, and record payments - same reminders and tracking as Tally customers.' },
+    hi: { t: 'Non-Tally party jodein', b: 'Sirf ASVA me track karne wala customer jodein: number ke saath banayein, date se bill daalein, payment record karein - wahi reminders.' } },
+
+  { view: 'payments', sel: '.nav[data-v="payments"]',
+    en: { t: 'Payments - post to Tally', b: 'When a customer pays, it lands here. Check the amount, then confirm it into Tally in one tap - it writes the receipt for you. Nothing posts without your confirm.' },
+    hi: { t: 'Payments - Tally me post', b: 'Jab customer pay kare, yahan aata hai. Amount check karke ek tap me Tally me confirm - receipt khud ban jaata hai. Aapke confirm bina kuch post nahi hota.' } },
+
+  { view: 'analytics', sel: '.nav[data-v="analytics"]',
+    en: { t: 'Analytics', b: 'Your business numbers: total outstanding, how much you recovered this month, and your oldest dues - so you can see progress at a glance.' },
+    hi: { t: 'Analytics', b: 'Aapke business ke numbers: total outstanding, is mahine kitna recover hua, aur sabse purane baaki - progress ek nazar me.' } },
+
+  { sel: '#phonebtn',
+    en: { t: 'ASVA on your phone', b: 'Tap this to show a QR - scan it with your phone to open ASVA there (view only): live dues and one-tap call, wherever you are.' },
+    hi: { t: 'Phone par ASVA', b: 'Ise tap karke QR dikhega - phone se scan karke ASVA wahan kholein (sirf dekhne): live baaki aur ek-tap call, aap kahin bhi ho.' } },
+
+  { verify: (s, base) => !!s.lastInboundAt && s.lastInboundAt !== (base && base.lastInboundAt), baseline: true,
+    en: { t: 'Run it from WhatsApp too', b: 'Save {BOT} as a contact named ASVA. From YOUR number ({OWNER}), message it: LIST. You will instantly get back who owes you - no need to open this app.',
+          do: 'Send LIST to {BOT} from {OWNER}', wait: 'Waiting for your message to reach ASVA…', ok: '✓ Your WhatsApp assistant works!' },
+    hi: { t: 'WhatsApp se bhi chalayein', b: '{BOT} ko ASVA naam se save karein. AAPKE number ({OWNER}) se LIST bhejein. Turant milega kaun baaki hai - app kholne ki zaroorat nahi.',
+          do: '{OWNER} se {BOT} ko LIST bhejein', wait: 'Aapke message ka intezaar…', ok: '✓ WhatsApp assistant chaltaa hai!' } },
+
+  { sel: '#statusbtn',
+    en: { t: 'Status - if something looks off', b: 'Check that the server, WhatsApp and Tally are all connected. From here you can restart a service, run a connection check, change the Tally company, and turn on "start with Windows".' },
+    hi: { t: 'Status - kuch gadbad lage to', b: 'Dekhein server, WhatsApp aur Tally sab connected hain. Yahan se service restart, connection check, Tally company badalna, aur "Windows ke saath chalu" on kar sakte hain.' } },
+
+  { sel: '#helpbtn',
+    en: { t: 'Help is always here', b: 'This Help button lists every screen and every WhatsApp command with an example - open it anytime you forget something.' },
+    hi: { t: 'Madad hamesha yahan', b: 'Yeh Help button har screen aur har WhatsApp command example ke saath dikhata hai - kabhi bhi kholein.' } },
+
+  { center: true,
+    en: { t: 'You are set! 🎉', b: 'That is the whole app. Reopen this tour anytime from "? Tour". A short video guide is coming soon.' },
+    hi: { t: 'Ho gaya! 🎉', b: 'Yeh poora app tha. "? Tour" se dobara kabhi bhi kholein. Jald ek chhota video guide bhi aayega.' } },
 ];
 function tourLang() { return (typeof currentLang === 'function' && currentLang() === 'hinglish') ? 'hi' : 'en'; }
-let tourI = 0;
-let _tourTap = null;   // {el, fn} of the current "tap to advance" listener, if any
-function _clearTourTap() { if (_tourTap) { try { _tourTap.el.removeEventListener('click', _tourTap.fn); } catch (e) {} _tourTap = null; } }
-function startTour() { tourI = 0; document.getElementById('tourpop').style.display = 'block'; showTourStep(); }
-function tourGo(d) { tourI += d; if (tourI >= TOUR.length) { endTour(); return; } if (tourI < 0) tourI = 0; showTourStep(); }
+let tourI = 0, _tourPoll = null, _tourBase = null, _tourDir = 1, _tourWvId = null;
+function _clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function _clearTourPoll() { if (_tourPoll) { clearInterval(_tourPoll); _tourPoll = null; } }
+const _WV_CLEAR = "(function(){var o=document.getElementById('__asva_hl');if(o)o.remove();})()";
+function _wvHl(sel) {
+  return "(function(){try{var id='__asva_hl',od=document.getElementById(id);if(od)od.remove();"
+    + "var el=document.querySelector(" + JSON.stringify(sel) + ");if(!el)return null;"
+    + "el.scrollIntoView({block:'center',inline:'nearest'});var r=el.getBoundingClientRect();"
+    + "var o=document.createElement('div');o.id=id;o.style.cssText='position:fixed;left:'+(r.left-5)+'px;top:'+(r.top-5)+'px;width:'+(r.width+10)+'px;height:'+(r.height+10)+'px;border:3px solid #16a34a;border-radius:8px;box-shadow:0 0 0 100000px rgba(9,17,13,.6);z-index:2147483647;pointer-events:none;transition:all .15s ease';"
+    + "document.body.appendChild(o);return {left:r.left,top:r.top,width:r.width,height:r.height};}catch(e){return null;}})()";
+}
+function _clearTourWv() {
+  if (_tourWvId) {
+    try { const w = document.getElementById(_tourWvId); if (w && w.executeJavaScript) w.executeJavaScript(_WV_CLEAR); } catch (e) {}
+    _tourWvId = null;
+  }
+}
+function _tourVars(t) {
+  const s = window._lastStatus || {};
+  const bot = s.botNumber || '9344110272';
+  const own = s.ownerNumber ? ('+91 ' + s.ownerNumber) : (tourLang() === 'hi' ? 'aapke number' : 'your number');
+  return String(t == null ? '' : t).split('{BOT}').join(bot).split('{OWNER}').join(own);
+}
+// Place the popup in the biggest free area around `rect` (shell coords) so it
+// NEVER covers the highlighted thing, and point a caret at the target from the
+// chosen side. rect=null -> centered, no caret.
+function _placePopup(rect) {
+  const pop = document.getElementById('tourpop'), caret = document.getElementById('tourcaret');
+  pop.style.display = 'block';
+  const M = 14, W = window.innerWidth, H = window.innerHeight;
+  const pw = Math.min(330, W - 2 * M); pop.style.width = pw + 'px';
+  const ph = pop.offsetHeight || 210;
+  if (!rect) {
+    pop.removeAttribute('data-side');
+    pop.style.left = Math.round((W - pw) / 2) + 'px';
+    pop.style.top = _clamp(Math.round((H - ph) / 2), M, H - ph - M) + 'px';
+    return;
+  }
+  const right = W - (rect.left + rect.width), left = rect.left, below = H - (rect.top + rect.height), above = rect.top;
+  let x, y, side;
+  if (right >= pw + 2 * M) { side = 'right'; x = rect.left + rect.width + 12; y = _clamp(rect.top, M, H - ph - M); }
+  else if (left >= pw + 2 * M) { side = 'left'; x = rect.left - pw - 12; y = _clamp(rect.top, M, H - ph - M); }
+  else if (below >= ph + 2 * M) { side = 'below'; y = rect.top + rect.height + 12; x = _clamp(rect.left, M, W - pw - M); }
+  else if (above >= ph + 2 * M) { side = 'above'; y = rect.top - ph - 12; x = _clamp(rect.left, M, W - pw - M); }
+  else { side = ''; x = (W - pw) / 2; y = H - ph - M; }   // no room beside - pin bottom, no caret
+  x = _clamp(Math.round(x), M, W - pw - M); y = _clamp(Math.round(y), M, H - ph - M);
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+  if (side) {
+    pop.dataset.side = side;
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    if (side === 'right' || side === 'left') { caret.style.left = ''; caret.style.top = _clamp(Math.round(cy - y - 9), 12, ph - 22) + 'px'; }
+    else { caret.style.top = ''; caret.style.left = _clamp(Math.round(cx - x - 9), 16, pw - 26) + 'px'; }
+  } else pop.removeAttribute('data-side');
+  // A gentle entry pop each step (game-like).
+  pop.style.animation = 'none'; void pop.offsetWidth; pop.style.animation = 'asvaPopIn .2s ease';
+}
+// The tour is grouped into sections; "Skip this section" jumps to the next one.
+const _TOUR_SECTIONS = [
+  { start: 1, en: 'Set up', hi: 'Setup' },
+  { start: 4, en: 'Dashboard', hi: 'Dashboard' },
+  { start: 15, en: 'More features', hi: 'Aur features' },
+];
+function _sectionOf(i) { let cur = null; for (const s of _TOUR_SECTIONS) { if (i >= s.start) cur = s; } return cur; }
+function _skipTarget(i) {
+  const last = TOUR.length - 1;
+  if (i <= 0 || i >= last) return null;
+  const sec = _sectionOf(i); if (!sec) return null;
+  const idx = _TOUR_SECTIONS.indexOf(sec);
+  const next = _TOUR_SECTIONS[idx + 1];
+  const t = next ? next.start : last;   // last section -> jump to the finish step
+  return t > i ? t : null;
+}
+function tourSkipSection() { const t = _skipTarget(tourI); if (t != null) { _clearTourPoll(); _clearTourWv(); _tourDir = 1; tourI = t; showTourStep(); } }
+function startTour() { tourI = 0; _tourDir = 1; document.getElementById('tourpop').style.display = 'block'; showTourStep(); }
+function tourGo(d) { _clearTourPoll(); _tourDir = d; tourI += d; if (tourI >= TOUR.length) { endTour(); return; } if (tourI < 0) tourI = 0; showTourStep(); }
 function endTour() {
-  _clearTourTap();
+  _clearTourPoll(); _clearTourWv();
   localStorage.setItem('asva_tour_done', '1');
   ['tourpop', 'tourspot', 'tourmask'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
   try { show('dash'); } catch (e) {}
 }
+// Watch a gated step: show the tick when done, and auto-advance ONLY when moving
+// forward. Going Back never auto-advances (that was the loop: a satisfied step
+// kept jumping forward the instant you went back to it).
+function _tourWatch(autoAdvance) {
+  const s = TOUR[tourI], hintEl = document.getElementById('tourhint');
+  const L = tourLang(), c = s[L] || s.en;
+  let advanced = false;
+  const check = () => {
+    if (advanced) return;
+    let ok = false;
+    try { ok = s.verify(window._lastStatus || {}, _tourBase); } catch (e) { ok = false; }
+    if (ok) {
+      advanced = true; _clearTourPoll();
+      hintEl.textContent = _tourVars(c.ok || '✓'); hintEl.classList.add('done');
+      if (autoAdvance) setTimeout(() => { if (document.getElementById('tourpop').style.display === 'block') tourGo(1); }, 1300);
+    }
+  };
+  check();
+  if (!advanced) _tourPoll = setInterval(check, 1200);
+}
 function showTourStep() {
+  _clearTourPoll(); _clearTourWv();
   const s = TOUR[tourI], spot = document.getElementById('tourspot'),
     pop = document.getElementById('tourpop'), mask = document.getElementById('tourmask');
-  if (s.view) { try { show(s.view); } catch (e) {} }   // open the real tab behind the spotlight
-  const L = tourLang(), c = s[L] || s.en;
-  const hi = L === 'hi';
+  if (s.view) { try { show(s.view); } catch (e) {} }
+  const L = tourLang(), c = s[L] || s.en, hi = L === 'hi';
+  const gated = typeof s.verify === 'function';
+  const gatedAuto = gated && _tourDir >= 0;
   document.getElementById('tourbar').style.width = Math.round(((tourI + 1) / TOUR.length) * 100) + '%';
-  document.getElementById('tourstep').textContent = (hi ? 'Kadam ' : 'Step ') + (tourI + 1) + (hi ? ' / ' : ' of ') + TOUR.length;
-  document.getElementById('tourtitle').textContent = c.t;
-  document.getElementById('tourbody').textContent = c.b;
+  const _sec = _sectionOf(tourI);
+  const _secLbl = (_sec ? ((hi ? _sec.hi : _sec.en) + ' · ') : '');
+  document.getElementById('tourstep').textContent = _secLbl + (hi ? 'Kadam ' : 'Step ') + (tourI + 1) + (hi ? ' / ' : ' of ') + TOUR.length;
+  const _skipSecBtn = document.getElementById('tourskipsec');
+  if (_skipSecBtn) {
+    const _st = _skipTarget(tourI);
+    _skipSecBtn.style.display = (_st != null) ? 'inline' : 'none';
+    _skipSecBtn.textContent = hi ? 'Yeh section chhodein →' : 'Skip this section →';
+  }
+  document.getElementById('tourtitle').textContent = _tourVars(c.t);
+  document.getElementById('tourbody').textContent = _tourVars(c.b);
   const hintEl = document.getElementById('tourhint');
-  if (c.h) { hintEl.textContent = c.h; hintEl.style.display = 'block'; }
+  hintEl.classList.remove('done');
+  if (gated || c.do) { hintEl.style.display = 'block'; hintEl.textContent = _tourVars(c.do || ''); }
   else { hintEl.style.display = 'none'; }
   document.getElementById('tourback').style.visibility = tourI === 0 ? 'hidden' : 'visible';
   document.getElementById('tourback').textContent = hi ? 'Peeche' : 'Back';
   document.querySelector('#tourpop .tskip').textContent = hi ? 'Tour band karein' : 'Skip tour';
-  document.getElementById('tournext').textContent = (tourI === TOUR.length - 1) ? (hi ? 'Ho gaya' : 'Done') : (hi ? 'Aage' : 'Next');
-  const el = s.sel ? document.querySelector(s.sel) : null;
-  _clearTourTap();   // drop any previous step's tap-to-advance listener
-  // Wait a tick so a just-switched view has laid out before we measure.
-  setTimeout(() => {
-    if (el) {
-      // Keep the highlighted control on screen so the spotlight is never off in
-      // a corner the owner has to hunt for.
-      try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
-      // Hands-on: let the owner ADVANCE by tapping the highlighted button. Every
-      // tap target is a NAVIGATION button (open a tab), never a Send button, so
-      // the tour can never fire a real message to a customer. Next is always
-      // available too, so no one is ever trapped waiting on a tap.
-      if (s.tap) {
-        const fn = () => { setTimeout(() => tourGo(1), 120); };
-        el.addEventListener('click', fn, { once: true });
-        _tourTap = { el, fn };
-      }
-      const r = el.getBoundingClientRect(), pad = 6;
-      mask.style.display = 'none';
-      spot.style.display = 'block';
-      spot.style.left = (r.left - pad) + 'px'; spot.style.top = (r.top - pad) + 'px';
-      spot.style.width = (r.width + pad * 2) + 'px'; spot.style.height = (r.height + pad * 2) + 'px';
-      pop.style.display = 'block';
-      const pw = Math.min(330, window.innerWidth - 24), ph = pop.offsetHeight || 190;
-      let left, top;
-      if (r.right < window.innerWidth * 0.5) { left = r.right + 18; top = Math.max(12, r.top - 8); }
-      else { left = Math.max(12, r.left); top = r.bottom + 16; }
-      if (left + pw > window.innerWidth - 12) left = window.innerWidth - 12 - pw;
-      if (top + ph > window.innerHeight - 12) top = Math.max(12, window.innerHeight - 12 - ph);
-      pop.style.left = left + 'px'; pop.style.top = top + 'px';
-    } else {
-      spot.style.display = 'none';
-      mask.style.display = 'block';
-      pop.style.display = 'block';
-      const pw = Math.min(360, window.innerWidth - 24), ph = pop.offsetHeight || 200;
-      pop.style.left = Math.max(12, (window.innerWidth - pw) / 2) + 'px';
-      pop.style.top = Math.max(24, (window.innerHeight - ph) / 2) + 'px';
+  const nextBtn = document.getElementById('tournext');
+  if (gatedAuto) { nextBtn.textContent = hi ? 'Yeh step chhodein' : 'Skip this step'; nextBtn.classList.add('ghost'); }
+  else { nextBtn.classList.remove('ghost'); nextBtn.textContent = (tourI === TOUR.length - 1) ? (hi ? 'Ho gaya' : 'Done') : (hi ? 'Aage' : 'Next'); }
+
+  const finish = (rect) => {
+    _placePopup(rect);
+    if (gated) {
+      if (s.baseline) _tourBase = Object.assign({}, window._lastStatus || {});
+      setTimeout(() => { if (_tourPoll) hintEl.textContent = _tourVars(c.wait || ''); }, 2600);
+      _tourWatch(gatedAuto);
     }
-  }, s.view ? 90 : 0);
+  };
+
+  setTimeout(() => {
+    if (s.wv && s.wvsel) {
+      // Highlight an element INSIDE the webview (it dims itself around the target).
+      spot.style.display = 'none'; mask.style.display = 'none';
+      const w = document.getElementById(s.wv);
+      const doHl = (retry) => {
+        let p = null;
+        try { p = (w && w.executeJavaScript) ? w.executeJavaScript(_wvHl(s.wvsel), false) : null; } catch (e) { p = null; }
+        if (p && p.then) {
+          p.then(r => {
+            if (r) { _tourWvId = s.wv; const wr = w.getBoundingClientRect(); finish({ left: wr.left + r.left, top: wr.top + r.top, width: r.width, height: r.height }); }
+            else if (retry > 0) { setTimeout(() => doHl(retry - 1), 260); }
+            else {  // fallback: ring the whole webview area from the shell
+              const wr = w.getBoundingClientRect();
+              spot.style.display = 'block';
+              spot.style.left = wr.left + 'px'; spot.style.top = wr.top + 'px';
+              spot.style.width = wr.width + 'px'; spot.style.height = wr.height + 'px';
+              finish({ left: wr.left, top: wr.top, width: wr.width, height: wr.height });
+            }
+          }).catch(() => { if (retry > 0) setTimeout(() => doHl(retry - 1), 260); else finish(null); });
+        } else if (retry > 0) { setTimeout(() => doHl(retry - 1), 260); }
+        else { finish(null); }
+      };
+      doHl(3);
+    } else if (s.sel) {
+      const el = document.querySelector(s.sel);
+      if (el) {
+        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+        const r = el.getBoundingClientRect(), pad = 6;
+        mask.style.display = 'none'; spot.style.display = 'block';
+        spot.style.left = (r.left - pad) + 'px'; spot.style.top = (r.top - pad) + 'px';
+        spot.style.width = (r.width + pad * 2) + 'px'; spot.style.height = (r.height + pad * 2) + 'px';
+        finish({ left: r.left - pad, top: r.top - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+      } else { spot.style.display = 'none'; mask.style.display = 'block'; finish(null); }
+    } else {
+      spot.style.display = 'none'; mask.style.display = 'block'; finish(null);
+    }
+  }, s.view ? 160 : 0);
 }
 window.addEventListener('resize', () => { if (document.getElementById('tourpop').style.display === 'block') showTourStep(); });
 document.addEventListener('keydown', e => {

@@ -31,6 +31,7 @@ SKIP_DIRS = {
     ".wwebjs_auth", ".wwebjs_cache", ".baileys_auth", "dist", "build", ".idea", ".vscode",
     ".mypy_cache", ".ruff_cache",
     ".claude",   # dev tooling config; can carry a token - never ship it
+    "dev",       # local dev module: isolated Supabase + seeder; never ship it
     # Installer build outputs (built by build_installer.ps1) - hundreds of MB of
     # Electron/PyInstaller binaries that must never bloat a code zip.
     "dist_installer", "dist_agent", "build_agent",

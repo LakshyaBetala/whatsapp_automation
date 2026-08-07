@@ -1,0 +1,10 @@
+[Unit]
+Description=ASVA database backup (pg_dump -> local + Google Drive)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/deploy/linux/asva-backup.sh

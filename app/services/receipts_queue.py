@@ -195,15 +195,45 @@ def list_confirmed(db, business_id: str) -> list[dict]:
         return []
 
 
-def claim_confirmed(db, business_id: str) -> list[dict]:
-    """Atomically CLAIM the confirmed receipts for posting: flip confirmed ->
-    posting and return them. A 'posting' row is never handed out again, so even if
-    the agent's post succeeds but the follow-up report is lost, the next drain will
-    NOT post it a second time. This is the guard against a receipt hitting Tally
-    twice."""
+# How long a receipt may sit in 'posting' before we assume its report was lost
+# and re-offer it. A healthy agent claims, posts, and reports within seconds, so
+# anything older than this is a lost report, not a live post-in-progress.
+POSTING_STALE_MINUTES = 10
+
+
+def reclaim_stale_posting(db, business_id: str, *, stale_minutes: int = POSTING_STALE_MINUTES) -> int:
+    """Self-heal: move any receipt wedged in 'posting' past the timeout back to
+    'confirmed' so the next claim re-offers it. Legacy rows (posting_at is null)
+    are reclaimed immediately. Returns how many were un-wedged."""
+    cutoff = (_dt.datetime.now(_dt.timezone.utc)
+              - _dt.timedelta(minutes=max(1, stale_minutes))).isoformat()
     try:
         r = (db.table("pending_receipts")
-             .update({"status": "posting"})
+             .update({"status": "confirmed",
+                      "error": "re-queued: previous post never confirmed"})
+             .eq("business_id", business_id).eq("status", "posting")
+             .or_(f"posting_at.is.null,posting_at.lt.{cutoff}")
+             .execute())
+        n = len(r.data or [])
+        if n:
+            log.info("reclaimed %d stale 'posting' receipt(s) for business %s", n, business_id)
+        return n
+    except Exception:
+        log.exception("reclaim_stale_posting failed (business %s)", business_id)
+        return 0
+
+
+def claim_confirmed(db, business_id: str) -> list[dict]:
+    """CLAIM confirmed receipts for posting: flip confirmed -> posting (stamping
+    posting_at) and return them. First self-heals any row wedged in 'posting'
+    beyond the timeout - so a lost report no longer strands a payment on
+    "Posting to Tally..." forever, yet a genuinely in-flight post (claimed
+    seconds ago) is still never handed out twice."""
+    reclaim_stale_posting(db, business_id)
+    try:
+        r = (db.table("pending_receipts")
+             .update({"status": "posting",
+                      "posting_at": _dt.datetime.now(_dt.timezone.utc).isoformat()})
              .eq("business_id", business_id).eq("status", "confirmed")
              .execute())
         return r.data or []

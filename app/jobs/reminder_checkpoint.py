@@ -127,17 +127,21 @@ async def run() -> None:
             if subs.effective_status(biz.get("plan_expires_on")) == "suspended":
                 continue
             cp_hour = max(0, _biz_hour(biz) - max(1, settings.checkpoint_lead_hours))
-            if now.hour != cp_hour:
+            # Fire at the checkpoint hour OR LATER (up to +6h), not only at the
+            # exact hour - so if the bot WhatsApp was down at that minute, a later
+            # hourly run still delivers the morning agenda (catch-up). Beyond the
+            # window we skip: a "morning" agenda at night is noise.
+            if now.hour < cp_hour or now.hour > cp_hour + 6:
                 continue
             if str(biz.get("checkpoint_date") or "")[:10] == today.isoformat():
                 continue   # already previewed today
 
             items = await _due_parties(db, biz, today)
-            checkpoint.set_today(db, biz["id"], items)   # marks 'previewed' even if empty
             if not items or not biz.get("whatsapp_number"):
+                checkpoint.set_today(db, biz["id"], items)   # nothing to send -> done for today
                 continue
 
-            await whatsapp.send_template(
+            res = await whatsapp.send_template(
                 business_id=biz["id"],
                 to_number=biz["whatsapp_number"],
                 campaign_name="checkpoint",
@@ -149,6 +153,13 @@ async def run() -> None:
                 message_text=_message(items),
                 channel="platform",     # owner-facing -> bot number, never queued
             )
-            log.info("Checkpoint -> owner of %s (%d parties)", biz["id"], len(items))
+            # Mark done ONLY if it actually went. A failed send (bot down) stays
+            # un-marked, so the next hourly run retries it - the fix for "if the
+            # bot was off at that time, the agenda never comes".
+            if res and res.get("sent"):
+                checkpoint.set_today(db, biz["id"], items)
+                log.info("Checkpoint -> owner of %s (%d parties)", biz["id"], len(items))
+            else:
+                log.warning("Checkpoint for %s not sent (bot down?) - will retry next hour", biz["id"])
         except Exception:
             log.exception("Checkpoint failed for business %s - continuing", biz.get("id"))

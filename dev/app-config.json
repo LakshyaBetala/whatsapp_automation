@@ -1,0 +1,6 @@
+{
+  "agent_token": "dev-agent-token",
+  "business_id": "dev-business-0000",
+  "backend_url": "http://localhost:8000",
+  "company_name": "DEV Wholesale"
+}

@@ -135,6 +135,13 @@ function migrateData() {
 migrateData();   // must run before loadConfig() reads the pairing below
 
 function configPath() {
+  // DEV ONLY: if ASVA_DEV_CONFIG points at a file, use it. This lets the real
+  // app run against the local dev backend (for demos/videos) WITHOUT touching the
+  // installed app's pairing in userData or the shop's tally_agent/config.json.
+  // Production never sets this env var, so this is a no-op in the field.
+  if (process.env.ASVA_DEV_CONFIG && fs.existsSync(process.env.ASVA_DEV_CONFIG)) {
+    return process.env.ASVA_DEV_CONFIG;
+  }
   if (fs.existsSync(DATA_CONFIG)) return DATA_CONFIG;
   if (fs.existsSync(RES_CONFIG)) return RES_CONFIG;
   if (fs.existsSync(LEGACY_CONFIG_PATH)) return LEGACY_CONFIG_PATH;
@@ -338,15 +345,23 @@ function startAll() {
     console.log('[main] not paired yet - waiting for setup');
     return;
   }
+  // DEV DEMO (pitch/video on mock data): ASVA_DEV_CONFIG is set. There is no
+  // Tally, so skip the Tally reader (watcher), the outbox drainer, and the
+  // source-tree updater - start ONLY wa_service so the WhatsApp Setup/QR demo
+  // still works. The dashboard + Payments run off the mock backend. This keeps
+  // the demo clean (no red "Tally watcher not running" noise) while the UI/UX
+  // stays byte-for-byte the real app.
+  const DEV_DEMO = !!process.env.ASVA_DEV_CONFIG;
   // Dev only: the source-tree Python updater. The packaged app updates via its
   // own installer, not by overwriting files, so there is no Python to run.
-  if (!app.isPackaged) {
+  if (!app.isPackaged && !DEV_DEMO) {
     try {
       const upd = spawnSync(PY, ['updater.py'], { cwd: REPO, timeout: 90000, encoding: 'utf8' });
       if (upd && upd.stdout) console.log('[update]', upd.stdout.trim());
     } catch (e) { console.error('updater skipped:', (e && e.message) || e); }
   }
-  Object.keys(SPECS).forEach(startService);
+  const toStart = DEV_DEMO ? ['whatsapp'] : Object.keys(SPECS);
+  toStart.forEach(startService);
 }
 
 // ── Setup wizard plumbing ─────────────────────────────────────────────────
@@ -511,6 +526,9 @@ function pollStatus() {
     if (ok) { try { const d = JSON.parse(b);
       out.tallyLabel = d.tally_label; out.tallyColor = d.tally_color;
       out.lastSyncedLabel = d.last_synced_label; out.lastSyncedAt = d.last_synced_at;
+      // Onboarding-tour signals (verify each step is actually done).
+      out.upi = d.upi; out.ownerNumber = d.owner_number;
+      out.botNumber = d.bot_number; out.lastInboundAt = d.last_inbound_at;
       noteSyncValue(d.last_synced_at);
     } catch (e) {} }
     // ok here means the backend answered sync-status = backend is up.
@@ -712,6 +730,16 @@ function setupAutoUpdate() {
 
   autoUpdater.autoDownload = true;           // fetch quietly in the background
   autoUpdater.autoInstallOnAppQuit = true;   // also apply on the next normal quit
+  // Differential (delta) downloads are ON: an update fetches only the CHANGED
+  // bytes, which is fast when a release is small. Two rules keep it that way and
+  // avoid the "stuck at 9%" that a HUGE delta caused through Cloudflare:
+  //   1. the bundled Tally agent is rebuilt ONLY when tally_agent/ actually
+  //      changes (a rebuild changes almost all of its bytes), and it is now built
+  //      WITHOUT UPX so unchanged code stays byte-identical between releases;
+  //   2. a release that DOES rebuild the agent is published WITHOUT its .blockmap
+  //      so clients do one clean FULL download for that jump instead of a giant
+  //      delta; ordinary (agent-unchanged) releases publish the .blockmap = fast
+  //      delta. See deploy note / BACKUP-style runbook.
   const notesOf = (info) => {
     const n = info && info.releaseNotes;
     if (!n) return '';

@@ -90,7 +90,16 @@ def cash_in_forecast(db, business_id: str, *, horizon_days: int = 7,
                 include = True                   # unparseable date -> count it, don't drop
         if not include:
             continue
-        amt = _money(p.get("amount")) if p.get("amount") else out_by_client.get(cid, Decimal(0))
+        # Ground every promise in the party's REAL open balance. A parsed amount
+        # is trusted only when it is positive AND does not exceed what they owe;
+        # a promise larger than the debt (or a misread number from free text) is
+        # almost certainly a mis-parse, so we fall back to the true outstanding.
+        # This stops the "coming in" figure from showing random inflated amounts.
+        owed = out_by_client.get(cid, Decimal(0))
+        if owed <= 0:
+            continue                              # nothing owed -> nothing coming
+        raw = _money(p.get("amount")) if p.get("amount") else Decimal(0)
+        amt = raw if (Decimal(0) < raw <= owed) else owed
         if amt > 0:
             # one figure per party (the largest signal), never stacked
             promised_by_client[cid] = max(promised_by_client.get(cid, Decimal(0)), amt)

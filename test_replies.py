@@ -43,9 +43,16 @@ def _setup(monkeypatch, verdict=None):
         return verdict
     monkeypatch.setattr(replies.intent, "classify", fake_classify)
 
-    async def fake_proof(bid, name, mb, mt):
-        rec.proof.append((bid, name))
+    async def fake_proof(bid, name, mb, mt, caption):
+        rec.proof.append((bid, name, caption))
     monkeypatch.setattr(replies, "_forward_proof", fake_proof)
+
+    # Default: OCR reads no amount (tests that need one override this). Keeps
+    # every test off the live Gemini API.
+    import app.services.ocr as _ocr
+    async def _fake_amt(b64, mt="image/jpeg"):
+        return None
+    monkeypatch.setattr(_ocr, "extract_payment_amount", _fake_amt)
     return rec
 
 
@@ -145,9 +152,12 @@ def test_gemini_off_degrades_to_silent(monkeypatch):
 def test_screenshot_forwards_proof_and_holds(monkeypatch):
     rec = _setup(monkeypatch)
     out = _run("", media_b64="ZmFrZQ==", media_type="image/jpeg")
-    assert rec.proof == [("b1", "Ramesh Traders")]
+    assert rec.proof and rec.proof[0][0] == "b1" and rec.proof[0][1] == "Ramesh Traders"
     assert rec.created and rec.created[0]["source"] == "screenshot"
-    assert rec.owner and "screenshot" in rec.owner[0].lower()   # owner nudged
+    # ONE owner message: the screenshot image carries the full caption; there is
+    # no separate text nudge (that was the duplicate).
+    assert "screenshot" in rec.proof[0][2].lower()
+    assert rec.owner == []
     assert out is True
 
 
@@ -165,7 +175,9 @@ def test_screenshot_with_readable_amount_queues_a_receipt(monkeypatch):
     out = asyncio.run(replies.capture_reply(client, "", media_b64="ZmFrZQ==", media_type="image/jpeg"))
     assert out is True
     assert queued and queued[0]["amount"] == 310.0
-    assert "Payments tab" in rec.owner[0]
+    # Amount read -> receipt queued, and the single image caption says so.
+    assert rec.proof and "Payments tab" in rec.proof[0][2]
+    assert rec.owner == []
 
 
 def test_capture_reply_never_returns_a_customer_message(monkeypatch):

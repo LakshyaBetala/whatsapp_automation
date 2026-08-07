@@ -65,3 +65,9 @@ wa_service/.baileys_auth/
 dist_installer/
 dist_agent/
 build_agent/
+deploy/remote.env
+dev/supabase/
+dev/_bringup.log
+dev/.env.dev
+dev/.supabase-status.txt
+dev/*.log

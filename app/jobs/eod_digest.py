@@ -284,13 +284,19 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
 # ======================================================================
 
 async def _digest_sent_today(db, business_id: str, today: date) -> bool:
-    """Per-day dedup: has this business already received today's digest?"""
+    """Per-day dedup: has this business already received today's digest?
+
+    Counts only SUCCESSFUL sends. A failed attempt (bot WhatsApp was down at the
+    digest hour) must NOT count - otherwise the digest is lost for the day. The
+    job runs hourly, so an un-deduped failure is retried the next hour and the
+    owner still gets the digest once the bot reconnects (catch-up)."""
     utc_start, utc_end = _today_utc_range_for_ist(today)
     resp = (
         db.table("messages")
         .select("id", count="exact")
         .eq("business_id", business_id)
         .eq("type", MessageType.eod_digest.value)
+        .in_("delivery_status", ["sent", "delivered", "read"])
         .gte("sent_at", utc_start)
         .lt("sent_at", utc_end)
         .limit(1)

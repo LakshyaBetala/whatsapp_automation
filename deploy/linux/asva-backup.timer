@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the ASVA database backup every night
+
+[Timer]
+# 02:30 every day (server time). Persistent=true means if the i3 was OFF at
+# 02:30, the backup runs the next time it boots - so a skipped night is caught up.
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

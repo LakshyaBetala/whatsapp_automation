@@ -87,8 +87,12 @@ async def _notify_owner(business_id: str, text: str) -> None:
         log.exception("owner notify failed (reply capture)")
 
 
-async def _forward_proof(business_id: str, name: str, media_b64: str, media_type: str) -> None:
-    """Send the customer's payment screenshot to the owner as proof."""
+async def _forward_proof(business_id: str, name: str, media_b64: str, media_type: str,
+                         caption: str) -> None:
+    """Send the customer's payment screenshot to the owner as ONE message: the
+    image WITH the full caption. This is the only owner nudge for a screenshot -
+    we no longer send a second text alert (that caused the duplicate "they have
+    paid, they have paid")."""
     try:
         db = require_db()
         biz = (db.table("businesses").select("whatsapp_number, plan")
@@ -97,15 +101,15 @@ async def _forward_proof(business_id: str, name: str, media_b64: str, media_type
             return
         await whatsapp.send_message(
             business_id=business_id, to_number=biz[0]["whatsapp_number"],
-            message_text=(f"{name} sent a payment screenshot. If the money has come, "
-                          f"enter it in Tally. To chase anyway, reply CHASE {name}."),
+            message_text=caption,
             plan=Plan(biz[0].get("plan") or "starter"),
             message_type=MessageType.owner_alert,
             image_base64=media_b64, image_media_type=media_type,
             language=Lang.hi, channel="platform")
     except Exception:
         log.exception("payment-proof forward failed")
-        await _notify_owner(business_id, f"{name} sent a payment screenshot on WhatsApp.")
+        # Fallback: still ONE message (text only) if the image send failed.
+        await _notify_owner(business_id, caption)
 
 
 def _amt_phrase(amount) -> str:
@@ -164,7 +168,6 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     # 1. A screenshot with no clear instruction: treat as payment proof. Try to
     #    read the amount off it (UPI/bank) so it can go straight to the Payments tab.
     if media_b64 and len(text) < 4:
-        await _forward_proof(business_id, name, media_b64, media_type)   # sends the image to the owner
         amount = None
         try:
             from app.services import ocr
@@ -174,18 +177,21 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
         promises.create(require_db(), business_id, client_id, kind="paid_claim",
                         hold_until=_grace_hold(), amount=amount,
                         raw_text="[payment screenshot]", source="screenshot")
+        # Build the ONE caption, then send the image with it - a single owner
+        # message, never two.
         if _queue_payment(business_id, client, amount):
-            await _notify_owner(business_id,
+            caption = (
                 f"{name} sent a payment screenshot for {inr(amount)}. It is in your "
                 f"Payments tab - check the account and post it into Tally. Reminders "
                 f"paused for {settings.promise_grace_days} days. Reply CHASE {name} to resume.")
-            return True
-        await _notify_owner(business_id,
-            f"{name} sent a payment screenshot. ASVA PAUSED their reminders for "
-            f"{settings.promise_grace_days} days (nothing was replied to {name}). "
-            f"When the money lands, reply PAID {name} to record it (you confirm the "
-            f"amount + account in the app, then it posts to Tally). "
-            f"Reply CHASE {name} to resume now, or message {name} yourself.")
+        else:
+            caption = (
+                f"{name} sent a payment screenshot. ASVA PAUSED their reminders for "
+                f"{settings.promise_grace_days} days (nothing was replied to {name}). "
+                f"When the money lands, reply PAID {name} to record it (you confirm the "
+                f"amount + account in the app, then it posts to Tally). "
+                f"Reply CHASE {name} to resume now, or message {name} yourself.")
+        await _forward_proof(business_id, name, media_b64, media_type, caption)
         return True
 
     if not text:

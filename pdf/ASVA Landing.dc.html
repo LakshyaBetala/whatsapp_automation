@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:'Inter',system-ui,sans-serif;background:#f9f8f5;color:#0c1a10;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:#16a34a;text-decoration:none}
+  a:hover{color:#0f7a37}
+  button{font-family:inherit}
+  ::selection{background:#16a34a;color:#f9f8f5}
+  @keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  @keyframes glow{0%,100%{opacity:.5}50%{opacity:.9}}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+</style>
+</helmet>
+
+<div style="max-width:100%;overflow:hidden">
+
+<!-- NAV -->
+<nav style="position:sticky;top:0;z-index:50;background:rgba(249,248,245,.82);backdrop-filter:blur(12px);border-bottom:2px solid #0c1a10">
+  <div style="max-width:1120px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:20px">
+    <button onClick="{{ navHome }}" style="display:flex;align-items:center;gap:9px;color:#0c1a10;background:none;border:none;cursor:pointer;padding:0">
+      <span style="width:30px;height:30px;background:#16a34a;border:2px solid #0c1a10;border-radius:9px;display:grid;place-items:center;font-weight:900;color:#f9f8f5;box-shadow:2px 2px 0 #0c1a10">A</span>
+      <span style="font-weight:900;font-size:20px;letter-spacing:-.03em">ASVA</span>
+    </button>
+    <div style="flex:1"></div>
+    <div style="display:flex;gap:8px;align-items:center;font-weight:600;font-size:15px">
+      <button onClick="{{ navHome }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:15px;color:#0c1a10;padding:6px 10px;border-radius:8px;border-bottom:2px solid {{ aHome }}">Home</button>
+      <button onClick="{{ navHow }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:15px;color:#0c1a10;padding:6px 10px;border-radius:8px;border-bottom:2px solid {{ aHow }}">How it works</button>
+      <button onClick="{{ navFeatures }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:15px;color:#0c1a10;padding:6px 10px;border-radius:8px;border-bottom:2px solid {{ aFeatures }}">Features</button>
+      <button onClick="{{ navPricing }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:15px;color:#0c1a10;padding:6px 10px;border-radius:8px;border-bottom:2px solid {{ aPricing }}">Pricing</button>
+    </div>
+    <button onClick="{{ navDownload }}" style="font-weight:800;font-size:14px;background:#16a34a;color:#f9f8f5;padding:10px 18px;border:2px solid #0c1a10;border-radius:11px;box-shadow:3px 3px 0 #0c1a10;cursor:pointer;transition:transform .12s,box-shadow .12s" style-hover="transform:translate(-1px,-1px);box-shadow:4px 4px 0 #0c1a10">Download app ↓</button>
+  </div>
+</nav>
+
+<!-- ============ HOME ============ -->
+<div data-page="home">
+<section id="top" style="max-width:1120px;margin:0 auto;padding:64px 24px 40px;display:grid;grid-template-columns:1.15fr .85fr;gap:48px;align-items:center">
+  <div>
+    <div style="display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:#eaf7ee;border:1.5px solid #16a34a;color:#0f7a37;padding:6px 12px;border-radius:999px">
+      <span style="width:7px;height:7px;background:#16a34a;border-radius:50%;display:inline-block"></span>
+      TallyPrime → WhatsApp
+    </div>
+    <h1 style="font-size:clamp(40px,6vw,72px);line-height:.98;letter-spacing:-.04em;font-weight:900;margin:22px 0 0;text-wrap:balance">
+      Your outstanding,<br>collected
+      <span style="display:inline-block;background:#16a34a;color:#f9f8f5;padding:0 12px;border:2px solid #0c1a10;border-radius:14px;transform:rotate(-2deg);box-shadow:4px 4px 0 #0c1a10">on its own.</span>
+    </h1>
+    <p style="font-size:19px;line-height:1.5;color:#37473c;margin:26px 0 0;max-width:36ch">
+      A tiny app reads your <b style="color:#0c1a10">TallyPrime</b> data and runs your <b style="color:#0c1a10">payment-reminder campaigns</b> on WhatsApp — from your <b style="color:#0c1a10">shop's own number</b>. Defaulters pay faster. You chase no one.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:30px">
+      <button onClick="{{ navDownload }}" style="font-weight:800;font-size:16px;background:#16a34a;color:#f9f8f5;padding:15px 26px;border:2px solid #0c1a10;border-radius:14px;box-shadow:5px 5px 0 #0c1a10;cursor:pointer;transition:transform .12s,box-shadow .12s" style-hover="transform:translate(-2px,-2px);box-shadow:7px 7px 0 #0c1a10">Download for Windows</button>
+      <button onClick="{{ navHow }}" style="font-weight:800;font-size:16px;background:#f9f8f5;color:#0c1a10;padding:15px 26px;border:2px solid #0c1a10;border-radius:14px;cursor:pointer;transition:transform .12s" style-hover="transform:translate(-2px,-2px)">See how it works</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#37473c">
+      <span style="background:#fff;border:1.5px solid #d7ddd7;border-radius:8px;padding:7px 11px">✳ 0 plugins in Tally</span>
+      <span style="background:#fff;border:1.5px solid #d7ddd7;border-radius:8px;padding:7px 11px">⚡ 5-min setup</span>
+      <span style="background:#fff;border:1.5px solid #d7ddd7;border-radius:8px;padding:7px 11px">🔒 ASVA never holds the money</span>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:center">
+    <div style="position:relative">
+      <div style="position:absolute;inset:-14px;background:radial-gradient(closest-side,rgba(22,163,74,.35),transparent);filter:blur(24px);animation:glow 3.4s ease-in-out infinite"></div>
+      <div style="position:relative;width:300px;background:#0b1a10;border:3px solid #0c1a10;border-radius:38px;padding:12px;box-shadow:10px 12px 0 #0c1a10;animation:floaty 5s ease-in-out infinite">
+        <div style="background:#e9e3da;border-radius:28px;overflow:hidden">
+          <div style="background:#075e54;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px">
+            <div style="width:34px;height:34px;border-radius:50%;background:#25d366;display:grid;place-items:center;font-weight:900;font-size:14px">ST</div>
+            <div style="line-height:1.2">
+              <div style="font-weight:700;font-size:14px">Sharma Traders</div>
+              <div style="font-size:11px;opacity:.8">via ASVA · online</div>
+            </div>
+          </div>
+          <div style="padding:16px 12px;display:flex;flex-direction:column;gap:9px;min-height:360px;background:#ded6cc">
+            <sc-for list="{{ bubbles }}" as="b" hint-placeholder-count="5">
+              <div style="{{ b.style }}">{{ b.text }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      <div style="position:absolute;top:-18px;right:-26px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;background:#16a34a;color:#f9f8f5;border:2px solid #0c1a10;border-radius:999px;padding:6px 12px;transform:rotate(6deg);box-shadow:3px 3px 0 #0c1a10">real convo ↑</div>
+    </div>
+  </div>
+</section>
+
+<section style="max-width:1120px;margin:0 auto;padding:20px 24px 8px">
+  <div data-rv style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:2px solid #0c1a10;border-radius:18px;overflow:hidden;background:#fff">
+    <div style="padding:24px 20px;border-right:2px solid #0c1a10">
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em">₹43L+</div>
+      <div style="font-size:13px;color:#37473c;margin-top:4px;line-height:1.35">receivables in the first live pilot</div>
+    </div>
+    <div style="padding:24px 20px;border-right:2px solid #0c1a10">
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em">1,966</div>
+      <div style="font-size:13px;color:#37473c;margin-top:4px;line-height:1.35">debtors handled in one Tally test</div>
+    </div>
+    <div style="padding:24px 20px;border-right:2px solid #0c1a10">
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em">30–160</div>
+      <div style="font-size:13px;color:#37473c;margin-top:4px;line-height:1.35">days of credit distributors carry</div>
+    </div>
+    <div style="padding:24px 20px">
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em">~₹2.3</div>
+      <div style="font-size:13px;color:#37473c;margin-top:4px;line-height:1.35">per active debtor / month, flat</div>
+    </div>
+  </div>
+</section>
+
+<section style="margin-top:40px;border-top:2px solid #0c1a10;border-bottom:2px solid #0c1a10;background:#0b1a10;color:#f9f8f5;overflow:hidden;padding:16px 0">
+  <div style="display:flex;width:max-content;animation:marquee 34s linear infinite;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:15px;letter-spacing:.02em">
+    <div style="display:flex;gap:34px;padding-right:34px">
+      <span>PLUGIN-FREE TALLY</span><span style="color:#25d366">◆</span><span>SHOP'S OWN NUMBER</span><span style="color:#25d366">◆</span><span>UPI PAY LINKS</span><span style="color:#25d366">◆</span><span>HINDI · GUJARATI · MARATHI</span><span style="color:#25d366">◆</span><span>NEVER TOUCHES THE MONEY</span><span style="color:#25d366">◆</span><span>FIFO RECONCILE</span><span style="color:#25d366">◆</span>
+    </div>
+    <div style="display:flex;gap:34px;padding-right:34px" aria-hidden="true">
+      <span>PLUGIN-FREE TALLY</span><span style="color:#25d366">◆</span><span>SHOP'S OWN NUMBER</span><span style="color:#25d366">◆</span><span>UPI PAY LINKS</span><span style="color:#25d366">◆</span><span>HINDI · GUJARATI · MARATHI</span><span style="color:#25d366">◆</span><span>NEVER TOUCHES THE MONEY</span><span style="color:#25d366">◆</span><span>FIFO RECONCILE</span><span style="color:#25d366">◆</span>
+    </div>
+  </div>
+</section>
+
+<section style="max-width:1120px;margin:0 auto;padding:80px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">The problem</div>
+  <h2 style="font-size:clamp(30px,4.4vw,52px);line-height:1.02;letter-spacing:-.035em;font-weight:900;margin:14px 0 0;max-width:20ch;text-wrap:balance">Distributors sell on credit, then spend their life chasing it.</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:34px">
+    <p style="font-size:18px;line-height:1.6;color:#37473c">A wholesaler sells on 30–160 day terms. Tens of lakhs sit locked in a long list of debtors. Chasing is manual, awkward and inconsistent — so <b style="color:#0c1a10">DSO creeps up</b>, working capital stays trapped, and you pay interest on money your customers owe <i>you</i>.</p>
+    <p style="font-size:18px;line-height:1.6;color:#37473c">Today's tools don't fix it. Tally only <b style="color:#0c1a10">shows</b> the outstanding. Add-on apps text from a generic number nobody trusts and bill per message. <b style="color:#0c1a10">Nobody closes the loop</b> from ledger to money in the bank.</p>
+  </div>
+</section>
+
+<section style="max-width:1120px;margin:0 auto;padding:40px 24px 40px">
+  <div data-rv>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">The reminder campaign, on autopilot</div>
+    <h2 style="font-size:clamp(30px,4.4vw,52px);line-height:1.02;letter-spacing:-.035em;font-weight:900;margin:14px 0 8px">One job, done automatically: get the money in.</h2>
+    <p style="font-size:18px;color:#37473c;max-width:52ch">Connect Tally once. From then on ASVA works the entire collections cycle by itself.</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:34px" data-rv>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:20px 16px;box-shadow:4px 4px 0 #0c1a10;transition:transform .14s,box-shadow .14s" style-hover="transform:translate(-2px,-3px);box-shadow:6px 7px 0 #16a34a">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">01</div>
+      <div style="font-weight:800;font-size:17px;margin-top:10px">Reads Tally</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:7px;line-height:1.45">Pulls debtors, bills &amp; receipts live — no plugin installed.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:20px 16px;box-shadow:4px 4px 0 #0c1a10;transition:transform .14s,box-shadow .14s" style-hover="transform:translate(-2px,-3px);box-shadow:6px 7px 0 #16a34a">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">02</div>
+      <div style="font-weight:800;font-size:17px;margin-top:10px">Sends the bill</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:7px;line-height:1.45">Every sale reaches the customer on WhatsApp with the real Tally PDF.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:20px 16px;box-shadow:4px 4px 0 #0c1a10;transition:transform .14s,box-shadow .14s" style-hover="transform:translate(-2px,-3px);box-shadow:6px 7px 0 #16a34a">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">03</div>
+      <div style="font-weight:800;font-size:17px;margin-top:10px">Reminds on cadence</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:7px;line-height:1.45">Firm, polite follow-ups after due date. One message per party.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:20px 16px;box-shadow:4px 4px 0 #0c1a10;transition:transform .14s,box-shadow .14s" style-hover="transform:translate(-2px,-3px);box-shadow:6px 7px 0 #16a34a">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">04</div>
+      <div style="font-weight:800;font-size:17px;margin-top:10px">Takes payment</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:7px;line-height:1.45">UPI link &amp; QR to the shop's own account. ASVA never holds it.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:20px 16px;box-shadow:4px 4px 0 #0c1a10;transition:transform .14s,box-shadow .14s" style-hover="transform:translate(-2px,-3px);box-shadow:6px 7px 0 #16a34a">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">05</div>
+      <div style="font-weight:800;font-size:17px;margin-top:10px">Reconciles</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:7px;line-height:1.45">Receipts clear the oldest bills first. The loop closes.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ============ HOW IT WORKS ============ -->
+<div data-page="how" style="display:none">
+<section style="max-width:1120px;margin:0 auto;padding:64px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">How it works</div>
+  <h2 style="font-size:clamp(34px,5vw,58px);line-height:1;letter-spacing:-.04em;font-weight:900;margin:14px 0 8px;max-width:16ch">Three parts. Your WhatsApp never leaves your PC.</h2>
+  <p style="font-size:18px;color:#37473c;max-width:56ch">Each part does only its job. The shop's WhatsApp stays on the shop's own connection, so the number is never at risk.</p>
+</section>
+<section style="max-width:1120px;margin:0 auto;padding:20px 24px" data-rv>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+    <div style="background:#eaf7ee;border:2px solid #0c1a10;border-radius:16px;padding:24px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#0f7a37;letter-spacing:.06em">ON THE SHOP'S PC</div>
+      <div style="font-weight:900;font-size:22px;margin-top:8px">The reader</div>
+      <p style="font-size:14.5px;color:#37473c;margin-top:10px;line-height:1.5">A small app sits next to Tally, reads the ledger, and delivers the server's queued messages from your own WhatsApp. Holds no keys.</p>
+    </div>
+    <div style="background:#eaf7ee;border:2px solid #0c1a10;border-radius:16px;padding:24px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#0f7a37;letter-spacing:.06em">IN THE CLOUD</div>
+      <div style="font-weight:900;font-size:22px;margin-top:8px">The brain</div>
+      <p style="font-size:14.5px;color:#37473c;margin-top:10px;line-height:1.5">Owns the schedule, send rules, audit trail and PDF. Decides what to send and when, and queues it for the shop to deliver.</p>
+    </div>
+    <div style="background:#eaf7ee;border:2px solid #0c1a10;border-radius:16px;padding:24px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#0f7a37;letter-spacing:.06em">ON THE CUSTOMER'S PHONE</div>
+      <div style="font-weight:900;font-size:22px;margin-top:8px">The channel</div>
+      <p style="font-size:14.5px;color:#37473c;margin-top:10px;line-height:1.5">Plain WhatsApp, from a number they already know, with a tap-to-pay UPI link straight to the shop's account.</p>
+    </div>
+  </div>
+</section>
+<section style="background:#0b1a10;color:#f9f8f5;margin-top:60px;border-top:2px solid #0c1a10;border-bottom:2px solid #0c1a10;padding:80px 0">
+  <div style="max-width:1120px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:.9fr 1.1fr;gap:48px;align-items:center">
+    <div data-rv>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#25d366;text-transform:uppercase">What it actually sends</div>
+      <h2 style="font-size:clamp(28px,4vw,46px);line-height:1.03;letter-spacing:-.03em;font-weight:900;margin:14px 0 0">Real messages. In the language they actually reply in.</h2>
+      <p style="font-size:17px;line-height:1.6;color:#b7c6bc;margin-top:18px">No robotic template spam. Bills, reminders and thank-yous that read like they came from you — because they came from your number.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700">
+        <span style="border:1.5px solid #25d366;color:#25d366;border-radius:999px;padding:6px 12px">HINDI</span>
+        <span style="border:1.5px solid #25d366;color:#25d366;border-radius:999px;padding:6px 12px">GUJARATI</span>
+        <span style="border:1.5px solid #25d366;color:#25d366;border-radius:999px;padding:6px 12px">MARATHI</span>
+        <span style="border:1.5px solid #25d366;color:#25d366;border-radius:999px;padding:6px 12px">HINGLISH</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" data-rv>
+      <div style="background:#0f2417;border:1.5px solid #1e3a29;border-radius:16px;padding:16px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#25d366;font-weight:700">BILL SENT</div>
+        <div style="background:#dcf8c6;color:#0c1a10;border-radius:12px;border-bottom-right-radius:4px;padding:11px 13px;margin-top:10px;font-size:14px;line-height:1.45">Namaste 🙏 Bill #4021 — ₹18,400. Due 15 Aug. PDF attached. Pay via UPI 👇</div>
+      </div>
+      <div style="background:#0f2417;border:1.5px solid #1e3a29;border-radius:16px;padding:16px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#25d366;font-weight:700">REMINDER · DUE DATE</div>
+        <div style="background:#dcf8c6;color:#0c1a10;border-radius:12px;border-bottom-right-radius:4px;padding:11px 13px;margin-top:10px;font-size:14px;line-height:1.45">Reminder: ₹18,400 pending. Aaj clear kar dijiye toh badhiya rahega 🙏</div>
+      </div>
+      <div style="background:#0f2417;border:1.5px solid #1e3a29;border-radius:16px;padding:16px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8fb6a0;font-weight:700">CUSTOMER REPLIES</div>
+        <div style="background:#fff;color:#0c1a10;border-radius:12px;border-bottom-left-radius:4px;padding:11px 13px;margin-top:10px;font-size:14px;line-height:1.45">paisa aaj bhej deta hoon sir 🙏 <br><span style="color:#37473c;font-size:12.5px">— reminders auto-pause</span></div>
+      </div>
+      <div style="background:#0f2417;border:1.5px solid #1e3a29;border-radius:16px;padding:16px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#25d366;font-weight:700">PAYMENT CONFIRMED</div>
+        <div style="background:#dcf8c6;color:#0c1a10;border-radius:12px;border-bottom-right-radius:4px;padding:11px 13px;margin-top:10px;font-size:14px;line-height:1.45">Payment received ✅ ₹18,400. Dhanyavaad! 🙏</div>
+      </div>
+    </div>
+  </div>
+</section>
+<section style="max-width:1120px;margin:0 auto;padding:70px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">The command surface</div>
+  <h2 style="font-size:clamp(28px,4vw,44px);line-height:1.03;letter-spacing:-.03em;font-weight:900;margin:14px 0 8px">Run the whole thing by texting.</h2>
+  <p style="font-size:18px;color:#37473c;max-width:56ch">No dashboard to log into. The owner texts the assistant; the customer self-serves on the same chat.</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:26px">
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px">
+      <div style="font-weight:800;font-size:16px;margin-bottom:12px">Owner commands</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:13.5px">
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">LIST</code> — open debtors &amp; what each owes</div>
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">REMIND TOP 10</code> — chase the ten biggest now</div>
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">[photo]</code> — snap a paper bill, ASVA reads it</div>
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">TERMS Ramesh 45</code> — set a party's credit days</div>
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">DIGEST</code> — today's summary, who was reminded</div>
+      </div>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px">
+      <div style="font-weight:800;font-size:16px;margin-bottom:12px">Customer commands</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:13.5px">
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">HISAB</code> — see my full outstanding</div>
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">PAID</code> — tell the shop I've paid (owner confirms)</div>
+        <div><code style="font-family:'JetBrains Mono',monospace;background:#eaf7ee;color:#0f7a37;padding:2px 7px;border-radius:6px;font-weight:700">band karo</code> — stop reminders, honoured at once</div>
+        <div style="color:#37473c;margin-top:6px;line-height:1.5">Bilingual by default. The customer never installs anything or learns a command — the reminder itself invites a one-word reply.</div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ============ FEATURES ============ -->
+<div data-page="features" style="display:none">
+<section style="max-width:1120px;margin:0 auto;padding:64px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">Everything in the product</div>
+  <h2 style="font-size:clamp(34px,5vw,58px);line-height:1;letter-spacing:-.04em;font-weight:900;margin:14px 0 8px">The whole surface, nothing hidden.</h2>
+  <p style="font-size:18px;color:#37473c;max-width:56ch">Every capability that ships today, grouped by what it does.</p>
+</section>
+<section style="max-width:1120px;margin:0 auto;padding:12px 24px 20px" data-rv>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;transition:transform .14s" style-hover="transform:translateY(-4px)">
+      <div style="font-size:26px">🔗</div>
+      <div style="font-weight:800;font-size:18px;margin-top:10px">Plugin-free Tally spine</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">Reads TallyPrime over its own HTTP server. Live day-book sync every few minutes. FIFO allocation, never double-counts.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;transition:transform .14s" style-hover="transform:translateY(-4px)">
+      <div style="font-size:26px">💬</div>
+      <div style="font-weight:800;font-size:18px;margin-top:10px">Collections engine</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">Bills &amp; reminders from the shop's own number. One consolidated reminder per party. Tone &amp; language profiles.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;transition:transform .14s" style-hover="transform:translateY(-4px)">
+      <div style="font-size:26px">🛡️</div>
+      <div style="font-weight:800;font-size:18px;margin-top:10px">Sending safety</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">Runs from the shop's own line. Daily caps, human pacing, quiet hours, number validation, opt-out honoured.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;transition:transform .14s" style-hover="transform:translateY(-4px)">
+      <div style="font-size:26px">🤖</div>
+      <div style="font-weight:800;font-size:18px;margin-top:10px">Owner assistant</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">Run your books by texting. LIST, REMIND TOP 10, snap a paper bill for AI OCR, PAID, TERMS — on a separate number.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;transition:transform .14s" style-hover="transform:translateY(-4px)">
+      <div style="font-size:26px">📊</div>
+      <div style="font-weight:800;font-size:18px;margin-top:10px">End-of-day digest</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">A nightly summary: sales, receipts, outstanding, and exactly who was reminded — by name, at a time you pick.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;transition:transform .14s" style-hover="transform:translateY(-4px)">
+      <div style="font-size:26px">⚡</div>
+      <div style="font-weight:800;font-size:18px;margin-top:10px">5-min onboarding</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">One installer, no keys. Type an 8-char code, pick the Tally company, scan WhatsApp. Self-updating, self-healing.</p>
+    </div>
+  </div>
+</section>
+<section style="max-width:1120px;margin:0 auto;padding:50px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">Why ASVA wins</div>
+  <h2 style="font-size:clamp(28px,4vw,44px);line-height:1.03;letter-spacing:-.03em;font-weight:900;margin:14px 0 24px">The difference the customer can see.</h2>
+  <div style="border:2px solid #0c1a10;border-radius:18px;overflow:hidden;background:#fff">
+    <table style="width:100%;border-collapse:collapse;font-size:14px">
+      <thead>
+        <tr style="background:#0b1a10;color:#f9f8f5;text-align:left;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.04em">
+          <th style="padding:14px 16px">CAPABILITY</th>
+          <th style="padding:14px 12px;text-align:center;color:#25d366">ASVA</th>
+          <th style="padding:14px 12px;text-align:center">BIZ ANALYST</th>
+          <th style="padding:14px 12px;text-align:center">CREDFLOW</th>
+          <th style="padding:14px 12px;text-align:center">TALLY TSS</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-top:1.5px solid #e2e6e0">
+          <td style="padding:13px 16px;font-weight:600">Sends from the shop's own WhatsApp</td>
+          <td style="padding:13px 12px;text-align:center;font-weight:800;color:#16a34a">Yes</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Generic no.</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Call/SMS</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">No</td>
+        </tr>
+        <tr style="border-top:1.5px solid #e2e6e0;background:#faf9f6">
+          <td style="padding:13px 16px;font-weight:600">Flat price, no per-message coins</td>
+          <td style="padding:13px 12px;text-align:center;font-weight:800;color:#16a34a">Yes</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Coins</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Tiered</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">n/a</td>
+        </tr>
+        <tr style="border-top:1.5px solid #e2e6e0">
+          <td style="padding:13px 16px;font-weight:600">Reads Tally with zero plugins</td>
+          <td style="padding:13px 12px;text-align:center;font-weight:800;color:#16a34a">Yes</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Yes</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Heavy sync</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Native</td>
+        </tr>
+        <tr style="border-top:1.5px solid #e2e6e0;background:#faf9f6">
+          <td style="padding:13px 16px;font-weight:600">Owner assistant inside WhatsApp</td>
+          <td style="padding:13px 12px;text-align:center;font-weight:800;color:#16a34a">Yes</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">App only</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">App only</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">No</td>
+        </tr>
+        <tr style="border-top:1.5px solid #e2e6e0">
+          <td style="padding:13px 16px;font-weight:600">Never routes the money (no 2% cut)</td>
+          <td style="padding:13px 12px;text-align:center;font-weight:800;color:#16a34a">Yes</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Yes</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Financing</td>
+          <td style="padding:13px 12px;text-align:center;color:#8a968d">Yes</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:13px;color:#8a968d;margin-top:14px;font-family:'JetBrains Mono',monospace">Ref (2026): Biz Analyst ~₹3,300/yr + coins · CredFlow ~₹3,499–15,000/yr · Tally Silver TSS ~₹4,500/yr</p>
+</section>
+</div>
+
+<!-- ============ PRICING ============ -->
+<div data-page="pricing" style="display:none">
+<section style="max-width:1120px;margin:0 auto;padding:64px 24px 20px">
+  <div data-rv style="text-align:center">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">Pricing</div>
+    <h2 style="font-size:clamp(34px,5vw,58px);line-height:1;letter-spacing:-.04em;font-weight:900;margin:14px 0 8px">Priced by the debtors ASVA actually chases.</h2>
+    <p style="font-size:18px;color:#37473c;max-width:56ch;margin:0 auto">Not per message. Monthly, direct by UPI, no gateway. Cost and value scale together.</p>
+  </div>
+  <div data-rv style="max-width:640px;margin:34px auto 0;background:#fff;border:2px solid #0c1a10;border-radius:18px;padding:22px 24px;box-shadow:5px 5px 0 #0c1a10">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <label style="font-weight:700;font-size:15px">How many customers owe you?</label>
+      <span style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:20px;color:#16a34a">{{ debtors }}</span>
+    </div>
+    <input type="range" min="50" max="1200" step="25" value="{{ debtors }}" onInput="{{ onDebtors }}" style="width:100%;margin-top:14px;accent-color:#16a34a;height:6px">
+    <div style="margin-top:14px;font-size:15px;font-weight:600;text-align:center">Your fit → <span style="background:#16a34a;color:#f9f8f5;padding:2px 10px;border-radius:8px;font-weight:800">{{ recName }} · {{ recPrice }}</span></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px;align-items:start" data-rv>
+    <div style="position:relative;background:#fff;border-radius:18px;padding:24px 20px;transition:transform .14s;border:{{ ring0 }}" style-hover="transform:translateY(-4px)">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#0f7a37;letter-spacing:.06em">BASIC</div>
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em;margin-top:6px">₹699<span style="font-size:15px;color:#8a968d;font-weight:600">/mo</span></div>
+      <p style="font-size:13px;color:#37473c;margin-top:6px;line-height:1.4">Small shops starting to automate.</p>
+      <ul style="list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:13.5px">
+        <li>✓ Up to 300 active debtors</li>
+        <li>✓ Bills + auto reminders</li>
+        <li>✓ UPI link and QR</li>
+      </ul>
+      <button onClick="{{ navDownload }}" style="width:100%;text-align:center;margin-top:18px;font-weight:800;font-size:14px;background:#f9f8f5;color:#0c1a10;padding:11px;border:2px solid #0c1a10;border-radius:11px;cursor:pointer">Choose Basic</button>
+    </div>
+    <div style="position:relative;background:#0b1a10;color:#f9f8f5;border-radius:18px;padding:24px 20px;transition:transform .14s;border:{{ ring1 }};box-shadow:5px 6px 0 #16a34a" style-hover="transform:translateY(-6px)">
+      <div style="position:absolute;top:-13px;left:50%;transform:translateX(-50%) rotate(-2deg);background:#16a34a;color:#f9f8f5;border:2px solid #0c1a10;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;padding:5px 12px;border-radius:999px;white-space:nowrap;box-shadow:2px 2px 0 #0c1a10">MOST SHOPS</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#25d366;letter-spacing:.06em">GROWTH</div>
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em;margin-top:6px">₹1,099<span style="font-size:15px;color:#8fb6a0;font-weight:600">/mo</span></div>
+      <p style="font-size:13px;color:#b7c6bc;margin-top:6px;line-height:1.4">The typical distributor, plus the assistant.</p>
+      <ul style="list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:13.5px">
+        <li>✓ Up to 500 active debtors</li>
+        <li>✓ Owner assistant on WhatsApp</li>
+        <li>✓ Photo bills + digest</li>
+      </ul>
+      <button onClick="{{ navDownload }}" style="width:100%;text-align:center;margin-top:18px;font-weight:800;font-size:14px;background:#16a34a;color:#f9f8f5;padding:11px;border:2px solid #f9f8f5;border-radius:11px;cursor:pointer">Choose Growth</button>
+    </div>
+    <div style="position:relative;background:#fff;border-radius:18px;padding:24px 20px;transition:transform .14s;border:{{ ring2 }}" style-hover="transform:translateY(-4px)">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#0f7a37;letter-spacing:.06em">PRO</div>
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em;margin-top:6px">₹1,999<span style="font-size:15px;color:#8a968d;font-weight:600">/mo</span></div>
+      <p style="font-size:13px;color:#37473c;margin-top:6px;line-height:1.4">Larger books, long debtor lists.</p>
+      <ul style="list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:13.5px">
+        <li>✓ Up to 1,000 active debtors</li>
+        <li>✓ Everything in Growth</li>
+        <li>✓ Priority support</li>
+      </ul>
+      <button onClick="{{ navDownload }}" style="width:100%;text-align:center;margin-top:18px;font-weight:800;font-size:14px;background:#f9f8f5;color:#0c1a10;padding:11px;border:2px solid #0c1a10;border-radius:11px;cursor:pointer">Choose Pro</button>
+    </div>
+    <div style="position:relative;background:#fff;border-radius:18px;padding:24px 20px;transition:transform .14s;border:{{ ring3 }}" style-hover="transform:translateY(-4px)">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#0f7a37;letter-spacing:.06em">CUSTOM</div>
+      <div style="font-size:34px;font-weight:900;letter-spacing:-.03em;margin-top:6px">Talk</div>
+      <p style="font-size:13px;color:#37473c;margin-top:6px;line-height:1.4">High-volume &amp; multi-branch.</p>
+      <ul style="list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:13.5px">
+        <li>✓ 5,000+ active debtors</li>
+        <li>✓ Everything in Pro</li>
+        <li>✓ Priced on request</li>
+      </ul>
+      <button onClick="{{ navDownload }}" style="width:100%;text-align:center;margin-top:18px;font-weight:800;font-size:14px;background:#f9f8f5;color:#0c1a10;padding:11px;border:2px solid #0c1a10;border-radius:11px;cursor:pointer">Talk to us</button>
+    </div>
+  </div>
+  <p style="text-align:center;font-size:14px;color:#37473c;margin-top:22px;max-width:60ch;margin-left:auto;margin-right:auto;line-height:1.55"><b>The ROI:</b> a shop with ₹30L receivables that collects 10 days faster unlocks ~₹5L of working capital and saves ₹60k–90k/yr in interest. The subscription is a rounding error.</p>
+</section>
+<section style="max-width:1120px;margin:0 auto;padding:40px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">The moat</div>
+  <h2 style="font-size:clamp(28px,4vw,44px);line-height:1.03;letter-spacing:-.03em;font-weight:900;margin:14px 0 24px">Every shop makes the next one harder to leave.</h2>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+    <div style="border-left:3px solid #16a34a;padding:4px 0 4px 16px">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a">01</div>
+      <div style="font-weight:800;font-size:16px;margin-top:6px">Sends reminders</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">Useful day one. On its own, replaceable.</p>
+    </div>
+    <div style="border-left:3px solid #16a34a;padding:4px 0 4px 16px">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a">02</div>
+      <div style="font-weight:800;font-size:16px;margin-top:6px">Source of truth</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">The daily who-to-chase lives here. Switching gets costly.</p>
+    </div>
+    <div style="border-left:3px solid #16a34a;padding:4px 0 4px 16px">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a">03</div>
+      <div style="font-weight:800;font-size:16px;margin-top:6px">Holds the history</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">Collection history &amp; payment promises. Now irreplaceable.</p>
+    </div>
+    <div style="border-left:3px solid #16a34a;padding:4px 0 4px 16px">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a">04</div>
+      <div style="font-weight:800;font-size:16px;margin-top:6px">The network</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">Cross-shop payment reliability no single-shop rival can build.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ============ DOWNLOAD ============ -->
+<div data-page="download" style="display:none">
+<section style="max-width:1120px;margin:0 auto;padding:64px 24px 30px;display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center">
+  <div data-rv>
+    <div style="display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:#eaf7ee;border:1.5px solid #16a34a;color:#0f7a37;padding:6px 12px;border-radius:999px">
+      <span style="width:7px;height:7px;background:#16a34a;border-radius:50%;display:inline-block"></span>
+      Desktop app · v2.4
+    </div>
+    <h1 style="font-size:clamp(36px,5.4vw,62px);line-height:1;letter-spacing:-.04em;font-weight:900;margin:20px 0 0">Download ASVA.<br>Live in <span style="display:inline-block;background:#16a34a;color:#f9f8f5;padding:0 12px;border:2px solid #0c1a10;border-radius:14px;transform:rotate(-2deg);box-shadow:4px 4px 0 #0c1a10">5 minutes.</span></h1>
+    <p style="font-size:18px;line-height:1.55;color:#37473c;margin:24px 0 0;max-width:44ch">One installer, no keys, no passwords. It sits beside TallyPrime, reads your ledger, and starts your reminder campaigns from your own WhatsApp.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:28px;align-items:center">
+      <a href="#" style="display:inline-flex;align-items:center;gap:12px;font-weight:800;font-size:17px;background:#16a34a;color:#f9f8f5;padding:16px 26px;border:2px solid #0c1a10;border-radius:14px;box-shadow:5px 5px 0 #0c1a10;transition:transform .12s,box-shadow .12s" style-hover="transform:translate(-2px,-2px);box-shadow:7px 7px 0 #0c1a10">
+        <span style="font-size:22px">⊞</span>
+        <span>Download for Windows<br><span style="font-weight:600;font-size:12px;opacity:.85;font-family:'JetBrains Mono',monospace">.exe · ~90 MB · Win 10/11</span></span>
+      </a>
+      <a href="#talk" style="font-weight:800;font-size:15px;color:#0c1a10;padding:14px 20px;border:2px solid #0c1a10;border-radius:14px;background:#f9f8f5;transition:transform .12s" style-hover="transform:translate(-2px,-2px)">Get setup help on WhatsApp</a>
+    </div>
+    <p style="font-size:13px;color:#8a968d;margin-top:16px;font-family:'JetBrains Mono',monospace">macOS build in beta — ask us for access.</p>
+  </div>
+  <div style="display:flex;justify-content:center" data-rv>
+    <div style="position:relative;width:100%;max-width:420px">
+      <div style="position:absolute;inset:-16px;background:radial-gradient(closest-side,rgba(22,163,74,.28),transparent);filter:blur(26px)"></div>
+      <div style="position:relative;background:#0b1a10;border:2px solid #0c1a10;border-radius:16px;overflow:hidden;box-shadow:8px 10px 0 #0c1a10">
+        <div style="display:flex;align-items:center;gap:6px;padding:12px 14px;background:#0f2417;border-bottom:1px solid #1e3a29">
+          <span style="width:11px;height:11px;border-radius:50%;background:#ff5f57"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:#febc2e"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:#28c840"></span>
+          <span style="color:#8fb6a0;font-family:'JetBrains Mono',monospace;font-size:12px;margin-left:8px">ASVA Agent</span>
+        </div>
+        <div style="padding:24px 22px;color:#f9f8f5">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#25d366;font-weight:700;letter-spacing:.06em">CONNECTION DOCTOR</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+            <div style="display:flex;align-items:center;gap:10px;font-size:14px"><span style="color:#25d366">●</span> Tally server &nbsp;<span style="margin-left:auto;color:#8fb6a0">connected</span></div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:14px"><span style="color:#25d366">●</span> Company loaded &nbsp;<span style="margin-left:auto;color:#8fb6a0">Sharma Traders</span></div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:14px"><span style="color:#25d366">●</span> WhatsApp paired &nbsp;<span style="margin-left:auto;color:#8fb6a0">+91 ••• 4021</span></div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:14px"><span style="color:#25d366">●</span> Debtors imported &nbsp;<span style="margin-left:auto;color:#8fb6a0">312</span></div>
+          </div>
+          <div style="margin-top:18px;padding:12px 14px;background:#0f2417;border:1px solid #1e3a29;border-radius:10px;font-size:13px;color:#b7c6bc">All systems go. Reminder campaign is <b style="color:#25d366">running</b>.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="max-width:1120px;margin:0 auto;padding:30px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">Setup, step by step</div>
+  <h2 style="font-size:clamp(28px,4vw,44px);line-height:1.03;letter-spacing:-.03em;font-weight:900;margin:14px 0 24px">One code. No secrets. Done.</h2>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px 18px;box-shadow:4px 4px 0 #0c1a10">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">01</div>
+      <div style="font-weight:800;font-size:16px;margin-top:8px">Install</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">Download the .exe and run it next to TallyPrime. Nothing is installed inside Tally.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px 18px;box-shadow:4px 4px 0 #0c1a10">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">02</div>
+      <div style="font-weight:800;font-size:16px;margin-top:8px">Type your code</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">Enter the 8-character code we read to you over the phone. No password to remember.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px 18px;box-shadow:4px 4px 0 #0c1a10">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">03</div>
+      <div style="font-weight:800;font-size:16px;margin-top:8px">Pick the company</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">Choose the Tally company. Debtors and bill-wise outstanding import in one click.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px 18px;box-shadow:4px 4px 0 #0c1a10">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#16a34a;font-size:14px">04</div>
+      <div style="font-weight:800;font-size:16px;margin-top:8px">Scan WhatsApp</div>
+      <p style="font-size:13.5px;color:#37473c;margin-top:6px;line-height:1.45">Scan the QR with your shop's WhatsApp. Campaigns start on your own number.</p>
+    </div>
+  </div>
+</section>
+
+<section style="max-width:1120px;margin:0 auto;padding:40px 24px 20px" data-rv>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div style="background:#eaf7ee;border:2px solid #0c1a10;border-radius:16px;padding:24px">
+      <div style="font-weight:800;font-size:18px;margin-bottom:12px">What you need</div>
+      <div style="display:flex;flex-direction:column;gap:9px;font-size:14.5px;color:#0c1a10">
+        <div>✓ Windows 10 or 11 PC that runs TallyPrime</div>
+        <div>✓ TallyPrime with your live company data</div>
+        <div>✓ A WhatsApp number for the shop</div>
+        <div>✓ 50+ credit customers to make it worth it</div>
+      </div>
+    </div>
+    <div style="background:#0b1a10;color:#f9f8f5;border:2px solid #0c1a10;border-radius:16px;padding:24px">
+      <div style="font-weight:800;font-size:18px;margin-bottom:12px">Safe by design</div>
+      <div style="display:flex;flex-direction:column;gap:9px;font-size:14.5px;color:#b7c6bc">
+        <div><span style="color:#25d366">→</span> The shop never holds the master key.</div>
+        <div><span style="color:#25d366">→</span> Self-updating &amp; self-healing — restarts crashes on its own.</div>
+        <div><span style="color:#25d366">→</span> Connection doctor names exactly what's broken, with the fix beside it.</div>
+        <div><span style="color:#25d366">→</span> Store, forward, delete — a bill PDF is held only long enough to deliver.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="max-width:1120px;margin:0 auto;padding:40px 24px 20px" data-rv>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em;color:#16a34a;text-transform:uppercase">Where we are</div>
+  <h2 style="font-size:clamp(26px,3.6vw,40px);line-height:1.05;letter-spacing:-.03em;font-weight:900;margin:14px 0 22px">Built, tested, and going live.</h2>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;box-shadow:4px 4px 0 #0c1a10">
+      <div style="font-weight:800;font-size:17px">Product complete</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">Cloud backend, Tally reader, self-updating desktop app, WhatsApp assistant, operator Command Center — all ship today.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;box-shadow:4px 4px 0 #0c1a10">
+      <div style="font-weight:800;font-size:17px">Proven on real data</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">Verified on live TallyPrime: a 930-debtor electricals trader and a 1,966-debtor, ₹28 crore chemicals firm. Messy ledgers work.</p>
+    </div>
+    <div style="background:#fff;border:2px solid #0c1a10;border-radius:16px;padding:22px;box-shadow:4px 4px 0 #0c1a10">
+      <div style="font-weight:800;font-size:17px">First pilot deploying</div>
+      <p style="font-size:14px;color:#37473c;margin-top:8px;line-height:1.5">A live electrical-hardware distributor carrying ~₹43L on 120–160 day terms. First proof of DSO reduction in the field.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- GLOBAL CTA -->
+<section id="talk" style="max-width:1120px;margin:80px auto 0;padding:0 24px">
+  <div style="position:relative;background:#0b1a10;color:#f9f8f5;border:2px solid #0c1a10;border-radius:26px;padding:64px 40px;text-align:center;overflow:hidden;box-shadow:8px 10px 0 #16a34a">
+    <div style="position:absolute;top:-60px;left:50%;transform:translateX(-50%);width:340px;height:340px;background:radial-gradient(closest-side,rgba(37,211,102,.4),transparent);filter:blur(30px)"></div>
+    <div style="position:relative">
+      <h2 style="font-size:clamp(30px,5vw,56px);line-height:1;letter-spacing:-.035em;font-weight:900">See it on your own ledger.</h2>
+      <p style="font-size:18px;color:#b7c6bc;margin:18px auto 0;max-width:48ch">Five minutes, one code. We set it up with you on a call. No card, no gateway, no changes to your Tally data.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:30px">
+        <button onClick="{{ navDownload }}" style="font-weight:800;font-size:17px;background:#16a34a;color:#f9f8f5;padding:16px 30px;border:2px solid #f9f8f5;border-radius:14px;cursor:pointer;transition:transform .12s" style-hover="transform:translate(-2px,-2px)">Download the app</button>
+        <a href="#" style="font-weight:800;font-size:17px;background:transparent;color:#f9f8f5;padding:16px 30px;border:2px solid #f9f8f5;border-radius:14px;transition:transform .12s" style-hover="transform:translate(-2px,-2px)">Talk to us on WhatsApp</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer style="max-width:1120px;margin:60px auto 0;padding:40px 24px 56px;display:flex;flex-wrap:wrap;gap:20px;align-items:center;justify-content:space-between;border-top:2px solid #0c1a10">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span style="width:30px;height:30px;background:#16a34a;border:2px solid #0c1a10;border-radius:9px;display:grid;place-items:center;font-weight:900;color:#f9f8f5">A</span>
+    <div>
+      <div style="font-weight:900;font-size:18px;letter-spacing:-.03em">ASVA</div>
+      <div style="font-size:12.5px;color:#37473c">TallyPrime → WhatsApp, automatic collections for Indian distributors.</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:18px;align-items:center;font-size:14px;font-weight:600">
+    <button onClick="{{ navHow }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:14px;color:#0c1a10">How it works</button>
+    <button onClick="{{ navFeatures }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:14px;color:#0c1a10">Features</button>
+    <button onClick="{{ navPricing }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:14px;color:#0c1a10">Pricing</button>
+    <button onClick="{{ navDownload }}" style="background:none;border:none;cursor:pointer;font-weight:600;font-size:14px;color:#16a34a">Download</button>
+  </div>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#37473c;width:100%">tryasva.com · © 2026</div>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:760}}">
+class Component extends DCLogic {
+  state = { step: 0, debtors: 400, page: 'home' };
+
+  raw = [
+    { side:'in',  text:'Namaste 🙏 Bill #4021 — ₹18,400. Due 15 Aug. PDF attached.' },
+    { side:'in',  text:'Reminder: ₹18,400 pending. Pay via UPI 👇 [ Pay ₹18,400 ]' },
+    { side:'out', text:'paisa aaj bhej deta hoon sir 🙏' },
+    { side:'in',  text:'Payment received ✅ ₹18,400. Dhanyavaad!' },
+  ];
+
+  componentDidMount(){
+    this._t = setInterval(() => {
+      this.setState(s => {
+        const max = this.raw.length + 2;
+        return { step: s.step >= max ? 0 : s.step + 1 };
+      });
+    }, 1150);
+    this._route();
+    this._reveal();
+  }
+  componentDidUpdate(){
+    if (this.state.page !== this._lastPage){
+      this._route();
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      this._reveal();
+    }
+  }
+  componentWillUnmount(){ clearInterval(this._t); clearTimeout(this._fs); if(this._io) this._io.disconnect(); }
+
+  _route(){
+    this._lastPage = this.state.page;
+    document.querySelectorAll('[data-page]').forEach(el => {
+      el.style.display = (el.getAttribute('data-page') === this.state.page) ? '' : 'none';
+    });
+  }
+
+  _reveal(){
+    clearTimeout(this._fs);
+    if(this._io) this._io.disconnect();
+    const all = Array.from(document.querySelectorAll('[data-rv]'));
+    const els = all.filter(el => { const p = el.closest('[data-page]'); return !p || p.getAttribute('data-page') === this.state.page; });
+    const show = el => { el.style.opacity='1'; el.style.transform='none'; };
+    if (!('IntersectionObserver' in window)){ all.forEach(show); return; }
+    els.forEach(el => { el.style.opacity='0'; el.style.transform='translateY(22px)'; el.style.transition='opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1)'; });
+    const vh = window.innerHeight || 800;
+    els.forEach(el => { if (el.getBoundingClientRect().top < vh * 0.95) show(el); });
+    this._io = new IntersectionObserver((entries)=>{
+      entries.forEach(e=>{ if(e.isIntersecting){ show(e.target); this._io.unobserve(e.target); } });
+    }, { threshold:.12 });
+    els.forEach(el => this._io.observe(el));
+    this._fs = setTimeout(()=> all.forEach(show), 1600);
+  }
+
+  _go(page){ return () => this.setState({ page }); }
+
+  _bubbleStyle(side, shown){
+    const base = side==='out'
+      ? 'align-self:flex-end;background:#dcf8c6;border-bottom-right-radius:4px;'
+      : 'align-self:flex-start;background:#fff;border-bottom-left-radius:4px;';
+    const reveal = shown ? 'opacity:1;transform:translateY(0) scale(1);' : 'opacity:0;transform:translateY(10px) scale(.96);';
+    return base + reveal + 'color:#0c1a10;max-width:82%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.4;box-shadow:0 1px 1px rgba(0,0,0,.12);transition:opacity .4s ease, transform .4s cubic-bezier(.2,.8,.2,1);';
+  }
+
+  _plan(d){ if (d <= 300) return 0; if (d <= 500) return 1; if (d <= 1000) return 2; return 3; }
+
+  renderVals(){
+    const step = this.state.step;
+    const bubbles = this.raw.map((b,i)=>({ text:b.text, style:this._bubbleStyle(b.side, i < step) }));
+
+    const d = this.state.debtors;
+    const rec = this._plan(d);
+    const names = ['Basic','Growth','Pro','Custom'];
+    const prices = ['₹699/mo','₹1,099/mo','₹1,999/mo','Custom'];
+    const ringOn = '3px solid #16a34a';
+    const ringOff = ['2px solid #e2e6e0','2px solid #0b1a10','2px solid #e2e6e0','2px solid #e2e6e0'];
+
+    const p = this.state.page;
+    const act = '#16a34a', off = 'transparent';
+
+    return {
+      bubbles,
+      debtors: d,
+      onDebtors: (e)=> this.setState({ debtors: parseInt(e.target.value,10) }),
+      recName: names[rec],
+      recPrice: prices[rec],
+      ring0: rec===0 ? ringOn : ringOff[0],
+      ring1: rec===1 ? ringOn : ringOff[1],
+      ring2: rec===2 ? ringOn : ringOff[2],
+      ring3: rec===3 ? ringOn : ringOff[3],
+      navHome: this._go('home'),
+      navHow: this._go('how'),
+      navFeatures: this._go('features'),
+      navPricing: this._go('pricing'),
+      navDownload: this._go('download'),
+      aHome: p==='home' ? act : off,
+      aHow: p==='how' ? act : off,
+      aFeatures: p==='features' ? act : off,
+      aPricing: p==='pricing' ? act : off,
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # team's WhatsApp number). Empty = the bot just acknowledges. Customer
     # issues are forwarded to their own shop owner, not here.
     product_team_number: str = ""
+    # The ASVA assistant number an owner messages (the bot device on :3002). Shown
+    # in the onboarding tour ("message this from your number"). Configurable so a
+    # different deployment can point at its own bot number.
+    asva_bot_number: str = "9344110272"
 
     # --- App ---
     app_env: str = "development"
@@ -37,7 +41,7 @@ class Settings(BaseSettings):
     # is the in-app "Restart to update" bar. Keep this in step with the shipped
     # app version so the older app_releases dashboard banner stays quiet (it
     # fires only when app_releases > this) and shops never see two notices.
-    app_version: str = "1.9.1"
+    app_version: str = "1.9.4"
     # The oldest desktop build the fleet still supports. A build below this is too
     # old to update itself (it predates the electron-updater), so the heartbeat
     # flags it `below_min` and the app shows a blocking "download the latest"

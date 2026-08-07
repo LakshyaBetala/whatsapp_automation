@@ -599,7 +599,14 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
         out_str = f"₹{out:,.0f}" if out else "-"
         od = overdue_days.get(c["id"], 0)
         od_str = f"{od} din" if od else "-"
-        phone = c.get("whatsapp_number") or '<span class="nono">number nahi</span>'
+        # Phone is a click-to-edit button: parties whose number was never stored
+        # in Tally can have it added right here (India +91 applied on save).
+        num_raw = c.get("whatsapp_number") or ""
+        num_disp = num_raw[-10:] if len(num_raw) >= 10 else num_raw
+        _add_lbl = "+ Add number" if lang == "english" else "+ Number daalein"
+        _ph_cls = "phbtn" if num_raw else "phbtn add"
+        phone = (f'<button class="{_ph_cls}" data-cid="{c["id"]}" data-num="{num_raw}">'
+                 + (num_disp if num_raw else _add_lbl) + '</button>')
         rem_on = c.get("reminders_enabled", True)
         checked = "checked" if rem_on else ""
         # Source tab: excluded parties live in their own Do-not-chase tab; the
@@ -744,6 +751,9 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
  .od{{text-align:right;color:#9f2f2d;font-size:.9em;white-space:nowrap;font-variant-numeric:tabular-nums}}
  .ph{{color:#787774;font-size:.9em}}
  .nono{{color:#c0392b;font-size:.95em}}
+ .phbtn{{background:#eef3ec;border:1px solid #d7e3d7;border-radius:6px;padding:4px 9px;font-size:.9em;cursor:pointer;color:#0a5d28}}
+ .phbtn:hover{{background:#e1efe1}}
+ .phbtn.add{{background:#fdecea;border-color:#e6b3ac;color:#c0392b;font-weight:600}}
  .row{{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}}
  .hint{{color:#787774;font-size:.85em;margin-top:6px}}
  .usage{{margin:12px 0;padding:14px 16px;border:1px solid #EAEAEA;border-radius:12px;background:#fff;font-size:.95em}}
@@ -758,6 +768,8 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
  .subtabs button{{border:0;border-radius:0;background:#fff;padding:9px 18px;font-weight:600;color:#787774}}
  .subtabs button+button{{border-left:1px solid #EAEAEA}}
  .subtabs button.on{{background:#0a7d33;color:#fff}}
+ .addparty{{margin:8px 0 6px;border:1px solid #0a7d33;background:#eef7ef;color:#0a7d33;font-weight:600;border-radius:8px;padding:8px 14px;cursor:pointer}}
+ .addparty:hover{{background:#e1f0e3}}
  .sendbtn{{padding:5px 10px;font-size:.85em;border:1px solid #0a7d33;color:#0a7d33;background:#fff}}
  .sendbtn:disabled{{opacity:.5;cursor:default}}
  .paybtn{{padding:5px 10px;font-size:.85em;border:1px solid #7d5a0a;color:#7d5a0a;background:#fff}}
@@ -796,6 +808,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
  <button data-sub="nontally">Non-Tally bills ({nontally_n:,})</button>
  <button data-sub="exclude">Do-not-chase ({exclude_n:,})</button>
 </div>
+<button class="addparty" onclick="openAddParty()" title="Add a customer you track in ASVA only, not in Tally">+ Add non-Tally party</button>
 
 <div class="bar">
  <input type="search" id="q" placeholder="Party dhundo...">
@@ -822,6 +835,23 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     <h3>Aaj kaun ko reminder jayega</h3>
     <div id="duebody" class="msgprev">...</div>
     <div style="margin-top:12px;text-align:right"><button onclick="document.getElementById('duemodal').classList.remove('show')">Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="newpartymodal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modalbox">
+    <h3>Add a non-Tally party</h3>
+    <div class="hint" style="margin:0 0 6px">A customer you track in ASVA only (not in Tally). Same reminders and payment handling.</div>
+    <label style="font-weight:600;display:block;margin:10px 0 5px">Party name</label>
+    <input id="nb_name" type="text" maxlength="120" placeholder="Ramesh Traders"
+      style="width:100%;padding:11px 12px;font-size:1em;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box">
+    <label style="font-weight:600;display:block;margin:12px 0 5px">WhatsApp number (10 digits, optional)</label>
+    <input id="nb_phone" type="text" inputmode="numeric" placeholder="9876543210"
+      style="width:100%;padding:11px 12px;font-size:1em;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box">
+    <div style="margin-top:18px;text-align:right">
+      <button onclick="document.getElementById('newpartymodal').classList.remove('show')">Cancel</button>
+      <button id="nb_save" style="background:#0a7d33;color:#fff;border:0">Create</button>
+    </div>
   </div>
 </div>
 
@@ -854,8 +884,24 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
   </div>
 </div>
 
+<div class="modal" id="nummodal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modalbox">
+    <h3>Customer WhatsApp number</h3>
+    <div id="numparty" style="font-weight:700;margin-bottom:10px"></div>
+    <label style="font-weight:600;display:block;margin-bottom:5px">10-digit mobile number</label>
+    <input id="numinput" type="text" inputmode="numeric" maxlength="14" placeholder="9876543210"
+      style="width:100%;padding:11px 12px;font-size:1em;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box">
+    <div style="margin-top:8px;font-size:.82em;color:#787774">Just type the number. +91 is added automatically. No spaces or +.</div>
+    <div style="margin-top:18px;text-align:right">
+      <button onclick="document.getElementById('nummodal').classList.remove('show')">Cancel</button>
+      <button id="numsave" style="background:#0a7d33;color:#fff;border:0">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const TOKEN = {token!r};
+const LANG = {lang!r};
 
 // Sync time + Tally status + Reload live in the app's top bar now (global).
 // Here we only auto re-render when the 5-min auto-sync brings new data - and
@@ -975,6 +1021,61 @@ async function savePayment() {{
 }}
 document.getElementById('paysave').onclick = savePayment;
 document.querySelectorAll('.paybtn').forEach(b => b.onclick = () => recordPayment(b));
+
+// Add / edit a customer's WhatsApp number in ASVA (for parties whose number was
+// never stored in Tally). +91 is added on the server; the owner types 10 digits.
+let NUM_CID = null;
+function openNumberModal(btn) {{
+  NUM_CID = btn.dataset.cid;
+  const tr = btn.closest('tr');
+  const nm = tr ? (tr.querySelector('.plink') || {{}}).textContent : '';
+  document.getElementById('numparty').textContent = nm || '';
+  document.getElementById('numinput').value = String(btn.dataset.num || '').slice(-10);
+  document.getElementById('nummodal').classList.add('show');
+  setTimeout(() => document.getElementById('numinput').focus(), 40);
+}}
+async function saveNumber() {{
+  const raw = String(document.getElementById('numinput').value).replace(/\\D/g, '');
+  if (raw.length < 10) {{ alert('Enter the 10-digit mobile number.'); return; }}
+  const btn = document.getElementById('numsave'); btn.disabled = true; btn.textContent = '...';
+  try {{
+    const r = await fetch('/admin/set-number', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: NUM_CID, number: raw}})}});
+    const d = await r.json();
+    if (r.ok && d.ok) {{ location.reload(); return; }}
+    btn.disabled = false; btn.textContent = 'Save';
+    alert(d.detail || 'Could not save that number.');
+  }} catch (e) {{ btn.disabled = false; btn.textContent = 'Save'; alert('Could not save. Please try again.'); }}
+}}
+document.getElementById('numsave').onclick = saveNumber;
+document.querySelectorAll('.phbtn').forEach(b => b.onclick = () => openNumberModal(b));
+
+// ── Create a new non-Tally party, then jump to its page to add bills ──
+function openAddParty() {{
+  document.getElementById('nb_name').value = '';
+  document.getElementById('nb_phone').value = '';
+  document.getElementById('newpartymodal').classList.add('show');
+  setTimeout(() => document.getElementById('nb_name').focus(), 40);
+}}
+async function saveNewParty() {{
+  const name = document.getElementById('nb_name').value.trim();
+  const phone = document.getElementById('nb_phone').value.trim();
+  if (!name) {{ alert('Enter the party name.'); return; }}
+  const btn = document.getElementById('nb_save'); btn.disabled = true; btn.textContent = '...';
+  try {{
+    const r = await fetch('/admin/party/create', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, name: name, whatsapp_number: phone}})}});
+    const d = await r.json().catch(() => ({{}}));
+    if (r.ok && d.client_id) {{
+      location.href = '/admin/party?token=' + encodeURIComponent(TOKEN) +
+        '&client_id=' + encodeURIComponent(d.client_id) + '&lang=' + encodeURIComponent(LANG);
+      return;
+    }}
+    alert(d.detail || 'Could not create the party.');
+  }} catch (e) {{ alert('Could not create. Please try again.'); }}
+  btn.disabled = false; btn.textContent = 'Create';
+}}
+document.getElementById('nb_save').onclick = saveNewParty;
 
 // ── "Who gets a reminder today" dry run (nothing is sent) ──────────────
 async function dueToday() {{
@@ -1511,12 +1612,32 @@ async def admin_sync_status(token: str = Query(...)):
     except Exception:
         pending = False
     tally_label, tally_color = _tally_status(last)
+    # Onboarding-tour signals (also power the setup checklist): whether UPI is set,
+    # the owner's own number + the ASVA bot number to message, and the timestamp of
+    # the last inbound message (so the tour can confirm the owner actually messaged
+    # the bot). All cheap: one small indexed query + fields already on `biz`.
+    from app.config import settings as _cfg
+    owner_raw = "".join(ch for ch in str(biz.get("whatsapp_number") or "") if ch.isdigit())
+    owner_disp = owner_raw[-10:] if len(owner_raw) >= 10 else owner_raw
+    last_inbound = None
+    try:
+        ib = (db.table("messages").select("created_at")
+              .eq("business_id", biz["id"]).eq("template_name", "inbound")
+              .order("created_at", desc=True).limit(1).execute())
+        if ib.data:
+            last_inbound = ib.data[0].get("created_at")
+    except Exception:
+        last_inbound = None
     return {
         "last_synced_at": last.isoformat() if last else None,
         "last_synced_label": _fmt_ago(last),
         "pending_refresh": pending,
         "tally_label": tally_label,
         "tally_color": tally_color,
+        "upi": bool(biz.get("upi_vpa")),
+        "owner_number": owner_disp,
+        "bot_number": _cfg.asva_bot_number,
+        "last_inbound_at": last_inbound,
     }
 
 
@@ -1993,6 +2114,34 @@ async def admin_send_now(payload: SendNowPayload):
     return {"sent": ok, "detail": reply[:160] if reply else ""}
 
 
+class SetNumberPayload(BaseModel):
+    token: str
+    client_id: str
+    number: str
+
+
+@router.post("/admin/set-number")
+async def admin_set_number(payload: SetNumberPayload):
+    """Owner adds/edits a customer's WhatsApp number in ASVA, for the many parties
+    whose number was never stored in Tally. The owner types just the 10 digits; we
+    normalise to 91XXXXXXXXXX (India). Tally still wins WHEN it has a number - a
+    blank Tally field never overwrites this (see _sync_contacts), so the number the
+    owner adds here sticks until Tally itself gets one."""
+    from app.routers.tally import _normalize_phone
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    phone = _normalize_phone(payload.number)
+    if not phone:
+        raise HTTPException(status_code=400,
+                            detail="Enter a valid 10-digit Indian mobile (it must start with 6, 7, 8 or 9).")
+    cr = (db.table("clients").select("id")
+          .eq("id", payload.client_id).eq("business_id", biz["id"]).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    db.table("clients").update({"whatsapp_number": phone}).eq("id", payload.client_id).execute()
+    return {"ok": True, "number": phone}
+
+
 class CreditDaysPayload(BaseModel):
     token: str
     client_id: str
@@ -2064,18 +2213,32 @@ def _nt_status(amount: float, paid: float, due_date: str | None) -> str:
     return "pending"
 
 
+def _parse_ymd(s: str | None, field: str) -> _dt.date | None:
+    """Parse a 'YYYY-MM-DD' string, or None if empty. Raises 400 on bad format."""
+    s = (s or "").strip()[:10]
+    if not s:
+        return None
+    try:
+        return _dt.date.fromisoformat(s)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{field} must be a date (YYYY-MM-DD)")
+
+
 class NTBillAddPayload(BaseModel):
     token: str
     client_id: str
     amount: float
     invoice_number: str = ""
     credit_days: int | None = None
+    invoice_date: str | None = None   # YYYY-MM-DD, default today
+    due_date: str | None = None       # YYYY-MM-DD, optional (else invoice_date + credit days)
 
 
 @router.post("/admin/nt-bill/add")
 async def admin_nt_bill_add(payload: NTBillAddPayload):
-    """Add a non-Tally bill from the dashboard (same record the BILL command
-    makes, but silent - no WhatsApp send)."""
+    """Add a non-Tally bill from the party page: choose the amount, the bill date,
+    and (optionally) the due date. The same record the BILL command makes, but
+    silent - no WhatsApp send."""
     import uuid as _uuid
     biz = _biz_by_token(payload.token)
     db = require_db()
@@ -2088,7 +2251,10 @@ async def admin_nt_bill_add(payload: NTBillAddPayload):
     days = payload.credit_days or cr.data[0].get("credit_days") or 30
     if not (1 <= days <= 730):
         raise HTTPException(status_code=400, detail="credit days must be 1-730")
-    inv_date = _dt.date.today()
+    inv_date = _parse_ymd(payload.invoice_date, "bill date") or _dt.date.today()
+    due = _parse_ymd(payload.due_date, "due date") or (inv_date + _dt.timedelta(days=days))
+    if due < inv_date:
+        raise HTTPException(status_code=400, detail="due date cannot be before the bill date")
     inv_no = (payload.invoice_number or "").strip()[:40] or f"NT-{_uuid.uuid4().hex[:6].upper()}"
     row = db.table("bills").insert({
         "business_id": biz["id"],
@@ -2098,8 +2264,8 @@ async def admin_nt_bill_add(payload: NTBillAddPayload):
         "amount": round(float(payload.amount), 2),
         "paid_amount": 0.0,
         "invoice_date": inv_date.isoformat(),
-        "due_date": (inv_date + _dt.timedelta(days=days)).isoformat(),
-        "status": "pending",
+        "due_date": due.isoformat(),
+        "status": _nt_status(round(float(payload.amount), 2), 0.0, due.isoformat()),
         "source": "manual",
     }).execute()
     return {"ok": True, "bill_id": row.data[0]["id"], "invoice_number": inv_no}
@@ -2110,34 +2276,48 @@ class NTBillEditPayload(BaseModel):
     bill_id: str
     amount: float | None = None
     invoice_number: str | None = None
+    invoice_date: str | None = None   # YYYY-MM-DD
+    due_date: str | None = None       # YYYY-MM-DD
 
 
 @router.post("/admin/nt-bill/edit")
 async def admin_nt_bill_edit(payload: NTBillEditPayload):
-    """Edit a non-Tally bill's amount and/or bill number. Status and the
-    derived outstanding recompute automatically."""
+    """Edit a non-Tally bill's amount, bill number, bill date and/or due date.
+    Status and the derived outstanding recompute automatically."""
     biz = _biz_by_token(payload.token)
     db = require_db()
     bill = _nt_bill_or_404(db, biz["id"], payload.bill_id)
+    # Current values (fetch once so status can be recomputed from the final state).
+    cur = (db.table("bills").select("amount, paid_amount, invoice_date, due_date")
+           .eq("id", bill["id"]).limit(1).execute()).data
+    cur = cur[0] if cur else {}
+    paid = float(cur.get("paid_amount") or 0)
     patch: dict = {}
+    new_amt = float(cur.get("amount") or 0)
     if payload.amount is not None:
-        amt = round(float(payload.amount), 2)
-        if not (0 < amt <= 100_000_000):
+        new_amt = round(float(payload.amount), 2)
+        if not (0 < new_amt <= 100_000_000):
             raise HTTPException(status_code=400, detail="amount must be positive")
-        paid = float(bill.get("paid_amount") or 0)
-        if amt < paid - 0.01:
+        if new_amt < paid - 0.01:
             raise HTTPException(status_code=400,
                                 detail=f"amount cannot be below already-paid ₹{paid:.0f}")
-        patch["amount"] = amt
-        # due_date unknown here without a fetch; reuse the row we have
-        dd = (db.table("bills").select("due_date").eq("id", bill["id"]).limit(1).execute()).data
-        patch["status"] = _nt_status(amt, paid, dd[0].get("due_date") if dd else None)
+        patch["amount"] = new_amt
     if payload.invoice_number is not None:
         inv = payload.invoice_number.strip()[:40]
         if inv:
             patch["invoice_number"] = inv
+    inv_d = _parse_ymd(payload.invoice_date, "bill date")
+    due_d = _parse_ymd(payload.due_date, "due date")
+    if inv_d:
+        patch["invoice_date"] = inv_d.isoformat()
+    if due_d:
+        patch["due_date"] = due_d.isoformat()
     if not patch:
         raise HTTPException(status_code=400, detail="nothing to change")
+    # Recompute status from the FINAL due date + amount (so an amount or date
+    # change flips pending/overdue/paid correctly).
+    final_due = patch.get("due_date", cur.get("due_date"))
+    patch["status"] = _nt_status(new_amt, paid, final_due)
     db.table("bills").update(patch).eq("id", bill["id"]).execute()
     return {"ok": True, **patch}
 
@@ -2223,6 +2403,38 @@ async def admin_party_edit(payload: PartyEditPayload):
     return {"ok": True, **patch}
 
 
+class PartyCreatePayload(BaseModel):
+    token: str
+    name: str
+    whatsapp_number: str | None = None
+    credit_days: int | None = None
+
+
+@router.post("/admin/party/create")
+async def admin_party_create(payload: PartyCreatePayload):
+    """Create a brand-new NON-Tally party (a customer the shop tracks in ASVA
+    only, not in Tally). No tally_ledger_name = non-Tally, so it is fully editable
+    here and gets the same reminders + payment detection as any party."""
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    name = " ".join((payload.name or "").split()).strip()[:120]
+    if not name:
+        raise HTTPException(status_code=400, detail="Enter the party name.")
+    phone = (_norm_phone_admin(payload.whatsapp_number)
+             if (payload.whatsapp_number or "").strip() else None)
+    row = {
+        "business_id": biz["id"],
+        "name": name,
+        "whatsapp_number": phone,
+        "reminders_enabled": True,
+    }
+    cd = payload.credit_days
+    if cd and 1 <= int(cd) <= 730:
+        row["credit_days"] = int(cd)
+    ins = db.table("clients").insert(row).execute()
+    return {"ok": True, "client_id": ins.data[0]["id"], "name": name}
+
+
 class PartyDeletePayload(BaseModel):
     token: str
     client_id: str
@@ -2274,14 +2486,17 @@ class RecordPaymentPayload(BaseModel):
     token: str
     client_id: str
     amount: float
+    payment_date: str | None = None   # YYYY-MM-DD, default today
+    note: str | None = None
 
 
 @router.post("/admin/record-payment")
 async def admin_record_payment(payload: RecordPaymentPayload):
     """Record a payment against a NON-Tally party's open bills (FIFO, oldest
-    first), update paid_amount + status, and send the customer a
-    'received X, remaining Y' confirmation. Tally parties are excluded - their
-    payments flow in from Tally automatically."""
+    first), update paid_amount + status, keep a dated entry in the payment log
+    (manual_payments), and send the customer a 'received X, remaining Y'
+    confirmation. Tally parties are excluded - their payments flow in from Tally
+    automatically."""
     from decimal import Decimal
     from app.models import Lang, MessageType, Plan
     from app.services import whatsapp
@@ -2292,6 +2507,7 @@ async def admin_record_payment(payload: RecordPaymentPayload):
     amount = round(float(payload.amount), 2)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be > 0")
+    pay_date = (_parse_ymd(payload.payment_date, "payment date") or _dt.date.today()).isoformat()
 
     cr = (db.table("clients")
           .select("id, name, whatsapp_number, language, tally_ledger_name")
@@ -2323,9 +2539,23 @@ async def admin_record_payment(payload: RecordPaymentPayload):
         pay = min(remaining, due)
         new_paid = round(float(b.get("paid_amount") or 0) + pay, 2)
         new_status = "paid" if new_paid >= float(b["amount"]) - 0.01 else "partial"
-        db.table("bills").update({"paid_amount": new_paid, "status": new_status}).eq("id", b["id"]).execute()
+        bupd = {"paid_amount": new_paid, "status": new_status}
+        if new_status == "paid":
+            bupd["settled_at"] = pay_date   # honest days-to-pay (migration 034)
+        db.table("bills").update(bupd).eq("id", b["id"]).execute()
         remaining -= pay
         applied += pay
+
+    # Keep a dated entry in the payment log so the party page shows real history.
+    if applied > 0:
+        try:
+            db.table("manual_payments").insert({
+                "business_id": biz["id"], "client_id": payload.client_id,
+                "amount": round(applied, 2), "payment_date": pay_date,
+                "note": (payload.note or "").strip()[:200] or None,
+            }).execute()
+        except Exception:
+            log.exception("manual_payments log insert failed (payment still applied)")
 
     # Remaining outstanding for this party across its non-Tally open bills.
     after = (db.table("bills").select("amount, paid_amount, source, status")
@@ -2448,6 +2678,17 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     except Exception:
         receipts = []
 
+    # Non-Tally payment log (recorded on this page) - the party's real history.
+    manual_pays = []
+    try:
+        mp = (db.table("manual_payments")
+              .select("amount, payment_date, note")
+              .eq("business_id", biz["id"]).eq("client_id", client_id)
+              .order("payment_date", desc=True).limit(50).execute())
+        manual_pays = mp.data or []
+    except Exception:
+        manual_pays = []
+
     # Reminders already sent (bill_id, reminder_day) so the schedule shows ticks.
     sent_map: dict = {}
     try:
@@ -2490,7 +2731,9 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
                        + ("photo" if b.get("source") == "photo" else "WhatsApp") + "</span>")
             acts = (
                 f'<button class="ntbtn" data-id="{b["id"]}" data-amt="{float(b.get("amount") or 0)}"'
-                f' data-inv="{attr(b.get("invoice_number") or "")}" onclick="ntEdit(this)">Edit</button> '
+                f' data-inv="{attr(b.get("invoice_number") or "")}"'
+                f' data-date="{attr(str(b.get("invoice_date") or "")[:10])}"'
+                f' data-due="{attr(str(b.get("due_date") or "")[:10])}" onclick="ntEdit(this)">Edit</button> '
                 f'<button class="ntbtn ntdel" data-id="{b["id"]}"'
                 f' data-inv="{attr(b.get("invoice_number") or "")}" onclick="ntDel(this)">Delete</button>'
             )
@@ -2509,16 +2752,33 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
         bill_rows = '<tr><td colspan="9" class="muted">Koi bill nahi.</td></tr>'
 
     # ── Payments received ─────────────────────────────────────────────
-    pay_rows = "".join(
-        f'<tr><td>{esc(r.get("receipt_date"))}</td>'
-        f'<td class="n">{_inr(r.get("amount"))}</td>'
-        f'<td>{esc(r.get("tally_voucher_number") or "-")}</td></tr>'
-        for r in receipts)
-    if not pay_rows:
-        pay_rows = ('<tr><td colspan="3" class="muted">'
-                    + ("Tally me is party ka koi receipt record nahi mila." if is_tally
-                       else "Non-Tally party - payments dashboard se record hote hain.")
-                    + '</td></tr>')
+    # Tally parties show their Tally receipts; non-Tally parties show the payment
+    # LOG recorded on this page (manual_payments), with an amount + date + note.
+    if is_tally:
+        pay_rows = "".join(
+            f'<tr><td>{esc(r.get("receipt_date"))}</td>'
+            f'<td class="n">{_inr(r.get("amount"))}</td>'
+            f'<td>{esc(r.get("tally_voucher_number") or "-")}</td></tr>'
+            for r in receipts)
+        if not pay_rows:
+            pay_rows = '<tr><td colspan="3" class="muted">Tally me is party ka koi receipt record nahi mila.</td></tr>'
+        payments_section = (
+            '<h2>Payments received (Tally)</h2>'
+            '<div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>'
+            + pay_rows + '</table></div>')
+    else:
+        pay_rows = "".join(
+            f'<tr><td>{esc(str(r.get("payment_date") or "")[:10])}</td>'
+            f'<td class="n">{_inr(r.get("amount"))}</td>'
+            f'<td>{esc(r.get("note") or "-")}</td></tr>'
+            for r in manual_pays)
+        if not pay_rows:
+            pay_rows = ('<tr><td colspan="3" class="muted">Abhi tak koi payment record nahi. '
+                        'Upar &ldquo;Record payment&rdquo; se daalein.</td></tr>')
+        payments_section = (
+            '<h2>Payments received</h2>'
+            '<div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Note</th></tr>'
+            + pay_rows + '</table></div>')
 
     # ── Reminder schedule: only meaningful once reminders are ON, and only
     # FORWARD from today. A party turned on AFTER the due date should see the
@@ -2710,25 +2970,45 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
   {batch_html}
 </div>
 
-<h2>Bills <button class="ntbtn ntadd" onclick="ntAdd()">+ Add bill (non Tally)</button></h2>
+<h2>Bills <button class="ntbtn ntadd" onclick="ntAdd()">+ Add bill</button>{'' if is_tally else ' <button class="ntbtn ntpay" onclick="ntPay()">₹ Record payment</button>'}</h2>
 <div class="tablewrap"><table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th>
   <th class="n">Baaki</th><th>Due</th><th>Status</th><th class="n">Overdue</th><th></th></tr>{bill_rows}</table></div>
 
 {sched_section}
 
-<h2>Payments received (Tally)</h2>
-<div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>{pay_rows}</table></div>
+{payments_section}
 
 <div class="modal" id="billmodal" onclick="if(event.target===this)closeM('billmodal')">
   <div class="modalbox">
     <h3 id="bm_title">Add bill</h3>
     <label>Amount (Rs)</label>
     <input id="bm_amt" type="text" inputmode="numeric" placeholder="12500">
+    <label>Bill date</label>
+    <input id="bm_date" type="date">
+    <label>Due date (optional - else credit days)</label>
+    <input id="bm_due" type="date">
     <label>Bill number (leave empty = automatic)</label>
     <input id="bm_inv" type="text" placeholder="e.g. INV-105">
     <div class="mbtns">
       <button class="ntbtn" onclick="closeM('billmodal')">Cancel</button>
       <button id="bm_save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="ntpaymodal" onclick="if(event.target===this)closeM('ntpaymodal')">
+  <div class="modalbox">
+    <h3>Record payment</h3>
+    <div class="hint" style="margin:0 0 6px">Applied to the oldest open bills first.</div>
+    <label>Amount received (Rs)</label>
+    <input id="np_amt" type="text" inputmode="numeric" placeholder="10000">
+    <label>Payment date</label>
+    <input id="np_date" type="date">
+    <label>Note (optional)</label>
+    <input id="np_note" type="text" placeholder="e.g. cash / UPI / cheque">
+    <div class="mbtns">
+      <button class="ntbtn" onclick="closeM('ntpaymodal')">Cancel</button>
+      <button id="np_save">Save</button>
     </div>
   </div>
 </div>
@@ -2808,11 +3088,14 @@ async function toggleRem() {{
 }}
 // ── Non-Tally bill add / edit (in-page modal - prompt() is unusable in the app) ──
 let BM_MODE = 'add', BM_ID = null;
+function _today() {{ return new Date().toISOString().slice(0, 10); }}
 function ntAdd() {{
   BM_MODE = 'add'; BM_ID = null;
-  document.getElementById('bm_title').textContent = 'Add bill (non Tally)';
+  document.getElementById('bm_title').textContent = 'Add bill';
   document.getElementById('bm_amt').value = '';
   document.getElementById('bm_inv').value = '';
+  document.getElementById('bm_date').value = _today();
+  document.getElementById('bm_due').value = '';
   openM('billmodal');
   setTimeout(() => document.getElementById('bm_amt').focus(), 40);
 }}
@@ -2821,6 +3104,8 @@ function ntEdit(btn) {{
   document.getElementById('bm_title').textContent = 'Edit bill';
   document.getElementById('bm_amt').value = btn.dataset.amt;
   document.getElementById('bm_inv').value = btn.dataset.inv;
+  document.getElementById('bm_date').value = btn.dataset.date || '';
+  document.getElementById('bm_due').value = btn.dataset.due || '';
   openM('billmodal');
   setTimeout(() => document.getElementById('bm_amt').focus(), 40);
 }}
@@ -2828,13 +3113,39 @@ async function saveBill() {{
   const a = ntNum(document.getElementById('bm_amt').value);
   if (!a) {{ alert('Enter numbers only, e.g. 12500'); return; }}
   const inv = document.getElementById('bm_inv').value.trim();
+  const date = document.getElementById('bm_date').value;
+  const due = document.getElementById('bm_due').value;
   if (BM_MODE === 'add') {{
-    await ntPost('/admin/nt-bill/add', {{token: TOKEN, client_id: CID, amount: a, invoice_number: inv}});
+    await ntPost('/admin/nt-bill/add', {{token: TOKEN, client_id: CID, amount: a, invoice_number: inv, invoice_date: date, due_date: due}});
   }} else {{
-    await ntPost('/admin/nt-bill/edit', {{token: TOKEN, bill_id: BM_ID, amount: a, invoice_number: inv}});
+    await ntPost('/admin/nt-bill/edit', {{token: TOKEN, bill_id: BM_ID, amount: a, invoice_number: inv, invoice_date: date, due_date: due}});
   }}
 }}
 document.getElementById('bm_save').onclick = saveBill;
+// ── Record a payment (non-Tally): amount + date + note, applied FIFO ──
+function ntPay() {{
+  document.getElementById('np_amt').value = '';
+  document.getElementById('np_date').value = _today();
+  document.getElementById('np_note').value = '';
+  openM('ntpaymodal');
+  setTimeout(() => document.getElementById('np_amt').focus(), 40);
+}}
+async function saveNTPayment() {{
+  const a = ntNum(document.getElementById('np_amt').value);
+  if (!a) {{ alert('Enter the amount, e.g. 10000'); return; }}
+  const date = document.getElementById('np_date').value;
+  const note = document.getElementById('np_note').value.trim();
+  const btn = document.getElementById('np_save'); btn.disabled = true;
+  try {{
+    const r = await fetch('/admin/record-payment', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID, amount: a, payment_date: date, note: note}})}});
+    const d = await r.json().catch(() => ({{}}));
+    if (r.ok && d.applied > 0) {{ location.reload(); return; }}
+    alert(d.detail || 'No open bills to apply this payment to.');
+  }} catch (e) {{ alert('Could not save. Please try again.'); }}
+  btn.disabled = false;
+}}
+const _npSave = document.getElementById('np_save'); if (_npSave) _npSave.onclick = saveNTPayment;
 async function ntDel(btn) {{
   if (!confirm('Delete bill ' + (btn.dataset.inv || '') + '? This cannot be undone.')) return;
   await ntPost('/admin/nt-bill/delete', {{token: TOKEN, bill_id: btn.dataset.id}});
@@ -2873,6 +3184,7 @@ async function delParty() {{
  .ntbtn.ntdel{color:#fff;background:#c0392b;border-color:#c0392b;font-weight:600}
  .ntbtn.ntdel:hover{background:#a93226}
  .ntbtn.ntadd{margin-left:10px;font-weight:600;color:#0a7d33;vertical-align:middle}
+ .ntbtn.ntpay{margin-left:8px;font-weight:600;color:#0a7d33;vertical-align:middle}
  .pactions{display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap}
  .pactions .ntbtn{padding:7px 14px;font-size:.9em}
  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
@@ -3237,6 +3549,7 @@ function render(){{
     '<div class="prow"><div class="pmain"><b>'+esc(q.party_display||q.party_ledger)+'</b> '+statusChip(q.status)+
       '<div class="meta">&#8377;'+inr(q.amount)+' &middot; into '+esc(q.deposit_ledger||'Cash')+'</div>'+
       (q.error?'<div class="said" style="color:#9f2f2d">'+esc(q.error)+'</div>':'')+
+      (q.agent_offline?'<div class="said" style="color:#956400">&#9888; Waiting '+q.waiting_mins+'m &middot; open ASVA on the shop PC (Tally open) so this posts. It will send itself once the agent runs.</div>':'')+
     '</div><div class="pacts">'+
       (q.status==='pending'||q.status==='failed'
         ? '<button class="mini" onclick=\\'enterPending('+JSON.stringify(q.id)+')\\'>Review &amp; post</button>'+
@@ -3408,16 +3721,34 @@ async def admin_payments_data(token: str = Query(...)):
         except Exception:
             log.warning("skipping a malformed promise row (business %s)", bid, exc_info=True)
 
+    _now = _dt.datetime.now(_dt.timezone.utc)
+    def _mins_since(ts):
+        try:
+            t = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=_dt.timezone.utc)
+            return int((_now - t).total_seconds() // 60)
+        except Exception:
+            return None
+
     pending_out = []
     for r in rq.list_for_owner(db, bid):
         try:
             led = r.get("party_ledger") or r.get("party_display") or "Customer"
+            st = r.get("status")
+            # How long the owner has been waiting for this to reach Tally. If it
+            # has been in confirm/post for a while, the shop's Tally agent is
+            # almost certainly not running - tell the owner exactly that instead
+            # of an endless "Posting...".
+            wm = _mins_since(r.get("confirmed_at") or r.get("created_at"))
             pending_out.append({
                 "id": r.get("id"), "party_ledger": led,
                 "party_display": r.get("party_display") or led,
                 "amount": float(r.get("amount") or 0),
-                "deposit_ledger": r.get("deposit_ledger") or "Cash", "status": r.get("status"),
+                "deposit_ledger": r.get("deposit_ledger") or "Cash", "status": st,
                 "receipt_date": str(r.get("receipt_date") or "")[:10], "error": r.get("error"),
+                "waiting_mins": wm,
+                "agent_offline": bool(wm is not None and wm >= 15 and st in ("confirmed", "posting")),
             })
         except Exception:
             log.warning("skipping a malformed receipt row (business %s)", bid, exc_info=True)
