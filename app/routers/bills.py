@@ -196,6 +196,15 @@ async def _generate_and_deliver(
                 media_filename=f"Invoice_{invoice_num}.pdf",
                 message_text=body,
             )
+            # Delivered. Remove the PDF from Storage so bills never pile up in the
+            # bucket (send_template has already handed the file to wa_service). The
+            # DB keeps pdf_url as the "already delivered" marker; only the stored
+            # file is freed. Mirrors the outbox path's cleanup.
+            if not have_direct and pdf_url:
+                try:
+                    pdf_service.delete_pdf(bill_id, invoice_num)
+                except Exception:
+                    log.warning("PDF storage cleanup skipped for bill %s", bill_id)
     except Exception:
         log.exception("WhatsApp delivery failed for bill %s", bill_id)
 

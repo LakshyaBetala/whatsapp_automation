@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import logging
+import re
 from collections import defaultdict
 from decimal import Decimal
 from typing import Optional
@@ -2140,6 +2141,174 @@ async def admin_set_number(payload: SetNumberPayload):
         raise HTTPException(status_code=404, detail="party not found")
     db.table("clients").update({"whatsapp_number": phone}).eq("id", payload.client_id).execute()
     return {"ok": True, "number": phone}
+
+
+@router.get("/admin/missing-numbers")
+async def admin_missing_numbers(token: str = Query(...)):
+    """Worklist for problem #4: every party that OWES money but has no WhatsApp
+    number, sorted by outstanding (biggest first). The owner knocks out the top
+    debtors from their phone in a couple of minutes - that is what turns 'no
+    numbers saved' into 'reminders actually go out'."""
+    from app.services import names
+    biz = _biz_by_token(token)
+    db = require_db()
+    bid = biz["id"]
+    clients = (db.table("clients")
+               .select("id, name")
+               .eq("business_id", bid).is_("whatsapp_number", "null").execute()).data or []
+    if not clients:
+        return {"parties": [], "count": 0}
+    ids = [c["id"] for c in clients]
+    owed: dict = {}
+    bills = (db.table("bills").select("client_id, outstanding")
+             .eq("business_id", bid).in_("client_id", ids)
+             .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+    for b in bills:
+        owed[b["client_id"]] = owed.get(b["client_id"], 0.0) + float(b.get("outstanding") or 0)
+    out = [{"client_id": c["id"], "name": names.clean_display(c.get("name") or "") or "Customer",
+            "outstanding": round(owed.get(c["id"], 0.0), 2)} for c in clients]
+    out.sort(key=lambda x: x["outstanding"], reverse=True)
+    return {"parties": out, "count": len(out)}
+
+
+class ImportNumbersPayload(BaseModel):
+    token: str
+    text: str            # pasted lines: "Party Name, 98765 43210" (comma/space/tab)
+
+
+def _parse_import_line(line: str):
+    """(name, raw_number) from one pasted line, or None. The phone is the digit
+    run at the END; everything before it is the name. Tolerates commas/tabs/dashes
+    and a leading +91."""
+    line = (line or "").strip()
+    if not line:
+        return None
+    m = re.search(r'(\+?\d[\d\s\-]{8,}\d)\s*$', line)
+    if not m:
+        return None
+    name = line[:m.start()].strip(" ,\t-|:")
+    return (name, m.group(1)) if name else None
+
+
+def _parse_vcard(text: str):
+    """Contacts exported from a phone come as vCard (.vcf): iPhone 'Share contact',
+    Android 'Export contacts'. Pull (FN, first TEL) from each card."""
+    out, name, tel = [], None, None
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        u = line.upper()
+        if u.startswith("BEGIN:VCARD"):
+            name, tel = None, None
+        elif u.startswith("FN:"):
+            name = line[3:].strip()
+        elif u.startswith("N:") and not name:
+            parts = line[2:].split(";")             # N:Last;First;;; -> "First Last"
+            name = " ".join(p for p in [parts[1] if len(parts) > 1 else "",
+                                        parts[0] if parts else ""] if p).strip() or None
+        elif u.startswith("TEL") and ":" in line and not tel:
+            tel = line.split(":", 1)[1].strip()
+        elif u.startswith("END:VCARD"):
+            if name and tel:
+                out.append((name, tel))
+            name, tel = None, None
+    return out
+
+
+def _parse_google_csv(text: str):
+    """Google Contacts CSV export: a 'Name' (or First/Last) column + one or more
+    'Phone N - Value' columns."""
+    import csv
+    import io
+    out = []
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        for row in reader:
+            name = (row.get("Name") or "").strip() or " ".join(
+                p for p in [(row.get("First Name") or "").strip(),
+                            (row.get("Last Name") or "").strip()] if p).strip()
+            num = ""
+            for k, v in row.items():
+                if v and k and ("phone" in k.lower() or "mobile" in k.lower()) \
+                        and "type" not in k.lower():
+                    num = v.strip()
+                    break
+            if name and num:
+                out.append((name, num))
+    except Exception:
+        log.warning("google-csv parse failed; falling back", exc_info=True)
+    return out
+
+
+def _parse_contacts(text: str):
+    """Turn ANY common contact export into [(name, number)]: vCard (.vcf), Google
+    CSV, or plain pasted 'Name  Number' lines. Auto-detected by content."""
+    text = text or ""
+    if "BEGIN:VCARD" in text.upper():
+        return _parse_vcard(text)
+    first = next((l for l in text.splitlines() if l.strip()), "").lower()
+    if "," in first and "name" in first and ("phone" in first or "mobile" in first):
+        rows = _parse_google_csv(text)
+        if rows:
+            return rows
+    return [p for p in (_parse_import_line(l) for l in text.splitlines()) if p]
+
+
+@router.post("/admin/import-numbers")
+async def admin_import_numbers(payload: ImportNumbersPayload):
+    """Bulk-fill WhatsApp numbers by PASTING them from the owner's phone (where
+    they already keep party numbers). Each line is matched to a Tally party by
+    name; a valid number fills a party that has none. Returns what filled, what
+    did not match, and what was a bad number - so nothing fails silently.
+    Never overwrites a number Tally/ASVA already has (safe to re-run)."""
+    from app.routers.tally import _normalize_phone
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    bid = biz["id"]
+
+    clients = (db.table("clients")
+               .select("id, name, tally_ledger_name, whatsapp_number")
+               .eq("business_id", bid).execute()).data or []
+
+    def norm(s: str) -> str:
+        return re.sub(r'[^a-z0-9]', '', (s or "").lower())
+
+    by_name: dict = {}
+    for c in clients:
+        for key in (c.get("name"), c.get("tally_ledger_name")):
+            k = norm(key)
+            if k:
+                by_name.setdefault(k, []).append(c)
+
+    filled, skipped_have, unmatched, bad_number = [], [], [], []
+    seen_ids = set()
+    for name, num in _parse_contacts(payload.text):
+        phone = _normalize_phone(num)
+        if not phone:
+            bad_number.append(name)
+            continue
+        k = norm(name)
+        cand = by_name.get(k)
+        if not cand:                       # fall back to a UNIQUE contains-match
+            hits = [c for kk, lst in by_name.items() for c in lst
+                    if (k and (k in kk or kk in k))]
+            uniq = {c["id"]: c for c in hits}
+            cand = list(uniq.values()) if len(uniq) == 1 else None
+        if not cand:
+            unmatched.append(name)
+            continue
+        c = cand[0]
+        if c["id"] in seen_ids:
+            continue
+        seen_ids.add(c["id"])
+        if c.get("whatsapp_number"):
+            skipped_have.append(c.get("name"))
+            continue
+        db.table("clients").update({"whatsapp_number": phone}).eq("id", c["id"]).execute()
+        filled.append({"name": c.get("name"), "number": phone})
+
+    return {"filled": filled, "filled_count": len(filled),
+            "already_had": skipped_have, "unmatched": unmatched,
+            "bad_number": bad_number}
 
 
 class CreditDaysPayload(BaseModel):
