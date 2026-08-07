@@ -810,6 +810,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
  <button data-sub="exclude">Do-not-chase ({exclude_n:,})</button>
 </div>
 <button class="addparty" onclick="openAddParty()" title="Add a customer you track in ASVA only, not in Tally">+ Add non-Tally party</button>
+<button class="addparty" onclick="openImportNumbers()" title="Fill missing WhatsApp numbers by pasting contacts from your phone">Import numbers from phone</button>
 
 <div class="bar">
  <input type="search" id="q" placeholder="Party dhundo...">
@@ -896,6 +897,19 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     <div style="margin-top:18px;text-align:right">
       <button onclick="document.getElementById('nummodal').classList.remove('show')">Cancel</button>
       <button id="numsave" style="background:#0a7d33;color:#fff;border:0">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="importnummodal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modalbox">
+    <h3>Import numbers from your phone</h3>
+    <div style="font-size:.85em;color:#787774;margin-bottom:8px">Paste your contacts (name and number, one per line), or paste a contact file (.vcf) you shared from your phone. ASVA matches each to a Tally party and fills the ones missing a number. Numbers you already have are never changed.</div>
+    <textarea id="imp_text" rows="8" placeholder="Ramesh Traders  9876543210&#10;Anand Electricals, 9876500002" style="width:100%;padding:11px 12px;font-size:.95em;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box"></textarea>
+    <div id="imp_result" style="margin-top:10px;font-size:.88em;line-height:1.5"></div>
+    <div style="margin-top:16px;text-align:right">
+      <button onclick="document.getElementById('importnummodal').classList.remove('show')">Close</button>
+      <button id="imp_go" style="background:#0a7d33;color:#fff;border:0">Fill numbers</button>
     </div>
   </div>
 </div>
@@ -1050,6 +1064,33 @@ async function saveNumber() {{
 }}
 document.getElementById('numsave').onclick = saveNumber;
 document.querySelectorAll('.phbtn').forEach(b => b.onclick = () => openNumberModal(b));
+
+// ── Bulk-fill numbers from the owner's phone contacts (problem #4) ──
+function openImportNumbers() {{
+  document.getElementById('imp_text').value = '';
+  document.getElementById('imp_result').innerHTML = '';
+  document.getElementById('importnummodal').classList.add('show');
+  setTimeout(() => document.getElementById('imp_text').focus(), 40);
+}}
+async function doImportNumbers() {{
+  const text = document.getElementById('imp_text').value;
+  if (!text.trim()) {{ alert('Paste your contacts first.'); return; }}
+  const btn = document.getElementById('imp_go'); btn.disabled = true; btn.textContent = '...';
+  try {{
+    const r = await fetch('/admin/import-numbers', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, text: text}})}});
+    const d = await r.json();
+    btn.disabled = false; btn.textContent = 'Fill numbers';
+    if (!r.ok) {{ alert(d.detail || 'Could not import.'); return; }}
+    let msg = '<b>' + (d.filled_count || 0) + ' number(s) added.</b>';
+    if ((d.unmatched || []).length) msg += '<br>Not matched to a party: ' + d.unmatched.join(', ');
+    if ((d.already_had || []).length) msg += '<br>Already had a number: ' + d.already_had.length;
+    if ((d.bad_number || []).length) msg += '<br>Not a valid number: ' + d.bad_number.join(', ');
+    document.getElementById('imp_result').innerHTML = msg;
+    if (d.filled_count) setTimeout(() => location.reload(), 1600);
+  }} catch (e) {{ btn.disabled = false; btn.textContent = 'Fill numbers'; alert('Could not import. Please try again.'); }}
+}}
+document.getElementById('imp_go').onclick = doImportNumbers;
 
 // ── Create a new non-Tally party, then jump to its page to add bills ──
 function openAddParty() {{
