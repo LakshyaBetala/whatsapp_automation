@@ -235,6 +235,55 @@ async def ops_support_resolve(payload: SupportResolvePayload):
     return {"ok": True}
 
 
+class DeleteBusinessPayload(BaseModel):
+    admin_key: str
+    business_id: str
+    confirm_name: str            # must match the business_name - guards against a mis-click
+
+
+# Every table that holds a business's data, wiped on a DPDP delete-on-request.
+# Children first, the business row last. Best-effort per table so one hiccup never
+# leaves the erase half-done.
+_BUSINESS_DATA_TABLES = (
+    "wa_outbox", "pending_receipts", "payment_promises", "inbound_messages",
+    "tally_receipts", "manual_payments", "photo_bills", "messages", "bills",
+    "clients", "support_requests",
+)
+
+
+@router.post("/delete-business")
+async def ops_delete_business(payload: DeleteBusinessPayload):
+    """DPDP delete-on-request: erase a business and ALL its data (its customers'
+    numbers, bills, messages, receipts). Admin-gated + name-confirmed so it can
+    never fire by accident. Irreversible - the shop's data is gone."""
+    if not _key_ok(payload.admin_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+    db = require_db()
+    row = (db.table("businesses").select("id, business_name")
+           .eq("id", payload.business_id).limit(1).execute()).data
+    if not row:
+        raise HTTPException(status_code=404, detail="Business not found")
+    name = row[0].get("business_name") or ""
+    if (payload.confirm_name or "").strip() != name.strip():
+        raise HTTPException(status_code=400,
+                            detail="confirm_name must exactly match the business name")
+    wiped = {}
+    for tbl in _BUSINESS_DATA_TABLES:
+        try:
+            r = db.table(tbl).delete().eq("business_id", payload.business_id).execute()
+            wiped[tbl] = len(r.data or [])
+        except Exception:
+            log.warning("delete-business: %s wipe failed for %s (continuing)",
+                        tbl, payload.business_id, exc_info=True)
+    try:
+        db.table("businesses").delete().eq("id", payload.business_id).execute()
+    except Exception:
+        log.exception("delete-business: business row delete failed for %s", payload.business_id)
+        raise HTTPException(status_code=500, detail="Data wiped but the business row could not be removed - retry.")
+    log.info("delete-business: erased %s (%s) rows=%s", payload.business_id, name, wiped)
+    return {"ok": True, "deleted": name, "rows": wiped}
+
+
 @router.get("/health")
 async def ops_health(key: str = Query("")):
     """The health center snapshot: system state, per-shop health, 14-day traffic,
