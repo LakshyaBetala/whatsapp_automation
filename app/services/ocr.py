@@ -95,18 +95,38 @@ async def extract_bill(image_b64: str, media_type: str = "image/jpeg") -> Option
         return None
 
 
+class PaymentExtract(BaseModel):
+    amount: Optional[float] = None       # rupees paid
+    payer: Optional[str] = None          # name on the UPI/bank screenshot
+    ref: Optional[str] = None            # UPI reference / UTR / txn id (proof + dedupe key)
+    confidence: float = 0.0              # 0-1 how sure the read is (drives auto-prefill vs "please check")
+
+
 _PAY_PROMPT = (
-    "This is a screenshot a customer sent to prove they paid (a UPI app, bank "
-    "transfer, or cheque). Read the RUPEE AMOUNT that was paid. Return JSON "
-    "{\"amount\": <number or null>}. Numeric only, no commas or symbols. If you "
-    "cannot clearly see a paid amount, return null.")
-_PAY_SCHEMA = {"type": "OBJECT", "properties": {"amount": {"type": "NUMBER", "nullable": True}}}
+    "This is a screenshot a customer sent to prove they paid (a UPI app like "
+    "GPay/PhonePe/Paytm, a bank transfer, or a cheque). Extract as JSON:\n"
+    "- amount: the RUPEE amount paid (number only, no commas/symbols; null if unclear)\n"
+    "- payer: the name of the person/firm who PAID (the sender), or null\n"
+    "- ref: the UPI reference number / UTR / transaction id (digits, often 12), or null\n"
+    "- confidence: 0.0-1.0, how sure you are of the amount (1 = crisp and certain, "
+    "low = blurry/ambiguous)\n"
+    "Return only these fields.")
+_PAY_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "amount": {"type": "NUMBER", "nullable": True},
+        "payer": {"type": "STRING", "nullable": True},
+        "ref": {"type": "STRING", "nullable": True},
+        "confidence": {"type": "NUMBER"},
+    },
+}
 
 
-async def extract_payment_amount(image_b64: str, media_type: str = "image/jpeg") -> Optional[float]:
-    """Read the paid amount off a payment screenshot (UPI/bank/cheque). Returns
-    the rupee amount, or None if not configured / not clearly readable. Best
-    effort - a failure never blocks the reply pipeline."""
+async def extract_payment(image_b64: str, media_type: str = "image/jpeg") -> Optional[PaymentExtract]:
+    """Read a payment screenshot: amount + payer + UPI reference + a confidence
+    score. Returns None if not configured / unreadable. The confidence is a
+    SUGGESTION for the app (high -> prefill the amount; low -> ask the owner to
+    check). ASVA never posts to Tally on this alone - the owner always confirms."""
     if not is_configured():
         return None
     payload = {
@@ -128,9 +148,21 @@ async def extract_payment_amount(image_b64: str, media_type: str = "image/jpeg")
             resp.raise_for_status()
             data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"]
-        amt = json.loads(text).get("amount")
+        raw = json.loads(text)
+        amt = raw.get("amount")
         amt = float(amt) if amt is not None else None
-        return amt if (amt and amt > 0) else None
+        return PaymentExtract(
+            amount=amt if (amt and amt > 0) else None,
+            payer=(raw.get("payer") or None),
+            ref=(str(raw.get("ref")).strip() or None) if raw.get("ref") else None,
+            confidence=float(raw.get("confidence") or 0.0),
+        )
     except Exception:
         log.exception("Payment-screenshot OCR failed")
         return None
+
+
+async def extract_payment_amount(image_b64: str, media_type: str = "image/jpeg") -> Optional[float]:
+    """Back-compat thin wrapper: just the amount (used by the reply pipeline)."""
+    r = await extract_payment(image_b64, media_type)
+    return r.amount if r else None

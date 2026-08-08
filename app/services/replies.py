@@ -116,10 +116,12 @@ def _amt_phrase(amount) -> str:
     return f" ({inr(amount)})" if amount else ""
 
 
-def _queue_payment(business_id: str, client: dict, amount) -> bool:
+def _queue_payment(business_id: str, client: dict, amount, *, ocr_payer=None,
+                   ocr_ref=None, ocr_confidence=None) -> bool:
     """A KNOWN customer reported a specific amount paid: put it straight in the
     owner's Payments tab (party matched by their number) so the owner just checks
-    the account and posts it into Tally. Deduped per party by receipts_queue.
+    the account and posts it into Tally. The ocr_* hints (from a screenshot) are
+    shown at confirm time as suggestions. Deduped per party by receipts_queue.
     Returns True if a receipt was queued. Best-effort - never breaks the reply."""
     try:
         amt = float(amount or 0)
@@ -138,7 +140,8 @@ def _queue_payment(business_id: str, client: dict, amount) -> bool:
         disp = names.clean_display(client.get("name") or "") or (client.get("name") or "Customer")
         rq.create_pending(db, business_id, client_id=client.get("id"),
                           party_ledger=led or client.get("name") or disp,
-                          party_display=disp, amount=amt)
+                          party_display=disp, amount=amt,
+                          ocr_payer=ocr_payer, ocr_ref=ocr_ref, ocr_confidence=ocr_confidence)
         return True
     except Exception:
         log.exception("could not queue customer-reported payment")
@@ -168,18 +171,22 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     # 1. A screenshot with no clear instruction: treat as payment proof. Try to
     #    read the amount off it (UPI/bank) so it can go straight to the Payments tab.
     if media_b64 and len(text) < 4:
-        amount = None
+        amount = payer = ref = None
+        conf = None
         try:
             from app.services import ocr
-            amount = await ocr.extract_payment_amount(media_b64, media_type)
+            pe = await ocr.extract_payment(media_b64, media_type)
+            if pe:
+                amount, payer, ref, conf = pe.amount, pe.payer, pe.ref, pe.confidence
         except Exception:
-            log.exception("screenshot amount OCR failed")
+            log.exception("screenshot OCR failed")
         promises.create(require_db(), business_id, client_id, kind="paid_claim",
                         hold_until=_grace_hold(), amount=amount,
                         raw_text="[payment screenshot]", source="screenshot")
         # Build the ONE caption, then send the image with it - a single owner
         # message, never two.
-        if _queue_payment(business_id, client, amount):
+        if _queue_payment(business_id, client, amount, ocr_payer=payer,
+                          ocr_ref=ref, ocr_confidence=conf):
             caption = (
                 f"{name} sent a payment screenshot for {inr(amount)}. It is in your "
                 f"Payments tab - check the account and post it into Tally. Reminders "

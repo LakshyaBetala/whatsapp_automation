@@ -3717,6 +3717,7 @@ async def admin_payments(token: str = Query(...), lang: str = Query("english")):
   <div class="cfbox">
     <h3 id="cftitle">Enter payment</h3>
     <div class="cfparty" id="cfparty"></div>
+    <div class="hint" id="cfocr" style="margin:2px 0 8px"></div>
     <label>Amount received</label>
     <input id="cfamt" type="number" min="1" step="0.01" inputmode="decimal">
     <label>Deposit into (Tally account)</label>
@@ -3822,6 +3823,7 @@ function openCf(title, party, amount, dep, dateStr, alloc){{
   document.getElementById('cfdep').innerHTML = depOpts(dep||'Cash');
   document.getElementById('cfdate').value = dateStr || today();
   document.getElementById('cfalloc').textContent = alloc||'';
+  document.getElementById('cfocr').innerHTML = '';
   document.getElementById('cfmsg').textContent = '';
   document.getElementById('cf').style.display='flex';
 }}
@@ -3837,6 +3839,14 @@ function enterPending(id){{
   CF = {{mode:'pending', id:id, name:q.party_display}};
   openCf((EN?'Review payment':'Payment'), q.party_display||q.party_ledger, q.amount,
     q.deposit_ledger||'Cash', q.receipt_date||today(), '');
+  // Screenshot hints (suggestions only - you still edit + post).
+  let bits=[];
+  if(q.ocr_payer) bits.push('From: '+q.ocr_payer);
+  if(q.ocr_ref) bits.push('Ref: '+q.ocr_ref);
+  let html = bits.join(' &middot; ');
+  if(q.ocr_confidence!=null && q.ocr_confidence < 0.6)
+    html += (html?'<br>':'')+'<span style="color:#956400">&#9888; Blurry screenshot - please check the amount.</span>';
+  document.getElementById('cfocr').innerHTML = html;
 }}
 async function postReceipt(){{
   if(!CF)return;
@@ -3991,6 +4001,9 @@ async def admin_payments_data(token: str = Query(...)):
                 "receipt_date": str(r.get("receipt_date") or "")[:10], "error": r.get("error"),
                 "waiting_mins": wm,
                 "agent_offline": bool(wm is not None and wm >= 15 and st in ("confirmed", "posting")),
+                "ocr_payer": r.get("ocr_payer"),
+                "ocr_ref": r.get("ocr_ref"),
+                "ocr_confidence": r.get("ocr_confidence"),
             })
         except Exception:
             log.warning("skipping a malformed receipt row (business %s)", bid, exc_info=True)

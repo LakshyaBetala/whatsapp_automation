@@ -47,12 +47,13 @@ def _setup(monkeypatch, verdict=None):
         rec.proof.append((bid, name, caption))
     monkeypatch.setattr(replies, "_forward_proof", fake_proof)
 
-    # Default: OCR reads no amount (tests that need one override this). Keeps
-    # every test off the live Gemini API.
+    # Default: OCR reads nothing (tests that need a value override this). Keeps
+    # every test off the live Gemini API. The screenshot path calls
+    # ocr.extract_payment (amount + payer + ref + confidence).
     import app.services.ocr as _ocr
-    async def _fake_amt(b64, mt="image/jpeg"):
+    async def _fake_pay(b64, mt="image/jpeg"):
         return None
-    monkeypatch.setattr(_ocr, "extract_payment_amount", _fake_amt)
+    monkeypatch.setattr(_ocr, "extract_payment", _fake_pay)
     return rec
 
 
@@ -165,8 +166,9 @@ def test_screenshot_with_readable_amount_queues_a_receipt(monkeypatch):
     # When ASVA can read the amount off the screenshot, it goes to the Payments tab.
     import app.services.ocr as ocr
     rec = _setup(monkeypatch)
-    async def fake_amt(b64, mt="image/jpeg"): return 310.0
-    monkeypatch.setattr(ocr, "extract_payment_amount", fake_amt)
+    async def fake_pay(b64, mt="image/jpeg"):
+        return ocr.PaymentExtract(amount=310.0, payer="Ramesh", ref="123456789012", confidence=0.95)
+    monkeypatch.setattr(ocr, "extract_payment", fake_pay)
     queued = []
     monkeypatch.setattr(replies.rq, "create_pending",
                         lambda db, bid, **kw: queued.append(kw) or {"id": "r1"})

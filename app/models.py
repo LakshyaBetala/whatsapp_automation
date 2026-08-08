@@ -77,11 +77,16 @@ class SyncType(str, Enum):
 #   Growth  Rs1099  -> 500 active debtors,  bot assistant
 #   Pro     Rs1999  -> 1000 active debtors, bot assistant
 #   Custom  -> larger shops, bot assistant, priced on request (price 0 = "contact us")
+# "daily_cap" = how many customer reminders this plan may send PER DAY. It is a
+# SAFETY drip (not a paywall the shop feels): on Baileys an over-sending number
+# gets throttled/banned, so we spread a big backlog over days, most-urgent first
+# (see reminder_sweep priority drip). A new number is warmed up UNDER this (ramp
+# over ~7 days). Higher tiers clear a large debtor book faster.
 PLAN_LIMITS: dict[Plan, dict[str, int]] = {
-    Plan.starter: {"debtors": 300, "messages": 2400, "clients": 1000000, "price": 699, "bot": 0},
-    Plan.growth: {"debtors": 500, "messages": 4000, "clients": 1000000, "price": 1099, "bot": 1},
-    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1999, "bot": 1},
-    Plan.max: {"debtors": 5000, "messages": 40000, "clients": 1000000, "price": 0, "bot": 1},
+    Plan.starter: {"debtors": 300, "messages": 2400, "clients": 1000000, "price": 699, "bot": 0, "daily_cap": 50},
+    Plan.growth: {"debtors": 500, "messages": 4000, "clients": 1000000, "price": 1099, "bot": 1, "daily_cap": 100},
+    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1999, "bot": 1, "daily_cap": 150},
+    Plan.max: {"debtors": 5000, "messages": 40000, "clients": 1000000, "price": 0, "bot": 1, "daily_cap": 300},
 }
 
 # Owner-facing plan labels (the enum values stay stable in the DB).

@@ -62,13 +62,26 @@ def allocate_fifo(open_bills: list[dict], amount) -> tuple[list[dict], Decimal]:
 # ── the pending queue ────────────────────────────────────────────────────────
 def create_pending(db, business_id: str, *, client_id: str | None, party_ledger: str,
                    party_display: str, amount, deposit_ledger: str = "CASH",
-                   receipt_date: str | None = None) -> dict | None:
+                   receipt_date: str | None = None, ocr_payer: str | None = None,
+                   ocr_ref: str | None = None, ocr_confidence: float | None = None) -> dict | None:
     """Queue a receipt for the owner to confirm in the app. Amount must be
-    positive. receipt_date defaults to today (IST), stored as YYYY-MM-DD."""
+    positive. receipt_date defaults to today (IST), stored as YYYY-MM-DD. The
+    ocr_* hints (from a payment screenshot) are shown at confirm time as
+    SUGGESTIONS - the owner still edits + posts; ASVA never auto-posts."""
     amt = money(amount)
     if amt <= 0:
         raise ValueError("amount must be positive")
     rdate = receipt_date or _dt.datetime.now(IST).date().isoformat()
+    _ocr = {}
+    if ocr_payer:
+        _ocr["ocr_payer"] = str(ocr_payer)[:120]
+    if ocr_ref:
+        _ocr["ocr_ref"] = str(ocr_ref)[:60]
+    if ocr_confidence is not None:
+        try:
+            _ocr["ocr_confidence"] = round(float(ocr_confidence), 2)
+        except (TypeError, ValueError):
+            pass
     # Dedup: never keep two OPEN receipts for the same party. If the owner reaches
     # the same payment from two places (PAID on WhatsApp AND "Enter payment" in
     # the app), update the existing open row instead of creating a second one -
@@ -84,7 +97,7 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
                 patch = {"party_ledger": party_ledger,
                          "party_display": party_display or party_ledger,
                          "amount": float(amt), "deposit_ledger": deposit_ledger or "CASH",
-                         "receipt_date": rdate, "status": "pending"}
+                         "receipt_date": rdate, "status": "pending", **_ocr}
                 r = (db.table("pending_receipts").update(patch)
                      .eq("id", pid).execute())
                 return (r.data or [{**patch, "id": pid}])[0]
@@ -99,6 +112,7 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
         "deposit_ledger": deposit_ledger or "CASH",
         "receipt_date": rdate,
         "status": "pending",
+        **_ocr,
     }
     try:
         r = db.table("pending_receipts").insert(row).execute()

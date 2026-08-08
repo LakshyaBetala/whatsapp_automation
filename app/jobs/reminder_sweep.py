@@ -27,7 +27,7 @@ from decimal import Decimal
 
 from app.config import settings
 from app.db import require_db
-from app.models import Lang, MessageType, Plan
+from app.models import PLAN_LIMITS, Lang, MessageType, Plan
 from app.services import checkpoint, promises, whatsapp
 from app.services.templates import inr
 
@@ -36,6 +36,45 @@ log = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 DEFAULT_CADENCE = [3, 7, 15, 21, 30]
+
+
+def _daily_cap(biz: dict, today: date) -> int:
+    """How many reminders this business may send today. Plan-based (PLAN_LIMITS),
+    warmed up over the first ~7 days of a new shop so a fresh WhatsApp number is
+    never blasted (a top ban signal). Falls back to the global setting if the plan
+    is unknown."""
+    try:
+        base = PLAN_LIMITS[Plan(biz.get("plan") or "starter")].get("daily_cap") \
+            or settings.daily_reminder_cap
+    except (KeyError, ValueError):
+        base = settings.daily_reminder_cap
+    try:
+        created = date.fromisoformat(str(biz.get("created_at"))[:10])
+        age = (today - created).days
+    except (TypeError, ValueError):
+        age = 999
+    if age < 7:                       # warm-up ramp: 20, 40, 60 ... capped at base
+        return max(1, min(base, 20 + 20 * age))
+    return base
+
+
+def _party_priority(bills: list, today: date) -> float:
+    """Urgency score for the drip queue: outstanding x (days since oldest bill).
+    Bigger, older debts get today's limited send slots first; the rest carry to
+    the next sweep - deterministic, fair, no party starved."""
+    total = 0.0
+    oldest = 0
+    for b in bills:
+        try:
+            total += float(b.get("outstanding") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            inv = date.fromisoformat(str(b["invoice_date"]))
+            oldest = max(oldest, (today - inv).days)
+        except (TypeError, ValueError):
+            pass
+    return total * (oldest + 1)
 
 # Reminder "style" → base cadence (authored for a 30-day term; cadence_points
 # scales it to each party's real credit period). The dashboard writes the
@@ -273,7 +312,7 @@ async def run() -> None:
             "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
             "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
             "discount_pct, overdue_repeat_days, overdue_max_repeats, plan_expires_on, "
-            "reminder_batches, catchup_date, catchup_action"
+            "reminder_batches, catchup_date, catchup_action, created_at"
         )
         .eq("reminders_enabled", True)
         .execute()
@@ -343,14 +382,28 @@ async def run() -> None:
     # Daily cap per business: a fresh backlog drips out over days instead of
     # blasting in one sweep. One party = one message = 1 toward the cap.
     sent_per_biz: dict[str, int] = {}
-    cap = settings.daily_reminder_cap
+    # Per-business daily cap (plan-based + warm-up), computed once per business.
+    cap_by_biz: dict[str, int] = {}
 
     from app.services import bot as bot_svc
     from app.services.batches import resolve_batch, batch_hour
 
-    for (biz_id, client_id), p in parties.items():
+    # Priority DRIP: rank due parties by urgency (biggest x oldest) WITHIN each
+    # business, so the day's limited slots go to the most important first and the
+    # rest carry to the next sweep. Ranking spans all batches together, so an
+    # early batch can never starve a later one. Sorting by business_id keeps
+    # sent_per_biz/cap bookkeeping contiguous.
+    ordered = sorted(
+        parties.items(),
+        key=lambda kv: (kv[0][0], -_party_priority(kv[1]["bills"], today)),
+    )
+
+    for (biz_id, client_id), p in ordered:
         try:
             biz, client = p["biz"], p["client"]
+            cap = cap_by_biz.get(biz_id)
+            if cap is None:
+                cap = cap_by_biz[biz_id] = _daily_cap(biz, today)
             # Owner held this party in this morning's checkpoint (already paid).
             if client_id in held.get(biz_id, set()):
                 skipped += 1
