@@ -141,6 +141,49 @@ def test_create_pending_survives_db_error():
                              party_display="P", amount=100) is None
 
 
+class _OcrRejectQ(_Q):
+    """Insert/update fails if the row carries any ocr_* column - simulates a DB
+    where migration 038 (the OCR hint columns) hasn't been applied yet."""
+    def insert(self, row):
+        if any(k.startswith("ocr_") for k in row):
+            raise RuntimeError('column "ocr_payer" does not exist')
+        return super().insert(row)
+    def update(self, patch):
+        if any(k.startswith("ocr_") for k in patch):
+            raise RuntimeError('column "ocr_payer" does not exist')
+        return super().update(patch)
+
+
+class OcrRejectDB(FakeDB):
+    def table(self, name):
+        return _OcrRejectQ(self.inserted, self.rows)
+
+
+def test_create_pending_survives_missing_ocr_columns():
+    # A screenshot ASVA can read carries ocr_* hints. If migration 038 lags, the
+    # first insert fails - but the PAYMENT must still be queued (retry without the
+    # suggestion columns). Losing a real payment over a prefill would be the worst
+    # possible failure of the whole capture pipeline.
+    db = OcrRejectDB()
+    out = rq.create_pending(db, "b1", client_id="c1", party_ledger="RAMESH",
+                            party_display="Ramesh", amount=310,
+                            ocr_payer="Ramesh", ocr_ref="123456789012", ocr_confidence=0.95)
+    assert out is not None
+    assert out["amount"] == 310.0 and out["status"] == "pending"
+    assert "ocr_payer" not in out                 # dropped, but the receipt survived
+
+
+def test_create_pending_dedup_survives_missing_ocr_columns():
+    # Same, on the dedup/update path (an open receipt already exists for the party).
+    rows = [{"id": "p1", "business_id": "b1", "client_id": "c1", "status": "pending",
+             "amount": 100.0, "deposit_ledger": "Cash"}]
+    db = OcrRejectDB(rows)
+    out = rq.create_pending(db, "b1", client_id="c1", party_ledger="R",
+                            party_display="R", amount=250, ocr_ref="999", ocr_confidence=0.8)
+    assert out["id"] == "p1" and rows[0]["amount"] == 250.0
+    assert "ocr_ref" not in rows[0]
+
+
 def test_list_pending_only_pending():
     rows = [{"business_id": "b1", "status": "pending", "amount": 1},
             {"business_id": "b1", "status": "posted", "amount": 2}]

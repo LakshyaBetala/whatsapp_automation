@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from app.config import settings
@@ -56,6 +56,36 @@ def _daily_cap(biz: dict, today: date) -> int:
     if age < 7:                       # warm-up ramp: 20, 40, 60 ... capped at base
         return max(1, min(base, 20 + 20 * age))
     return base
+
+
+def _parties_sent_today(db, biz_ids: list, today: date) -> dict:
+    """How many DISTINCT parties each business has already been sent a reminder
+    today (counted from the cadence markers). This seeds the daily drip cap so the
+    hourly sweep spends ONE daily budget across the whole day - not a fresh budget
+    every hour. Without this seed, already-sent parties simply drop out of
+    contention (via _already_sent) and each hourly run sends the NEXT `cap`
+    parties, draining a 200-party backlog in a few hours instead of over days.
+    Best-effort: any failure returns {} and the cap degrades to per-run counting."""
+    if not biz_ids:
+        return {}
+    start = datetime.combine(today, time(0, 0), IST).astimezone(timezone.utc).isoformat()
+    try:
+        rows = (db.table("messages")
+                .select("business_id, client_id")
+                .eq("type", MessageType.reminder.value)
+                .eq("template_name", "cadence_marker")
+                .gte("created_at", start)
+                .in_("business_id", list(biz_ids))
+                .execute()).data or []
+    except Exception:
+        log.debug("parties-sent-today seed failed - cap falls back to per-run", exc_info=True)
+        return {}
+    seen: dict = {}
+    for r in rows:
+        bid, cid = r.get("business_id"), r.get("client_id")
+        if bid and cid:
+            seen.setdefault(bid, set()).add(cid)
+    return {bid: len(cids) for bid, cids in seen.items()}
 
 
 def _party_priority(bills: list, today: date) -> float:
@@ -380,8 +410,11 @@ async def run() -> None:
     # decision, aggregated per business for ONE owner alert per day.
     catchup_pending: dict[str, dict] = {}
     # Daily cap per business: a fresh backlog drips out over days instead of
-    # blasting in one sweep. One party = one message = 1 toward the cap.
-    sent_per_biz: dict[str, int] = {}
+    # blasting in one sweep. One party = one message = 1 toward the cap. Seed
+    # from parties ALREADY messaged today so the cap is a true DAILY budget
+    # spent across every hourly run - not reset each hour (which drained a
+    # whole backlog within the send window).
+    sent_per_biz: dict[str, int] = _parties_sent_today(db, list(businesses.keys()), today)
     # Per-business daily cap (plan-based + warm-up), computed once per business.
     cap_by_biz: dict[str, int] = {}
 

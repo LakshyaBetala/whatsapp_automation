@@ -98,8 +98,20 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
                          "party_display": party_display or party_ledger,
                          "amount": float(amt), "deposit_ledger": deposit_ledger or "CASH",
                          "receipt_date": rdate, "status": "pending", **_ocr}
-                r = (db.table("pending_receipts").update(patch)
-                     .eq("id", pid).execute())
+                try:
+                    r = (db.table("pending_receipts").update(patch)
+                         .eq("id", pid).execute())
+                except Exception:
+                    # The ocr_* columns may not exist yet (migration 038 not
+                    # applied). A payment must NEVER be dropped over a suggestion
+                    # field - retry without the OCR hints.
+                    if _ocr:
+                        base = {k: v for k, v in patch.items() if k not in _ocr}
+                        r = (db.table("pending_receipts").update(base)
+                             .eq("id", pid).execute())
+                        patch = base
+                    else:
+                        raise
                 return (r.data or [{**patch, "id": pid}])[0]
         except Exception:
             log.debug("dedup check failed (business %s) - inserting fresh", business_id, exc_info=True)
@@ -118,6 +130,17 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
         r = db.table("pending_receipts").insert(row).execute()
         return (r.data or [row])[0]
     except Exception:
+        # Retry without the OCR hint columns in case migration 038 hasn't been
+        # applied yet - a real payment is far too important to lose over a
+        # suggestion field the owner would only see as a prefill.
+        if _ocr:
+            base = {k: v for k, v in row.items() if k not in _ocr}
+            try:
+                r = db.table("pending_receipts").insert(base).execute()
+                return (r.data or [base])[0]
+            except Exception:
+                log.exception("could not queue pending receipt even without OCR (business %s)", business_id)
+                return None
         log.exception("could not queue pending receipt (business %s)", business_id)
         return None
 
