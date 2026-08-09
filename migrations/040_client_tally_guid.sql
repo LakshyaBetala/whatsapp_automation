@@ -1,4 +1,4 @@
--- 035_client_tally_guid.sql
+-- 040_client_tally_guid.sql
 -- Permanent fix for duplicate customers ("Thilak" vs "Thialk", same party):
 -- match clients on Tally's stable per-ledger GUID, not the editable ledger name.
 --

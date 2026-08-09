@@ -600,7 +600,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     "party_name": v.party_name,
                     "amount": v.amount,
                     "receipt_date": v.date,
-                    "client_id": client_id,   # link by id (rename-proof), migration 033
+                    "client_id": client_id,   # link by id (rename-proof), migration 038
                 }).execute()
 
                 # Find oldest open TALLY bills. WhatsApp-made bills (source
@@ -627,7 +627,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     if new_status == "paid":
                         # True settlement date = the receipt's own date (the day the
                         # money came), NOT now() - so days-to-pay is honest. Only
-                        # stamped when the bill is FULLY cleared (migration 034).
+                        # stamped when the bill is FULLY cleared (migration 039).
                         bill_update["settled_at"] = str(v.date)
                     db.table("bills").update(bill_update).eq("id", b["id"]).execute()
 

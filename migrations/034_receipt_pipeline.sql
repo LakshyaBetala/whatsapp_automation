@@ -1,4 +1,4 @@
--- 029_receipt_pipeline.sql
+-- 034_receipt_pipeline.sql
 -- Wire the payment-entry pipeline (PAID -> queue -> desktop confirm -> Tally).
 --
 -- 1. pending_receipts gains a 'confirmed' status in its lifecycle

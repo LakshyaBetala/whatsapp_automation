@@ -3,7 +3,7 @@
 When an owner sends "TEAM <message>", bot._forward_to_team both pings the product
 team's WhatsApp AND records the request here so the Command Center can show every
 request (who, when, text) and let the operator mark it resolved. Every call is
-best-effort: a missing migration 030 degrades to "not logged", never an error, so
+best-effort: a missing migration 035 degrades to "not logged", never an error, so
 the owner's message still reaches the team.
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ def record(db, *, business_id: str | None, business_name: str | None,
         r = db.table("support_requests").insert(row).execute()
         return (r.data or [row])[0]
     except Exception:
-        log.warning("support.record failed (apply migration 030?) - continuing")
+        log.warning("support.record failed (apply migration 035?) - continuing")
         return None
 
 

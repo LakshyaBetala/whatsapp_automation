@@ -1,4 +1,4 @@
--- 026_owner_language.sql
+-- 031_owner_language.sql
 -- The OWNER's language for the ASVA app UI + the WhatsApp assistant's replies to
 -- the owner. Chosen in the app, saved here, read by the bot so the owner is
 -- answered in the same language as the app. Separate from msg_language, which is

@@ -143,7 +143,7 @@ def test_create_pending_survives_db_error():
 
 class _OcrRejectQ(_Q):
     """Insert/update fails if the row carries any ocr_* column - simulates a DB
-    where migration 038 (the OCR hint columns) hasn't been applied yet."""
+    where migration 043 (the OCR hint columns) hasn't been applied yet."""
     def insert(self, row):
         if any(k.startswith("ocr_") for k in row):
             raise RuntimeError('column "ocr_payer" does not exist')
@@ -160,7 +160,7 @@ class OcrRejectDB(FakeDB):
 
 
 def test_create_pending_survives_missing_ocr_columns():
-    # A screenshot ASVA can read carries ocr_* hints. If migration 038 lags, the
+    # A screenshot ASVA can read carries ocr_* hints. If migration 043 lags, the
     # first insert fails - but the PAYMENT must still be queued (retry without the
     # suggestion columns). Losing a real payment over a prefill would be the worst
     # possible failure of the whole capture pipeline.

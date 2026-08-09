@@ -1,4 +1,4 @@
--- 032_rls_lockdown.sql
+-- 037_rls_lockdown.sql
 -- ============================================================================
 -- Defense-in-depth for tenant isolation (audit P0).
 --

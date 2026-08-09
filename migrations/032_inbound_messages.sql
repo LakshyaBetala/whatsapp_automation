@@ -1,4 +1,4 @@
--- 027_inbound_messages.sql
+-- 032_inbound_messages.sql
 -- Remember what customers say. Until now we stored only a promise's raw_text and
 -- an inbound message id (for dedup) - so the owner could never see a party's
 -- story ("reminded 3 times, replied once, went quiet") and the payment-behaviour

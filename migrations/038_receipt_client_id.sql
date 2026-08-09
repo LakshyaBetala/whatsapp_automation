@@ -1,4 +1,4 @@
--- 033_receipt_client_id.sql
+-- 038_receipt_client_id.sql
 -- ============================================================================
 -- Data integrity (audit P1): link a Tally receipt to its client by ID, not just
 -- by party_name text. Party names get renamed in Tally; an id does not. This

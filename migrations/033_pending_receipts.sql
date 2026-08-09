@@ -1,4 +1,4 @@
--- 028_pending_receipts.sql
+-- 033_pending_receipts.sql
 -- The payment-entry queue. When the owner confirms a payment ("Ramesh paid 500
 -- hdfc"), ASVA holds it here; the next time they open the app (with Tally open)
 -- a popup shows it for confirm/edit, then the agent writes the Receipt into

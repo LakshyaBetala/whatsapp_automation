@@ -2783,7 +2783,7 @@ async def admin_record_payment(payload: RecordPaymentPayload):
         new_status = "paid" if new_paid >= float(b["amount"]) - 0.01 else "partial"
         bupd = {"paid_amount": new_paid, "status": new_status}
         if new_status == "paid":
-            bupd["settled_at"] = pay_date   # honest days-to-pay (migration 034)
+            bupd["settled_at"] = pay_date   # honest days-to-pay (migration 039)
         db.table("bills").update(bupd).eq("id", b["id"]).execute()
         remaining -= pay
         applied += pay

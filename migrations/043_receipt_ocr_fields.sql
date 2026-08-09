@@ -1,4 +1,4 @@
--- 038: carry the payment-screenshot OCR hints onto the pending receipt so the
+-- 043: carry the payment-screenshot OCR hints onto the pending receipt so the
 -- owner sees them at confirm time (who paid, the UPI reference, and how sure the
 -- read was). These are SUGGESTIONS only - the owner still edits amount/date/
 -- account and taps to post; ASVA never auto-posts to Tally.

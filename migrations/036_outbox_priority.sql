@@ -1,4 +1,4 @@
--- 031_outbox_priority.sql
+-- 036_outbox_priority.sql
 -- Owner-initiated sends (Send Now, and a freshly-made bill the owner just
 -- created) must go out immediately, even after the customer send window (9-19).
 -- Automated reminders stay inside the window. A 'priority' row bypasses the

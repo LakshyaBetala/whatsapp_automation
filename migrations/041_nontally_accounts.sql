@@ -1,4 +1,4 @@
--- 036_nontally_accounts.sql
+-- 041_nontally_accounts.sql
 -- Make the non-Tally party page a full accounts handler:
 --   1. Fix party/bill deletion. photo_bills.bill_id referenced bills(id) with NO
 --      on-delete rule (defaults to RESTRICT), so deleting a bill that was ever a
@@ -43,6 +43,6 @@ CREATE INDEX IF NOT EXISTS idx_manual_payments_client
   ON public.manual_payments (business_id, client_id, payment_date DESC);
 
 -- A new table defaults to RLS OFF, which would expose it to the anon/PostgREST
--- role. The whole DB is locked down (migration 032): the backend uses the
+-- role. The whole DB is locked down (migration 037): the backend uses the
 -- service-role key and bypasses RLS, so enable RLS with NO policy = deny anon.
 ALTER TABLE public.manual_payments ENABLE ROW LEVEL SECURITY;

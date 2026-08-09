@@ -1,4 +1,4 @@
--- 037: self-healing receipt posting.
+-- 042: self-healing receipt posting.
 --
 -- Problem: a receipt is CLAIMED by the agent (status flips confirmed -> posting),
 -- the agent writes it to Tally, but the follow-up /receipts/report call is lost

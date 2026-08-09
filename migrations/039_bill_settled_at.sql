@@ -1,4 +1,4 @@
--- 034_bill_settled_at.sql
+-- 039_bill_settled_at.sql
 -- Data integrity (audit P1, second half): a real settlement date per bill.
 -- Until now a bill only had updated_at (changes on any edit), so "average days
 -- to pay" could not be computed honestly. This adds settled_at, stamped with the

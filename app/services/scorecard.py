@@ -160,7 +160,7 @@ def build_scorecard(db, business_id: str, client: dict, *,
         pass
 
     # ── Real receipts booked in Tally ────────────────────────────────
-    # Prefer the id link (rename-proof, migration 033); fall back to the party
+    # Prefer the id link (rename-proof, migration 038); fall back to the party
     # name only for any historical receipt not yet linked by id.
     receipts = []
     try:

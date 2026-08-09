@@ -102,7 +102,7 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
                     r = (db.table("pending_receipts").update(patch)
                          .eq("id", pid).execute())
                 except Exception:
-                    # The ocr_* columns may not exist yet (migration 038 not
+                    # The ocr_* columns may not exist yet (migration 043 not
                     # applied). A payment must NEVER be dropped over a suggestion
                     # field - retry without the OCR hints.
                     if _ocr:
@@ -130,7 +130,7 @@ def create_pending(db, business_id: str, *, client_id: str | None, party_ledger:
         r = db.table("pending_receipts").insert(row).execute()
         return (r.data or [row])[0]
     except Exception:
-        # Retry without the OCR hint columns in case migration 038 hasn't been
+        # Retry without the OCR hint columns in case migration 043 hasn't been
         # applied yet - a real payment is far too important to lose over a
         # suggestion field the owner would only see as a prefill.
         if _ocr:
