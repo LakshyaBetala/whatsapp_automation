@@ -49,7 +49,8 @@ def _fixture(today, *, reminder_hour=11, catchup_date=None, catchup_action=None,
            "reminder_hour": reminder_hour, "msg_language": "hinglish",
            "discount_pct": 0, "overdue_repeat_days": 7, "overdue_max_repeats": 3,
            "plan_expires_on": None, "reminder_batches": None,
-           "catchup_date": catchup_date, "catchup_action": catchup_action}
+           "catchup_date": catchup_date, "catchup_action": catchup_action,
+           "last_seen": today.isoformat()}
     return FakeDB({"businesses": [biz], "bills": bills, "messages": [],
                    "sweep_runs": sweep_runs or []})
 

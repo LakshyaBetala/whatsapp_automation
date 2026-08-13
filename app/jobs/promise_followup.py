@@ -52,11 +52,26 @@ async def run() -> None:
     due = promises.due_followups(db)
     if not due:
         return
+    # Dormant shops (ASVA not opened for dormant_pause_days) get no owner nudge
+    # and no resume - the promise waits until the owner reopens ASVA. One batched
+    # lookup of last_seen for the businesses in play.
+    from app.services import license as lic
+    dormant: set = set()
+    biz_ids = list({p.get("business_id") for p in due if p.get("business_id")})
+    if biz_ids:
+        try:
+            rows = (db.table("businesses").select("id, last_seen")
+                    .in_("id", biz_ids).execute()).data or []
+            dormant = {r["id"] for r in rows if lic.is_dormant(r)}
+        except Exception:
+            dormant = set()
     kept = broken = 0
     for p in due:
         biz_id, client_id = p.get("business_id"), p.get("client_id")
         pid = p.get("id")
         if not (biz_id and client_id and pid):
+            continue
+        if biz_id in dormant:
             continue
         try:
             if not _has_open_bills(db, biz_id, client_id):

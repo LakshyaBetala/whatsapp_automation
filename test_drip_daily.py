@@ -110,7 +110,8 @@ def _make(n_parties, plan="pro"):
            "reminder_style": None, "reminder_custom_line": None, "reminder_hour": 0,
            "msg_language": "hinglish", "discount_pct": 0, "overdue_repeat_days": 7,
            "overdue_max_repeats": 3, "plan_expires_on": None, "reminder_batches": None,
-           "catchup_date": None, "catchup_action": None, "created_at": inv}
+           "catchup_date": None, "catchup_action": None, "created_at": inv,
+           "last_seen": today.isoformat()}
     return biz, bills
 
 

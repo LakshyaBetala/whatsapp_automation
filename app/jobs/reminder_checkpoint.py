@@ -20,6 +20,7 @@ from app.db import require_db
 from app.models import Lang, MessageType, Plan
 from app.services import checkpoint, whatsapp
 from app.services import subscription as subs
+from app.services import license as lic
 from app.services.templates import inr
 from app.jobs.reminder_sweep import (DEFAULT_CADENCE, IST, _already_sent,
                                      _biz_hour, cadence_points, latest_reached_point)
@@ -119,12 +120,15 @@ async def run() -> None:
     biz_rows = (db.table("businesses")
                 .select("id, business_name, whatsapp_number, plan, reminders_enabled, "
                         "reminder_cadence, reminder_hour, overdue_repeat_days, "
-                        "overdue_max_repeats, plan_expires_on, checkpoint_date")
+                        "overdue_max_repeats, plan_expires_on, checkpoint_date, last_seen")
                 .eq("reminders_enabled", True).execute()).data or []
 
     for biz in biz_rows:
         try:
             if subs.effective_status(biz.get("plan_expires_on")) == "suspended":
+                continue
+            # Dormant shop: no morning checkpoint either, until ASVA is reopened.
+            if lic.is_dormant(biz):
                 continue
             cp_hour = max(0, _biz_hour(biz) - max(1, settings.checkpoint_lead_hours))
             # Fire at the checkpoint hour OR LATER (up to +6h), not only at the

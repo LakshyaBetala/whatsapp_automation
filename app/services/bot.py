@@ -287,6 +287,14 @@ async def _handle_shop_inbound(
             except Exception:
                 log.exception("shop opt-out failed for %s", c.get("name"))
         return ""
+    # Customer re-opt-in (resume after a STOP) - "until they say again".
+    if _is_optin(upper, low):
+        for c in candidates:
+            try:
+                await _handle_customer_optin(c, from_number)
+            except Exception:
+                log.exception("shop opt-in failed for %s", c.get("name"))
+        return ""
 
     # The reply-capture features run ONLY for a matched customer who owes money.
     # If two parties share this number (a demo/dedup mistake), the payment
@@ -589,6 +597,9 @@ async def handle(
         p in low for p in ("band kar", "mat bhej", "reminder band", "stop reminder", "unsubscribe")
     ):
         return await _handle_customer_optout(client, from_number)
+    # Customer re-opt-in (resume after a STOP) - "until they say again".
+    if _is_optin(upper, low):
+        return await _handle_customer_optin(client, from_number)
 
     # ── Customer self-service (keyword-only: this number is ALSO the
     #    shop's normal chat, so the bot must stay silent on normal talk) ─
@@ -1944,6 +1955,46 @@ async def _handle_customer_optout(client: dict, from_number: str) -> str:
                 "You can always talk to the shop directly. Thank you.")
     return ("Theek hai, aapko ab payment reminder nahi bhejenge.\n"
             "Zaroorat ho to dukaan se baat kar sakte hain. Dhanyavaad.")
+
+
+# Customer re-opt-in words: a party who STOPped can turn reminders back on
+# themselves ("they say again"), no owner action needed.
+_OPTIN_WORDS = ("START", "CHALU", "SHURU", "RESUME", "CONTINUE", "SHURI")
+_OPTIN_PHRASES = ("chalu kar", "shuru kar", "reminder chalu", "phir se bhej", "dobara bhej")
+
+
+def _is_optin(upper: str, low: str) -> bool:
+    return upper in _OPTIN_WORDS or any(p in low for p in _OPTIN_PHRASES)
+
+
+async def _handle_customer_optin(client: dict, from_number: str) -> str:
+    """A customer who previously STOPped asks to resume ("they say again").
+    Turn reminders back on and tell the owner. Only acts if they were actually
+    opted out, so a stray 'start' never nags the owner. Mirror of opt-out."""
+    db = require_db()
+    try:
+        cur = (db.table("clients").select("reminders_enabled")
+               .eq("id", client["id"]).limit(1).execute()).data
+    except Exception:
+        cur = None
+    was_off = bool(cur) and cur[0].get("reminders_enabled") is False
+    if not was_off:
+        return ""  # not opted out - nothing to resume; stay silent
+    try:
+        db.table("clients").update({"reminders_enabled": True}).eq("id", client["id"]).execute()
+    except Exception:
+        log.exception("opt-in resume failed for %s", client.get("name"))
+        return ""
+    try:
+        await whatsapp.notify_owner(
+            client["business_id"],
+            f"{client['name']} ({from_number}) asked to resume reminders. "
+            f"ASVA has turned them back on.")
+    except Exception:
+        log.exception("opt-in owner notify failed")
+    if _biz_is_en(client["business_id"]):
+        return "Done. We will send you payment reminders again. Thank you."
+    return "Theek hai, aapko phir se payment reminder bhejenge. Dhanyavaad."
 
 
 async def _find_client_by_name(business_id: str, name: str) -> dict | None:

@@ -82,7 +82,8 @@ def test_sweep_sends_one_consolidated_message_per_party(monkeypatch):
            "upi_vpa": "t@ok", "reminder_cadence": None, "weekly_off_day": None,
            "reminder_style": None, "reminder_custom_line": None, "reminder_hour": 0,
            "msg_language": "hinglish", "discount_pct": 0, "overdue_repeat_days": 7,
-           "overdue_max_repeats": 3, "plan_expires_on": None, "reminder_batches": None}
+           "overdue_max_repeats": 3, "plan_expires_on": None, "reminder_batches": None,
+           "last_seen": today.isoformat()}
 
     # sweep_runs stamp for hour 0 = ASVA ran at the batch hour today, so the
     # late send stays AUTOMATIC (catch-up confirmation is off; see test_catchup).
@@ -135,7 +136,8 @@ def test_sweep_failed_send_marks_nothing(monkeypatch):
            "reminder_cadence": None, "weekly_off_day": None, "reminder_style": None,
            "reminder_custom_line": None, "reminder_hour": 0, "msg_language": "hinglish",
            "discount_pct": 0, "overdue_repeat_days": 7, "overdue_max_repeats": 3,
-           "plan_expires_on": None, "reminder_batches": None, "reminders_enabled": True}
+           "plan_expires_on": None, "reminder_batches": None, "reminders_enabled": True,
+           "last_seen": today.isoformat()}
 
     fake = FakeDB({"businesses": [biz], "bills": bills, "messages": [],
                    "sweep_runs": [{"run_hour": 0}]})

@@ -342,12 +342,13 @@ async def run() -> None:
             "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
             "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
             "discount_pct, overdue_repeat_days, overdue_max_repeats, plan_expires_on, "
-            "reminder_batches, catchup_date, catchup_action, created_at"
+            "reminder_batches, catchup_date, catchup_action, created_at, last_seen"
         )
         .eq("reminders_enabled", True)
         .execute()
     )
     from app.services import subscription as subs
+    from app.services import license as lic
     # The sweep runs hourly. SEND TIME is now per-batch (each batch has its own
     # hour), so we no longer gate the whole business here - we process every
     # active business and gate each PARTY on its batch's hour below. Catch-up
@@ -355,12 +356,16 @@ async def run() -> None:
     # hour, so a laptop that was off at that hour sends the next hour it is on.
     # Per-bill dedup keeps each reminder to one send/day. Only calendar-marked
     # holidays (blackout_dates) pause a day (handled per-bill below).
+    # Drop suspended shops, AND dormant shops (ASVA not opened for
+    # dormant_pause_days): a shop that walked away sends NOTHING - no reminder,
+    # no escalation - until the owner opens ASVA again (last_seen refreshes).
     businesses = {
         b["id"]: b for b in (biz_resp.data or [])
         if subs.live_status(b.get("plan_expires_on")) != "suspended"
+        and not lic.is_dormant(b)
     }
     if not businesses:
-        log.info("Reminder sweep - nothing to do (no active businesses)")
+        log.info("Reminder sweep - nothing to do (no active/awake businesses)")
         return
 
     # Parties the owner HELD in this morning's checkpoint (already paid). One

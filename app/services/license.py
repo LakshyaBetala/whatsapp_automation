@@ -111,6 +111,34 @@ def stamp_last_seen(db, business_id: str) -> None:
         pass
 
 
+def is_dormant(biz: dict, days: Optional[int] = None) -> bool:
+    """True when the shop's ASVA app has not checked in for `days` days (or has
+    never checked in). A dormant shop gets NO sends at all - not customer
+    reminders, not the owner's EOD digest or morning checkpoint - until the owner
+    opens ASVA again, which refreshes `last_seen` through the heartbeat/sync.
+
+    This is the "don't send if ASVA wasn't opened for N days" guard: a shop that
+    walked away must never have stale reminders fire on its own days later. The
+    moment the app is opened, last_seen goes fresh and everything resumes.
+
+    `days<=0` disables the guard (never dormant). Best-effort/tolerant: an
+    unparseable or missing last_seen counts as dormant (fail safe = don't send)."""
+    if days is None:
+        days = settings.dormant_pause_days
+    if not days or days <= 0:
+        return False
+    ls = biz.get("last_seen")
+    if not ls:
+        return True
+    try:
+        seen = _dt.datetime.fromisoformat(str(ls).replace("Z", "+00:00"))
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=_dt.timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    return (_dt.datetime.now(_dt.timezone.utc) - seen) > _dt.timedelta(days=days)
+
+
 def _plan_of(biz: dict) -> Plan:
     try:
         return Plan(biz.get("plan") or "starter")

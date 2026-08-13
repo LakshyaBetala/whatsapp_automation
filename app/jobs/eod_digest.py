@@ -316,13 +316,14 @@ async def run() -> None:
     biz_resp = (
         db.table("businesses")
         .select("id, business_name, whatsapp_number, plan, eod_enabled, "
-                "plan_expires_on, digest_hour, owner_language")
+                "plan_expires_on, digest_hour, owner_language, last_seen")
         .eq("eod_enabled", True)
         .execute()
     )
     businesses = biz_resp.data or []
 
     from app.services import subscription as subs
+    from app.services import license as lic
 
     sent = 0
     skipped = 0
@@ -339,6 +340,11 @@ async def run() -> None:
                 continue
             sub_status = subs.effective_status(biz.get("plan_expires_on"))
             if sub_status == "suspended":
+                skipped += 1
+                continue
+            # Dormant shop (ASVA not opened for dormant_pause_days): no digest
+            # either, until the owner opens the app again.
+            if lic.is_dormant(biz):
                 skipped += 1
                 continue
             params = await _build_digest(biz["id"], biz)

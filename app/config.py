@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # is the in-app "Restart to update" bar. Keep this in step with the shipped
     # app version so the older app_releases dashboard banner stays quiet (it
     # fires only when app_releases > this) and shops never see two notices.
-    app_version: str = "1.9.5"
+    app_version: str = "1.9.6"
     # The oldest desktop build the fleet still supports. A build below this is too
     # old to update itself (it predates the electron-updater), so the heartbeat
     # flags it `below_min` and the app shows a blocking "download the latest"
@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # looks human, not a burst. Keep the window wide; the daily cap bounds total.
     send_gap_min_s: float = 12.0
     send_gap_max_s: float = 40.0
+    # Dormancy guard: if a shop's ASVA app hasn't checked in (last_seen) for this
+    # many days, send NOTHING for it - no customer reminders AND no owner digest
+    # or morning checkpoint - until the owner opens ASVA again (which refreshes
+    # last_seen via the heartbeat). Stops a shop that walked away from silently
+    # blasting stale reminders days later. 0 disables the guard.
+    dormant_pause_days: int = 4
 
     # --- Scheduling ---
     eod_digest_hour: int = 22   # 10 PM IST - owner's end-of-day summary via the bot
