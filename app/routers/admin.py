@@ -3710,6 +3710,7 @@ async def admin_payments(token: str = Query(...), lang: str = Query("english")):
     title = biz.get("business_name") or "ASVA"
     body = f"""<h1>Payments</h1><div class="muted">{title}</div>
 <div class="hint" style="margin:6px 0 2px">When a customer says they paid, it appears here. Check the amount and the deposit account, then post it into Tally with one tap. ASVA never posts on its own.</div>
+<div style="margin:12px 0 2px"><button class="mini" onclick="openAdd()">+ Add a payment</button></div>
 <div id="pmflash" class="flash"></div>
 <div id="pmwrap"><div class="card" style="margin-top:18px">Loading...</div></div>
 
@@ -3730,6 +3731,20 @@ async def admin_payments(token: str = Query(...), lang: str = Query("english")):
       <button class="ghost" onclick="closeCf()">Cancel</button>
     </div>
     <div id="cfmsg" class="okmsg" style="display:block;margin:10px 0 0"></div>
+  </div>
+</div>
+
+<div id="addcf" class="cfback" style="display:none">
+  <div class="cfbox">
+    <h3>Add a payment</h3>
+    <div class="hint" style="margin:2px 0 8px">Pick the customer who paid. You confirm the amount and deposit account next, then post it into Tally. Nothing posts without your confirm.</div>
+    <label>Customer</label>
+    <select id="addsel"><option value="">Loading...</option></select>
+    <div style="margin-top:18px;display:flex;gap:10px">
+      <button onclick="pickAdd()" id="addnext">Next</button>
+      <button class="ghost" onclick="closeAdd()">Cancel</button>
+    </div>
+    <div id="addmsg" class="okmsg" style="display:block;margin:10px 0 0"></div>
   </div>
 </div>
 <script>
@@ -3882,6 +3897,31 @@ async function cancelPending(id){{
     body:JSON.stringify({{token:TOKEN,id:id}})}});
   load();
 }}
+let ADDCLIENTS=[];
+async function openAdd(){{
+  document.getElementById('addmsg').textContent='';
+  document.getElementById('addcf').style.display='flex';
+  const s=document.getElementById('addsel');
+  s.innerHTML='<option value="">Loading...</option>';
+  try{{
+    const r=await fetch('/admin/payments/clients?token='+encodeURIComponent(TOKEN));
+    const d=await r.json();
+    ADDCLIENTS=d.clients||[];
+    s.innerHTML = ADDCLIENTS.length
+      ? ADDCLIENTS.map(c=>'<option value="'+esc(c.client_id)+'">'+esc(c.name)+(c.outstanding>0?(' \\u00b7 \\u20b9'+inr(c.outstanding)):'')+'</option>').join('')
+      : '<option value="">No customers found</option>';
+  }}catch(e){{ s.innerHTML='<option value="">Could not load customers</option>'; }}
+}}
+function closeAdd(){{document.getElementById('addcf').style.display='none';}}
+function pickAdd(){{
+  const cid=document.getElementById('addsel').value;
+  if(!cid){{document.getElementById('addmsg').textContent=EN?'Pick a customer.':'Customer chunein.';return;}}
+  const c=ADDCLIENTS.find(x=>x.client_id===cid)||{{}};
+  CF={{mode:'promise', client_id:cid, name:c.name||''}};
+  closeAdd();
+  openCf((EN?'Enter payment':'Payment'), c.name||'', c.outstanding||'', 'Cash', today(),
+    (c.outstanding>0?((EN?'Full outstanding: ':'Poora baaki: ')+'\\u20b9'+inr(c.outstanding)):''));
+}}
 load();
 setInterval(load, 15000);   // reflect posted/failed status as the agent works
 </script>"""
@@ -4013,6 +4053,36 @@ async def admin_payments_data(token: str = Query(...)):
         "pending": pending_out,
         "deposit_ledgers": rq.get_deposit_ledgers(db, bid),
     }
+
+
+@router.get("/admin/payments/clients")
+async def admin_payments_clients(token: str = Query(...)):
+    """Party picker for the Payments tab's 'Add a payment' button: the shop's
+    customers with their current outstanding, most-owed first. Fetched lazily
+    when the owner opens the add popup, so the 15s Payments poll stays light."""
+    from app.services import names
+    biz = _biz_by_token(token)
+    db = require_db()
+    bid = biz["id"]
+    cl = (db.table("clients").select("id, name")
+          .eq("business_id", bid).limit(3000).execute()).data or []
+    owed: dict = {}
+    ob = (db.table("bills").select("client_id, outstanding")
+          .eq("business_id", bid)
+          .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+    for b in ob:
+        cid = b.get("client_id")
+        if cid:
+            owed[cid] = owed.get(cid, Decimal(0)) + Decimal(str(b.get("outstanding") or 0))
+    out = []
+    for c in cl:
+        nm = names.clean_display(c.get("name") or "")
+        if not nm:
+            continue
+        o = owed.get(c["id"], Decimal(0))
+        out.append({"client_id": c["id"], "name": nm, "outstanding": float(o)})
+    out.sort(key=lambda x: (-x["outstanding"], x["name"].lower()))
+    return {"clients": out}
 
 
 class PromiseActionPayload(BaseModel):
