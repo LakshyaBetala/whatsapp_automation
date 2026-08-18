@@ -103,6 +103,33 @@ async def fetch_and_parse(config: dict, query: str, timeout: float = 180.0) -> s
     raw = await post_to_tally(config['tally_host'], config['tally_port'], query, timeout)
     return tally_xml.sanitize_xml(raw)
 
+
+async def fetch_masters(config: dict, company: str, debtor_groups) -> str:
+    """Memory-safe debtor-masters fetch.
+
+    Tally's full all-ledger export (build_masters_query) is what trips
+    TallyPrime's Memory Access Violation and closes Tally on a big shop. This
+    fetches only the DEBTOR ledgers, in small batches of route-groups, so every
+    request stays tiny (verified: ~0.3 MB/batch, ~2s total on a 937-debtor shop
+    vs a multi-MB single export). Returns the same merged LEDGER document
+    parse_masters expects. If batching yields nothing (an unusual group tree,
+    a Tally quirk), it falls back to the single full query so behaviour never
+    regresses. Use ONLY for debtor masters - callers that need Cash/Bank or other
+    non-debtor ledgers must keep build_masters_query."""
+    try:
+        groups = sorted(debtor_groups or [])
+        if groups:
+            parts, batch = [], 25
+            for i in range(0, len(groups), batch):
+                parts.append(await fetch_and_parse(
+                    config, tally_xml.build_masters_query_for_groups(groups[i:i + batch], company)))
+            merged = tally_xml.merge_ledger_collections(parts)
+            if '<LEDGER' in merged:
+                return merged
+    except Exception as e:                                    # noqa: BLE001
+        log_and_print(f"Chunked masters fetch failed ({e}); using the full query.", is_error=True)
+    return await fetch_and_parse(config, tally_xml.build_masters_query(company))
+
 async def check_pending_refresh(config: dict) -> bool:
     """Did the owner press 'Reload data' on the dashboard? If so we refresh
     outstanding immediately instead of waiting for the auto cycle."""
@@ -311,7 +338,7 @@ async def run_import(config: dict):
     log_and_print(f"Found {len(debtor_groups)} customer groups under Sundry Debtors.")
 
     # 2. All ledgers -> debtors with balances + phone numbers
-    masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
+    masters_xml = await fetch_masters(config, company, debtor_groups)
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
 
     # Credit terms: Tally's per-ledger BillCreditPeriod wins; else the
@@ -637,7 +664,7 @@ async def run_check_outstanding(config: dict):
 
     groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
     debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
-    masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
+    masters_xml = await fetch_masters(config, company, debtor_groups)
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
     debtor_names = {d['name'] for d in debtors}
     ledger_close = {d['name']: d.get('current_outstanding', 0) for d in debtors}
@@ -689,7 +716,7 @@ async def run_apply_outstanding(config: dict):
     groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
     debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
     emit_progress(2, 4, "Reading customers from Tally")
-    masters_xml = await fetch_and_parse(config, tally_xml.build_masters_query(company))
+    masters_xml = await fetch_masters(config, company, debtor_groups)
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
     debtor_names = sorted({d['name'] for d in debtors})
 

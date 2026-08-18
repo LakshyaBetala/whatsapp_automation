@@ -141,8 +141,12 @@ def _phone_from_ledger(ledger: ET.Element) -> Optional[str]:
       5. the address lines (first number wins),
       6. otherwise no number.
     Covers every place a shop might have typed the customer's number."""
-    # 1. dedicated WhatsApp field, then 2. mobile, then 3. phone/contact
-    for tag in ('LEDGERWHATSAPP', 'LEDGERMOBILE', 'LEDGERPHONE', 'LEDGERCONTACT'):
+    # 1. dedicated WhatsApp field, then 2. mobile, then 3. phone/contact/fax.
+    # LedgerFax is included because a real mobile is sometimes typed into the fax
+    # slot (verified on a live shop: the party's only 10-digit mobile sat in
+    # LedgerFax while LedgerMobile held a truncated 9-digit typo). extract_indian_mobile
+    # still only accepts a genuine 6-9 mobile, so a real fax/landline is ignored.
+    for tag in ('LEDGERWHATSAPP', 'LEDGERMOBILE', 'LEDGERPHONE', 'LEDGERCONTACT', 'LEDGERFAX'):
         phone = extract_indian_mobile(ledger.findtext(tag, ''))
         if phone:
             return phone
@@ -196,17 +200,59 @@ def build_groups_query(company: str = "") -> str:
     return _collection_query('Group', ['Name', 'Parent'], company)
 
 
+_MASTERS_FIELDS = [
+    'Name', 'Parent', 'OpeningBalance', 'ClosingBalance',
+    'LedgerWhatsApp', 'LedgerMobile', 'LedgerPhone', 'LedgerContact', 'LedgerFax', 'Address',
+    'BillCreditPeriod', 'GUID',
+]
+
+
 def build_masters_query(company: str = "") -> str:
     """All ledgers with balances + contact + credit-period fields in one shot.
 
     GUID is Tally's own stable per-ledger id: it never changes when the shop
     renames the party or edits their number, so ASVA matches on it to update the
-    SAME customer instead of creating a duplicate (the 'Thilak vs Thialk' bug)."""
-    return _collection_query('Ledger', [
-        'Name', 'Parent', 'OpeningBalance', 'ClosingBalance',
-        'LedgerWhatsApp', 'LedgerMobile', 'LedgerPhone', 'LedgerContact', 'Address',
-        'BillCreditPeriod', 'GUID',
-    ], company)
+    SAME customer instead of creating a duplicate (the 'Thilak vs Thialk' bug).
+
+    Note: this fetches EVERY ledger (debtors, creditors, cash, tax, expenses...).
+    On a big company that full export is what trips TallyPrime's Memory Access
+    Violation and closes Tally. build_masters_query_for_groups (below) scopes the
+    export to the debtor groups only, in small batches, to avoid that - the agent
+    uses the chunked path and falls back to this single query if it yields nothing.
+    """
+    return _collection_query('Ledger', _MASTERS_FIELDS, company)
+
+
+def build_masters_query_for_groups(groups, company: str = "") -> str:
+    """Masters query scoped to ledgers whose PARENT is one of `groups` (a batch of
+    Sundry Debtors subgroups). Same fields as build_masters_query, but a much
+    smaller result set - fetching debtors group-batch by group-batch keeps every
+    response tiny so a large shop never hits Tally's Memory Access Violation.
+    Returns the same LEDGER shape parse_masters expects."""
+    sv_company = f'<SVCURRENTCOMPANY>{escape(company)}</SVCURRENTCOMPANY>' if company else ''
+    native = ''.join(f'<NATIVEMETHOD>{m}</NATIVEMETHOD>' for m in _MASTERS_FIELDS)
+    cond = ' OR '.join(f'$Parent = "{escape(g)}"' for g in groups) or '$$IsEmpty:$Name'
+    return f'''<ENVELOPE>
+    <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>COLLECTION</TYPE><ID>SaaSLedgers</ID></HEADER>
+    <BODY><DESC>
+      <STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{sv_company}</STATICVARIABLES>
+      <TDL><TDLMESSAGE>
+        <COLLECTION NAME="SaaSLedgers" ISMODIFY="No"><TYPE>Ledger</TYPE>{native}<FILTER>GrpFilter</FILTER></COLLECTION>
+        <SYSTEM TYPE="Formula" NAME="GrpFilter">{cond}</SYSTEM>
+      </TDLMESSAGE></TDL>
+    </DESC></BODY>
+  </ENVELOPE>'''
+
+
+def merge_ledger_collections(xml_parts: List[str]) -> str:
+    """Merge several COLLECTION responses' <LEDGER>..</LEDGER> blocks into one
+    envelope that parse_masters can consume unchanged. Used to reassemble the
+    group-batched masters fetch into a single masters document."""
+    blocks: List[str] = []
+    for x in (xml_parts or []):
+        blocks.extend(re.findall(r'<LEDGER[ >].*?</LEDGER>', x or '', re.S))
+    return ('<ENVELOPE><BODY><DATA><COLLECTION>'
+            + ''.join(blocks) + '</COLLECTION></DATA></BODY></ENVELOPE>')
 
 
 def build_vouchers_query(company: str = "") -> str:
@@ -479,6 +525,12 @@ def import_succeeded(response_text: str) -> bool:
         return int(m.group(1)) if m else 0
     created = _num('CREATED') + _num('ALTERED')
     errors = _num('ERRORS') + _num('EXCEPTIONS') + _num('LINEERROR')
+    # A <LINEERROR> often carries a text MESSAGE ("Could not find Ledger ...")
+    # rather than a count, so the digit-based _num above misses it. Treat any
+    # non-empty LINEERROR text as a failure so a rejected voucher is never
+    # reported to the owner as posted.
+    if re.search(r'<LINEERROR>\s*\S', response_text or '', re.IGNORECASE):
+        errors += 1
     return created >= 1 and errors == 0
 
 
