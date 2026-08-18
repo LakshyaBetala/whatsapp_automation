@@ -242,7 +242,8 @@
   <div id="side">
     <div id="brand"><img src="logo.png" alt="ASVA"><span class="wm">ASVA<small>RECOVERY CONTROL</small></span></div>
     <select id="cosel" title="Switch company" style="display:none;margin:0 12px 12px;padding:8px;border-radius:6px;background:#123524;color:#dfe9e2;border:1px solid #2c5c42;width:calc(100% - 24px);font-size:.9rem"></select>
-    <button class="nav on" data-v="dash">Dashboard<small>Parties, dues and bills</small></button>
+    <button class="nav on" data-v="today">Today<small>Paid, who to chase, cash</small></button>
+    <button class="nav" data-v="dash">Dashboard<small>Parties, dues and bills</small></button>
     <button class="nav" data-v="reminders">Reminders<small>Batches, time and holidays</small></button>
     <button class="nav" data-v="payments">Payments<small>Who paid, confirm to Tally</small></button>
     <button class="nav" data-v="analytics">Analytics<small>Your business numbers</small></button>
@@ -326,7 +327,14 @@
     </div>
     <div id="gnotice" style="display:none"></div>
     <div id="maincontent">
-    <div class="view on" id="v-dash">
+    <div class="view on" id="v-today">
+      <div class="grow" style="position:absolute;inset:0">
+        <webview id="wv-today" src="about:blank"></webview>
+        <div class="overlay" id="todayov">Starting ASVA... about 15 seconds. Keep this window open.</div>
+      </div>
+    </div>
+
+    <div class="view" id="v-dash">
       <div class="col">
         <div id="dashbanner" class="banner"></div>
         <div class="grow">
@@ -558,7 +566,7 @@ function setDot(id, ok) { const el = document.getElementById(id); if (el) { el.c
 function restart(name) { window.asva.restartService(name); }
 
 // ── UI language (persisted on this laptop) ────────────────────────────
-const WV = { 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-payments': 'paymentsUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
+const WV = { 'wv-today': 'todayUrl', 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-payments': 'paymentsUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
 function currentLang() { return localStorage.getItem('asva_lang') || 'english'; }
 function urlWithLang(url) { if (!url) return url; return url + (url.includes('?') ? '&' : '?') + 'lang=' + encodeURIComponent(currentLang()); }
 function applyLangButtons() {
@@ -884,6 +892,7 @@ applyTheme();
 function applyCompany(i) {
   const co = CONFIG.companies && CONFIG.companies[i];
   if (!co) return;
+  CONFIG.todayUrl = co.todayUrl;
   CONFIG.dashboardUrl = co.dashboardUrl;
   CONFIG.remindersUrl = co.remindersUrl;
   CONFIG.paymentsUrl = co.paymentsUrl;
@@ -1359,15 +1368,17 @@ window.asva.onStatus((s) => {
   const banner = document.getElementById('dashbanner');
   if (banner) banner.className = 'banner';
 
-  const ov = document.getElementById('dashov');
+  const ov = document.getElementById('todayov');
   if (s.backend) {
     window._backendDownSince = 0;
+    loadPage('wv-today', CONFIG.todayUrl);
     loadPage('wv-dash', CONFIG.dashboardUrl);
     loadPage('wv-reminders', CONFIG.remindersUrl);
     loadPage('wv-payments', CONFIG.paymentsUrl);
     loadPage('wv-analytics', CONFIG.analyticsUrl);
     loadPage('wv-accounts', CONFIG.accountsUrl);
-    if (loaded['wv-dash']) ov.classList.add('hide');
+    const dov = document.getElementById('dashov'); if (dov && loaded['wv-dash']) dov.classList.add('hide');
+    if (ov && loaded['wv-today']) ov.classList.add('hide');
     else if (ov) ov.textContent = 'Starting ASVA... one moment.';   // clear any old error text
   } else if (ov && !ov.classList.contains('hide')) {
     // Backend not reachable. Don't leave the hopeful "15 seconds" message up

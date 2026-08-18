@@ -55,6 +55,7 @@ app.on('web-contents-created', (e, contents) => {
 function pageUrls(backend, token) {
   const q = `?token=${encodeURIComponent(token)}`;
   return {
+    todayUrl: `${backend}/admin/today${q}`,
     dashboardUrl: `${backend}/admin${q}`,
     remindersUrl: `${backend}/admin/reminders${q}`,
     paymentsUrl: `${backend}/admin/payments${q}`,
@@ -178,7 +179,7 @@ function loadConfig() {
     // config missing/invalid - dashboard tab will show a helpful message
   }
   const base = token ? pageUrls(backend, token) : {
-    dashboardUrl: '', remindersUrl: '', paymentsUrl: '', analyticsUrl: '', accountsUrl: '',
+    todayUrl: '', dashboardUrl: '', remindersUrl: '', paymentsUrl: '', analyticsUrl: '', accountsUrl: '',
   };
   return {
     token,

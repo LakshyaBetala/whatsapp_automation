@@ -429,6 +429,7 @@ _NAV_CSS = """
 """
 
 _NAV_PAGES = [
+    ("today", "Today", "/admin/today"),
     ("dashboard", "Dashboard", "/admin"),
     ("reminders", "Reminders", "/admin/reminders"),
     ("payments", "Payments", "/admin/payments"),
@@ -3487,6 +3488,216 @@ _CSS = """
  .okmsg{color:#346538;font-weight:600;margin-left:10px}
  .hint{color:#787774;font-size:.86rem;line-height:1.5;margin-top:8px}
 """ + _NAV_CSS
+
+
+_TODAY_CSS = """
+ .hi{font-size:1.6rem;font-weight:700;letter-spacing:-.02em;margin:0}
+ .hd{color:#787774;font-size:.9rem;margin-top:2px}
+ .synp{display:inline-block;font-size:.74rem;font-weight:600;padding:3px 10px;border-radius:9999px;margin-top:8px}
+ .synp.ok{background:#EDF3EC;color:#346538}
+ .synp.stale{background:#FBF3DB;color:#956400}
+ .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:20px 0}
+ .hcard{background:#fff;border:1px solid #EAEAEA;border-radius:14px;padding:20px}
+ .hcard .l{color:#787774;font-size:.74rem;text-transform:uppercase;letter-spacing:.05em}
+ .hcard .n{font-size:2rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:6px;line-height:1}
+ .hcard .s{color:#787774;font-size:.82rem;margin-top:7px;line-height:1.4}
+ .hcard.accent{background:#EDF3EC;border-color:#cfe4d0}
+ .hcard .up{color:#346538;font-weight:600}
+ .hcard .dn{color:#9F2F2D;font-weight:600}
+ .sec{margin-top:26px}
+ .sec h2{font-size:1.05rem;font-weight:700;margin:0 0 4px;letter-spacing:-.01em}
+ .sec .sub{color:#787774;font-size:.84rem;margin-bottom:12px}
+ .clist{background:#fff;border:1px solid #EAEAEA;border-radius:14px;overflow:hidden}
+ .crow{display:flex;gap:12px;align-items:center;padding:13px 16px;border-bottom:1px solid #EAEAEA;flex-wrap:wrap}
+ .crow:last-child{border-bottom:0}
+ .crank{width:22px;height:22px;flex-shrink:0;border-radius:6px;background:#F7F6F3;color:#787774;font-size:.78rem;font-weight:700;display:flex;align-items:center;justify-content:center}
+ .cmain{flex:1;min-width:150px}
+ .cmain .nm{font-weight:600;font-size:.96rem}
+ .cmain .mt{color:#787774;font-size:.8rem;margin-top:2px;font-variant-numeric:tabular-nums}
+ .camt{font-weight:700;font-variant-numeric:tabular-nums;font-size:1rem;white-space:nowrap}
+ .late{display:inline-block;font-size:.72rem;font-weight:700;padding:1px 7px;border-radius:9999px;background:#FDEBEC;color:#9F2F2D;margin-left:6px}
+ .cacts{display:flex;gap:7px;flex-shrink:0}
+ .cacts a,.cacts button{font-size:.8rem;padding:7px 12px;border-radius:7px;text-decoration:none;cursor:pointer}
+ .cacts .rem{background:#0a7d33;color:#fff;border:0}
+ .cacts .op{background:#fff;color:#2F3437;border:1px solid #EAEAEA}
+ .cacts .op:hover{background:#f4f4f1}
+ .empty{color:#787774;padding:22px 16px;text-align:center;line-height:1.5}
+ .nudge{background:#FBF3DB;border:1px solid #f0e3b8;border-radius:12px;padding:16px 18px;margin-top:18px;color:#7a5c12;font-size:.9rem;line-height:1.5}
+ .nudge a{color:#956400;font-weight:700}
+ .flash{max-height:0;overflow:hidden;opacity:0;transition:all .25s ease;background:#EDF3EC;color:#346538;border-radius:10px;font-weight:600;padding:0 14px}
+ .flash.on{max-height:60px;opacity:1;padding:11px 14px;margin-top:12px}
+ .twocol{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+ @media(max-width:720px){.twocol{grid-template-columns:1fr}}
+"""
+
+
+@router.get("/admin/today", response_class=HTMLResponse)
+async def admin_today(token: str = Query(...), lang: str = Query("english")):
+    """The Today home: the single reason to open ASVA each morning. Answers
+    'did I get paid?' and 'who do I chase today?' in one glance, then hands the
+    owner one-tap actions on the ranked chase list. All numbers are honest -
+    built from the shop's own bills and booked receipts by app.services.today."""
+    biz = _biz_by_token(token)
+    en = _is_en(lang)
+    title = biz.get("business_name") or "ASVA"
+    body = """<div id="thead"><h1 class="hi">Loading...</h1></div>
+<div id="tflash" class="flash"></div>
+<div id="twrap"><div class="hcard" style="margin-top:18px">Loading your day...</div></div>
+<script>
+const TOKEN = __TOKEN__;
+const EN = __EN__;
+let T = null;
+function esc(s){ return String(s==null?'':s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+function fmt(n){ try{ return '\\u20b9'+Number(Math.round(n||0)).toLocaleString('en-IN'); }catch(e){ return '\\u20b9'+n; } }
+function short(n){ n=Number(n||0);
+  if(n>=10000000) return '\\u20b9'+(n/10000000).toFixed(n>=1e8?0:1).replace(/\\.0$/,'')+' Cr';
+  if(n>=100000) return '\\u20b9'+(n/100000).toFixed(n>=1e6?0:1).replace(/\\.0$/,'')+' L';
+  if(n>=1000) return '\\u20b9'+(n/1000).toFixed(n>=10000?0:1).replace(/\\.0$/,'')+' K';
+  return '\\u20b9'+Math.round(n).toLocaleString('en-IN'); }
+function flash(m){ const f=document.getElementById('tflash'); if(!f)return; f.textContent=m; f.classList.add('on'); setTimeout(()=>f.classList.remove('on'),4000); }
+async function load(){
+  try{
+    const r = await fetch('/admin/today/data?token='+encodeURIComponent(TOKEN));
+    if(!r.ok) throw new Error('http '+r.status);
+    T = await r.json();
+  }catch(e){
+    document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">Could not load. <a href="#" onclick="load();return false">Retry</a></div>';
+    return;
+  }
+  render();
+}
+function heroCard(label, big, sub, cls){
+  return '<div class="hcard '+(cls||'')+'"><div class="l">'+esc(label)+'</div><div class="n">'+big+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';
+}
+function render(){
+  const t=T; if(!t) return;
+  document.getElementById('thead').innerHTML =
+    '<h1 class="hi">'+esc(t.greeting)+'</h1>'+
+    '<div class="hd">'+esc(t.business)+' \\u00b7 '+esc(t.date_label)+'</div>'+
+    (t.sync? '<span class="synp '+(t.sync.stale?'stale':'ok')+'">'+esc(t.sync.label)+'</span>' : '');
+
+  // ── Hero: the morning brief ──────────────────────────────────────
+  const mi=t.money_in||{}, y=mi.yesterday||{}, td=mi.today||{};
+  const ci=t.coming_in||{}, rc=t.recovered||{}, os=t.outstanding||{}, ds=t.dso||{};
+  let miSub = td.count>0 ? ('Today so far: '+fmt(td.amount)+' \\u00b7 '+td.count+' payment'+(td.count>1?'s':'')) :
+              (y.count>0 ? (y.count+' payment'+(y.count>1?'s':'')+' booked') : 'No payments booked yet');
+  let ciSub = [];
+  if(ci.promised>0) ciSub.push(fmt(ci.promised)+' promised');
+  if(ci.due_soon>0) ciSub.push(fmt(ci.due_soon)+' due');
+  let rcSub = '';
+  if(rc.last_month>0){
+    rcSub = rc.up ? ('<span class="up">Up '+fmt(Math.abs(rc.delta))+'</span> vs last month')
+                  : ('<span class="dn">Down '+fmt(Math.abs(rc.delta))+'</span> vs last month');
+  } else { rcSub = 'in '+esc(rc.month_label||''); }
+  let dsSub = os.party_count>0 ? (os.party_count+' parties owe you') : 'across your open bills';
+
+  let hero = '<div class="hero">'+
+    heroCard(EN?'Money in yesterday':'Kal aaya', short(y.amount||0), miSub, '') +
+    heroCard('Coming in ('+(ci.days||7)+' days)', short(ci.total||0), (ciSub.length?ciSub.join(' + '):'Nothing promised yet'), '') +
+    heroCard('Recovered '+esc(rc.month_label||'this month'), short(rc.this_month||0), rcSub, 'accent') +
+    heroCard('Money stuck', (ds.days_stuck||0)+' days', dsSub, '') +
+  '</div>';
+
+  // ── Who to chase today (the daily action) ────────────────────────
+  const C=t.chase||[];
+  let chaseRows = C.length ? C.map((c,i)=>{
+    const late = c.days_late>0 ? '<span class="late">'+c.days_late+'d late</span>' : '';
+    const rem = c.has_number
+      ? '<button class="rem" onclick=\\'remind('+JSON.stringify(c.name)+',this)\\'>Remind</button>'
+      : '';
+    const op = '<a class="op" href="/admin/party?token='+encodeURIComponent(TOKEN)+'&client_id='+encodeURIComponent(c.client_id)+'&lang='+(EN?'english':'hinglish')+'">Open</a>';
+    return '<div class="crow"><div class="crank">'+(i+1)+'</div>'+
+      '<div class="cmain"><div class="nm">'+esc(c.display)+late+(c.has_number?'':' <span style="color:#956400;font-size:.75rem">no WhatsApp</span>')+'</div>'+
+      '<div class="mt">'+(c.days_late>0?(c.days_late+' days past due'):'')+'</div></div>'+
+      '<div class="camt">'+fmt(c.amount)+'</div>'+
+      '<div class="cacts">'+rem+op+'</div></div>';
+  }).join('') : '<div class="empty">Nothing overdue right now. When bills cross their due date, the ones worth chasing show here, biggest first.</div>';
+
+  let chaseHead = C.length
+    ? ('Top '+C.length+' by money at stake'+(t.chase_overdue_count>C.length?(' of '+t.chase_overdue_count+' overdue'):''))
+    : '';
+
+  // ── Promises: who said they will pay ─────────────────────────────
+  const PR=(t.promises&&t.promises.items)||[];
+  let promRows = PR.length ? PR.map(p=>(
+    '<div class="crow"><div class="cmain"><div class="nm">'+esc(p.display)+'</div>'+
+    (p.said?'<div class="mt">\\u201c'+esc(p.said)+'\\u201d</div>':'')+
+    (p.promise_date?'<div class="mt">By '+esc(p.promise_date)+'</div>':'')+'</div>'+
+    '<div class="cacts"><a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+(EN?'english':'hinglish')+'">Enter payment</a></div></div>'
+  )).join('') : '<div class="empty">No open promises. When a customer says they paid or gives a date, it shows here.</div>';
+
+  // ── Aging bars ───────────────────────────────────────────────────
+  const B=(ds.buckets)||[]; const maxB=Math.max(1,...B.map(x=>x.amount||0));
+  let ageRows = B.filter(b=>b.amount>0).map(b=>(
+    '<div class="age"><div class="lbl">'+esc(b.label)+'</div>'+
+    '<div class="barwrap"><i style="width:'+Math.max(3,Math.round((b.amount/maxB)*100))+'%"></i></div>'+
+    '<div class="amt">'+fmt(b.amount)+'</div></div>'
+  )).join('') || '<div class="empty">No open bills.</div>';
+
+  // ── No-number nudge (the 146 fix, framed kindly) ─────────────────
+  let nudge='';
+  const nn=(t.no_number&&t.no_number.count)||0;
+  if(nn>0){
+    nudge = '<div class="nudge"><b>'+nn+' customer'+(nn>1?'s':'')+' who owe you have no WhatsApp number.</b> '+
+      'ASVA can only remind the ones you can message. Add their numbers to reach more of your money. '+
+      '<a href="/admin?token='+encodeURIComponent(TOKEN)+'&lang='+(EN?'english':'hinglish')+'#import">Add numbers &rarr;</a></div>';
+  }
+
+  document.getElementById('twrap').innerHTML =
+    hero +
+    '<div class="sec"><h2>Who to chase today</h2><div class="sub">'+esc(chaseHead)+'</div><div class="clist">'+chaseRows+'</div></div>'+
+    nudge +
+    '<div class="twocol">'+
+      '<div class="sec"><h2>Said they will pay</h2><div class="sub">Following up automatically. Enter the payment when it lands.</div><div class="clist">'+promRows+'</div></div>'+
+      '<div class="sec"><h2>Where your money is stuck</h2><div class="sub">Outstanding by how far past due.</div><div class="card">'+ageRows+'</div></div>'+
+    '</div>';
+}
+async function remind(party, btn){
+  if(btn){ btn.disabled=true; btn.textContent='Sending...'; }
+  try{
+    const r=await fetch('/admin/send-now',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,party:party})});
+    const d=await r.json().catch(()=>({}));
+    if(d && d.wa_down){ flash('Shop WhatsApp not connected. Open WhatsApp Setup and scan the QR.'); }
+    else if(r.ok){ flash('\\u2713 Reminder sent to '+party+'.'); }
+    else { flash('Could not send. Try again.'); }
+  }catch(e){ flash('Could not send. Try again.'); }
+  if(btn){ btn.disabled=false; btn.textContent='Remind'; }
+}
+load();
+setInterval(load, 30000);
+</script>""".replace("__TOKEN__", json.dumps(token)).replace("__EN__", "true" if en else "false")
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<title>{title} - Today</title>{_FAVICON}'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}{_TODAY_CSS}</style>'
+        f'<div class="wrap">{_topnav(token, lang, "today")}{body}</div>',
+        en))
+
+
+@router.get("/admin/today/data")
+async def admin_today_data(token: str = Query(...)):
+    """JSON behind the Today home. Best-effort - always returns a usable shape."""
+    biz = _biz_by_token(token)
+    db = require_db()
+    from app.services import today as today_svc
+
+    data = today_svc.build_today(db, biz["id"], biz)
+
+    # Sync freshness pill (reuses the dashboard's own reading).
+    synced_dt = _last_synced_at(db, biz["id"])
+    label, _color = _tally_status(synced_dt)
+    stale = True
+    try:
+        if synced_dt is not None:
+            stale = synced_dt.astimezone(_TODAY_IST).date() != _dt.datetime.now(_TODAY_IST).date()
+    except Exception:
+        stale = True
+    data["sync"] = {"label": f"Tally: {label}", "stale": stale}
+    return data
+
+
+_TODAY_IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 
 
 def _fetch_paged(db, table, cols, biz_id, status_in=None):
