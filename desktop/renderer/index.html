@@ -971,6 +971,9 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.9.9': [
+    'Smoother updates: fixed the "ASVA cannot be closed" message that could appear while updating. ASVA now shuts its background parts down on its own and installs quietly - you no longer have to close anything by hand.',
+  ],
   '1.9.8': [
     'Who to chase is clearer: each customer now shows their phone number with a one-tap Call, right next to Remind.',
     'Add a missing number without leaving Today: for the customers who owe you but have no WhatsApp number, tap Add number and save it right there.',

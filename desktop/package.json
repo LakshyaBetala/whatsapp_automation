@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.9.8",
+  "version": "1.9.9",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "This update: a cleaner, sturdier Today screen.\nWho to chase now shows each customer's phone number with a one-tap Call, next to Remind.\nAdd a missing number right on Today: the moment you tap it, add the mobile for the customers who owe you but cannot be reached - no jumping to another screen.\nAccurate counts: Today only counts customers who OWE you and have no number (a handful), never every party in your books. Customers you marked do-not-chase no longer appear in the chase list.\nThe Today tab stays Today: opening a payment or a customer no longer leaves the Today screen stuck on another page.\nSturdier display: the page no longer goes blank on a hiccup - it keeps your last view and recovers on its own.\n\nAlso included from the previous update: the Today home itself; trade-based due dates (electricals 60 days) when Tally has none; a fairer reliability score where one late bill among many paid does not drag the customer down; a money-in alert when a customer says they paid; your WhatsApp login surviving updates; and a one-tap 'confirm your balance' you can send a customer at most once every 90 days."
+      "releaseNotes": "Smoother updates: fixed the \"ASVA cannot be closed\" message that could pop up while updating. ASVA now closes its background parts on its own and installs the update quietly, so you no longer have to close anything by hand.\n\nAlso in recent updates: a cleaner, sturdier Today screen - Who to chase shows each customer's phone number with one-tap Call next to Remind; add a missing number right on Today for the customers who owe you but have no WhatsApp; honest counts (only customers who OWE you and have no number, never every party); do-not-chase customers stay off the chase list; opening a payment no longer leaves Today stuck on another page; and the page recovers on its own instead of going blank. Plus trade-based due dates (electricals 60 days) when Tally has none, a fairer reliability score where one late bill among many paid does not drag a customer down, a money-in alert when a customer says they paid, your WhatsApp login surviving updates, and a one-tap 'confirm your balance' you can send at most once every 90 days."
     },
     "files": [
       "main.js",

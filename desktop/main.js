@@ -26,6 +26,8 @@ const USER_AGENT = `Mozilla/5.0 (compatible; ASVA-Desktop/${app.getVersion()}; +
 let mainWindow = null;
 let tray = null;
 app.isQuitting = false;
+let updateReady = false;      // an update is downloaded and waiting to install
+let autoUpdater = null;       // set in setupAutoUpdate; module scope so close/quit can apply it
 
 // ── Anti-blank-screen hardening ───────────────────────────────────────────
 // Budget shop laptops have flaky GPU drivers; hardware-accelerated Electron
@@ -424,6 +426,26 @@ function stopAll() {
   }
 }
 
+// Apply a downloaded update WITHOUT the "ASVA cannot be closed" installer prompt.
+// Two things caused that prompt: (1) the window's close-confirm dialog blocked the
+// installer's close request, and (2) wa_service runs as ASVA.exe (ELECTRON_RUN_AS_NODE),
+// so a non-silent installer saw a lingering ASVA process. Fix: mark quitting (so the
+// close-confirm is skipped), kill every child, give Windows a moment to reap them,
+// then run the installer SILENTLY so it force-closes instead of prompting.
+let _updateApplying = false;
+function applyUpdateAndQuit() {
+  if (_updateApplying) return;
+  _updateApplying = true;
+  app.isQuitting = true;
+  try { stopAll(); } catch (e) {}
+  setTimeout(() => {
+    try {
+      if (autoUpdater) autoUpdater.quitAndInstall(true, true);   // isSilent, isForceRunAfter
+      else app.quit();
+    } catch (e) { try { app.quit(); } catch (_) {} }
+  }, 1500);
+}
+
 // ── Health polling (done in main to avoid renderer CORS) ──────────────────
 function ping(url, cb) {
   let req;
@@ -640,6 +662,9 @@ function createWindow() {
   // stopped going.
   mainWindow.on('close', (e) => {
     if (app.isQuitting) return;                 // a real quit is already underway
+    // A downloaded update is waiting: closing = apply it. Never show the
+    // close-confirm here, or it blocks the updater ("ASVA cannot be closed").
+    if (updateReady) { e.preventDefault(); applyUpdateAndQuit(); return; }
     e.preventDefault();
     const { dialog } = require('electron');
     const choice = dialog.showMessageBoxSync(mainWindow, {
@@ -781,7 +806,6 @@ ipcMain.handle('set-language', (e, l) => {
 // every shop to update" into "one push to the i3 updates everyone".
 function setupAutoUpdate() {
   if (!app.isPackaged) return;               // dev has no installer to replace
-  let autoUpdater;
   try { ({ autoUpdater } = require('electron-updater')); }
   catch (e) { console.error('[update] electron-updater not available:', (e && e.message) || e); return; }
 
@@ -807,8 +831,10 @@ function setupAutoUpdate() {
     sendToWindow('update', { state: 'downloading', version: info && info.version, notes: notesOf(info) }));
   autoUpdater.on('download-progress', (p) =>
     sendToWindow('update', { state: 'downloading', percent: Math.round((p && p.percent) || 0) }));
-  autoUpdater.on('update-downloaded', (info) =>
-    sendToWindow('update', { state: 'ready', version: info && info.version, notes: notesOf(info) }));
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = true;                        // closing the window now applies it
+    sendToWindow('update', { state: 'ready', version: info && info.version, notes: notesOf(info) });
+  });
   autoUpdater.on('update-not-available', () => sendToWindow('update', { state: 'current' }));
   autoUpdater.on('error', (err) => {
     console.error('[update] error:', (err && err.message) || err);
@@ -816,7 +842,7 @@ function setupAutoUpdate() {
   });
   // The owner presses "Restart to update" -> apply now.
   ipcMain.handle('install-update', () => {
-    try { app.isQuitting = true; stopAll(); autoUpdater.quitAndInstall(); } catch (e) {}
+    try { applyUpdateAndQuit(); } catch (e) {}
     return true;
   });
 
