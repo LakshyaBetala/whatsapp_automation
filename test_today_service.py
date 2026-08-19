@@ -133,6 +133,27 @@ def test_build_today_snapshot_is_honest():
     assert snap["dso"]["days_stuck"] > 0
 
 
+def test_excluded_party_is_off_the_chase_list_and_nudge():
+    store = {
+        "bills": [
+            _bill(outstanding=90000, invoice_date="2026-06-01", due_date="2026-07-01",
+                  client_id="c1", clients={"name": "REGULAR", "whatsapp_number": None, "excluded": False}),
+            # Do-not-chase party who owes a lot and has no number: must be hidden.
+            _bill(outstanding=500000, invoice_date="2026-01-01", due_date="2026-02-01",
+                  client_id="cx", clients={"name": "DO NOT CHASE", "whatsapp_number": None, "excluded": True}),
+        ],
+        "tally_receipts": [], "payment_promises": [],
+    }
+    snap = today_svc.build_today(_DB(store), "b1", {"id": "b1", "business_name": "X"}, today=TODAY)
+    chase_ids = [c["client_id"] for c in snap["chase"]]
+    assert "cx" not in chase_ids                 # excluded never on the chase list
+    assert "c1" in chase_ids
+    assert snap["no_number"]["count"] == 1        # only the non-excluded ower counts
+    assert snap["chase"][0]["phone"] == ""        # no number -> empty dial string
+    # Outstanding total still reflects ALL money owed (excluded party still owes).
+    assert snap["outstanding"]["total"] == 590000
+
+
 def test_build_today_tolerates_empty_shop():
     db = _DB({"bills": [], "tally_receipts": [], "payment_promises": []})
     snap = today_svc.build_today(db, "b1", {"id": "b1", "business_name": "X"}, today=TODAY)

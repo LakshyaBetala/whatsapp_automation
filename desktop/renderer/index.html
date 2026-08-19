@@ -737,10 +737,48 @@ if (window.asva.onLang) window.asva.onLang((d) => {
 // pane with no recovery. Wire every webview so it reloads itself when its
 // process crashes, and retries a failed load a few seconds later. This is what
 // makes "the tab went blank" self-heal instead of needing an app restart.
+// ── Cross-tab navigation routing ──────────────────────────────────────────
+// A link inside one tab's page can point at ANOTHER tab's page (e.g. Today's
+// "Enter payment" -> Payments). Without this, that link navigates the CURRENT
+// webview, so the Today tab would start showing the Payments/Dashboard page and
+// stay stuck there. Instead: detect it, switch to the right tab, load the page
+// THERE, and reset the origin tab back to its own page.
+const ID2TAB = { 'wv-today': 'today', 'wv-dash': 'dash', 'wv-reminders': 'reminders',
+  'wv-payments': 'payments', 'wv-analytics': 'analytics', 'wv-accounts': 'accounts' };
+const TAB2ID = { today: 'wv-today', dash: 'wv-dash', reminders: 'wv-reminders',
+  payments: 'wv-payments', analytics: 'wv-analytics', accounts: 'wv-accounts' };
+function tabForUrl(u) {
+  try {
+    const p = new URL(u).pathname;
+    if (p === '/admin/today') return 'today';
+    if (p.indexOf('/admin/reminders') === 0) return 'reminders';
+    if (p.indexOf('/admin/payments') === 0) return 'payments';
+    if (p.indexOf('/admin/analytics') === 0) return 'analytics';
+    if (p.indexOf('/admin/accounts') === 0) return 'accounts';
+    // The party drill-down and setup live under the Dashboard tab.
+    if (p === '/admin' || p.indexOf('/admin/party') === 0 || p.indexOf('/admin/setup') === 0) return 'dash';
+  } catch (e) {}
+  return null;
+}
+function routeCrossTabNav(w, url) {
+  const target = tabForUrl(url);
+  if (!target) return;                               // external/unknown: leave it
+  const own = ID2TAB[w.id];
+  if (!own || target === own) return;                // same tab: normal drill-down
+  try { show(target); } catch (e) {}
+  const tid = TAB2ID[target];
+  if (tid) { const tw = document.getElementById(tid); if (tw) { loaded[tid] = true; tw.src = urlWithLang(url); } }
+  // Bounce the origin tab back to its own page so it never gets stuck showing
+  // another tab's content.
+  const key = WV[w.id]; const home = key && CONFIG ? CONFIG[key] : null;
+  if (home) setTimeout(() => { try { w.src = urlWithLang(home); } catch (e) {} }, 40);
+}
+
 const _failTries = {};
 function hardenWebview(w) {
   if (!w || w._hardened) return;
   w._hardened = true;
+  w.addEventListener('did-navigate', (e) => routeCrossTabNav(w, e.url));
   const recover = () => { try { if (w.src && w.src !== 'about:blank') w.reload(); } catch (e) {} };
   w.addEventListener('crashed', recover);
   w.addEventListener('render-process-gone', recover);
@@ -764,7 +802,7 @@ function loadPage(id, url) {
   if (url && !loaded[id]) { loaded[id] = true; const w = document.getElementById(id); hardenWebview(w); w.src = urlWithLang(url); }
 }
 function reloadAll() {
-  ['wv-dash', 'wv-reminders', 'wv-payments', 'wv-analytics', 'wv-accounts'].forEach(id => {
+  ['wv-today', 'wv-dash', 'wv-reminders', 'wv-payments', 'wv-analytics', 'wv-accounts'].forEach(id => {
     const w = document.getElementById(id);
     try { if (w && w.reload && loaded[id]) w.reload(); } catch (e) {}
   });
@@ -933,6 +971,13 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.9.8': [
+    'Who to chase is clearer: each customer now shows their phone number with a one-tap Call, right next to Remind.',
+    'Add a missing number without leaving Today: for the customers who owe you but have no WhatsApp number, tap Add number and save it right there.',
+    'Honest counts: Today counts only customers who OWE you and have no number (a handful) - never every party in your books. Customers you set to do-not-chase no longer show up on the chase list.',
+    'The Today tab stays Today: opening a payment or a customer no longer leaves the Today screen stuck showing another page.',
+    'Sturdier display: if something hiccups, the page keeps your last view and recovers on its own instead of going blank.',
+  ],
   '1.9.7': [
     'A new Today home: the first thing you see each morning is your day - money that came in, who to chase (biggest first, with how reliably each one pays), how much cash is likely this week, and how many days your money is stuck on average.',
     'ASVA now knows your trade: pick your line (electricals, chemicals, hardware and more) once in setup, and customers who have no credit period in Tally get sensible due dates automatically - electricals starts at 60 days. A real credit period in Tally always still wins.',

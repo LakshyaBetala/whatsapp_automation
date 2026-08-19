@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.9.7",
+  "version": "1.9.8",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "A new Today home: the first thing you see each morning is your day - money that came in, who to chase (biggest first, with how reliably each one pays), how much cash is likely this week, and how many days your money is stuck on average.\nASVA now knows your trade: pick your line (electricals, chemicals, hardware and more) once in setup, and customers with no credit period in Tally get sensible due dates automatically - electricals starts at 60 days. A real Tally credit period always still wins.\nFairer reliability: a customer is rated only on their own record with you, and one late bill among many paid on time no longer drags their score down.\nMoney-in alert: the moment a customer says they paid, your computer shows a notification so you never miss it.\nYour WhatsApp stays connected through updates: ASVA keeps a safe copy of your login so an update never quietly logs you out.\nAsk a customer to confirm their balance in one tap from their page (at most once every 90 days, only when you press it)."
+      "releaseNotes": "This update: a cleaner, sturdier Today screen.\nWho to chase now shows each customer's phone number with a one-tap Call, next to Remind.\nAdd a missing number right on Today: the moment you tap it, add the mobile for the customers who owe you but cannot be reached - no jumping to another screen.\nAccurate counts: Today only counts customers who OWE you and have no number (a handful), never every party in your books. Customers you marked do-not-chase no longer appear in the chase list.\nThe Today tab stays Today: opening a payment or a customer no longer leaves the Today screen stuck on another page.\nSturdier display: the page no longer goes blank on a hiccup - it keeps your last view and recovers on its own.\n\nAlso included from the previous update: the Today home itself; trade-based due dates (electricals 60 days) when Tally has none; a fairer reliability score where one late bill among many paid does not drag the customer down; a money-in alert when a customer says they paid; your WhatsApp login surviving updates; and a one-tap 'confirm your balance' you can send a customer at most once every 90 days."
     },
     "files": [
       "main.js",

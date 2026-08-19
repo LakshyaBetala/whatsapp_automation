@@ -57,7 +57,7 @@ def _fetch_open_bills(db, business_id: str) -> list[dict]:
         try:
             resp = (db.table("bills")
                     .select("outstanding, invoice_date, due_date, client_id, "
-                            "clients(name, whatsapp_number)")
+                            "clients(name, whatsapp_number, excluded)")
                     .eq("business_id", business_id)
                     .in_("status", ["pending", "partial", "overdue"])
                     .range(start, start + page - 1).execute())
@@ -70,6 +70,17 @@ def _fetch_open_bills(db, business_id: str) -> list[dict]:
             break
         start += page
     return out
+
+
+def _dial_number(raw: str | None) -> str:
+    """A clean 10-digit dialling number (strip the 91 country code), or '' when
+    there is none - so the chase list can offer tap-to-call."""
+    t = "".join(ch for ch in (raw or "") if ch.isdigit())
+    if len(t) == 12 and t.startswith("91"):
+        t = t[2:]
+    elif len(t) == 13 and t.startswith("091"):
+        t = t[3:]
+    return t if len(t) == 10 else ""
 
 
 def _receipts_sum(db, business_id: str, day: _dt.date) -> tuple[float, int]:
@@ -108,6 +119,10 @@ def build_today(db, business_id: str, business: dict, *,
             continue
         party_ids_with_outstanding.add(cid)
         cl = b.get("clients") or {}
+        # Do-not-chase (excluded) parties never appear on the chase list or in the
+        # "add a number" nudge - the owner has deliberately taken them off.
+        if cl.get("excluded"):
+            continue
         phone = cl.get("whatsapp_number")
         if not phone:
             no_number_ids.add(cid)
@@ -141,6 +156,7 @@ def build_today(db, business_id: str, business: dict, *,
             "amount": float(e["total"]),
             "days_late": e["days_late"],
             "has_number": bool(e["phone"]),
+            "phone": _dial_number(e["phone"]),   # clean 10-digit for a tap-to-call
         }
         # Reliability grade for the shown parties only (accurate: uses the party's
         # own bills + promises + receipts). Best-effort - never breaks the page.
@@ -171,6 +187,16 @@ def build_today(db, business_id: str, business: dict, *,
               "recovered_last_month": Decimal(0), "outstanding": Decimal(0)}
     this_m = float(pf.get("recovered_this_month") or 0)
     last_m = float(pf.get("recovered_last_month") or 0)
+
+    # ── Owe-money-but-no-number: the actual parties, so the owner can add a
+    # number for each right on Today (biggest owed first). This is the honest,
+    # actionable list - NOT "every party with no number".
+    no_number_parties = sorted(
+        ({"client_id": cid,
+          "display": names.clean_display(per_party[cid]["name"] or "") or (per_party[cid]["name"] or "Customer"),
+          "amount": float(per_party[cid]["total"])}
+         for cid in no_number_ids if cid in per_party),
+        key=lambda x: x["amount"], reverse=True)[:50]
 
     # ── Open promises (who said they'd pay) ───────────────────────────────
     proms = []
@@ -225,5 +251,5 @@ def build_today(db, business_id: str, business: dict, *,
         "chase": chase,
         "chase_overdue_count": len(overdue),
         "promises": {"count": len(rows), "items": proms},
-        "no_number": {"count": len(no_number_ids)},
+        "no_number": {"count": len(no_number_ids), "parties": no_number_parties},
     }

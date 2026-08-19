@@ -2294,19 +2294,25 @@ async def admin_missing_numbers(token: str = Query(...)):
     db = require_db()
     bid = biz["id"]
     clients = (db.table("clients")
-               .select("id, name")
-               .eq("business_id", bid).is_("whatsapp_number", "null").execute()).data or []
-    if not clients:
+               .select("id, name, whatsapp_number, excluded")
+               .eq("business_id", bid).execute()).data or []
+    # Only parties with NO usable number (null OR blank) and not marked do-not-chase.
+    nonum = {c["id"]: c for c in clients
+             if not (c.get("whatsapp_number") or "").strip() and not c.get("excluded")}
+    if not nonum:
         return {"parties": [], "count": 0}
-    ids = [c["id"] for c in clients]
     owed: dict = {}
     bills = (db.table("bills").select("client_id, outstanding")
-             .eq("business_id", bid).in_("client_id", ids)
+             .eq("business_id", bid).in_("client_id", list(nonum.keys()))
              .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
     for b in bills:
-        owed[b["client_id"]] = owed.get(b["client_id"], 0.0) + float(b.get("outstanding") or 0)
-    out = [{"client_id": c["id"], "name": names.clean_display(c.get("name") or "") or "Customer",
-            "outstanding": round(owed.get(c["id"], 0.0), 2)} for c in clients]
+        cid = b.get("client_id")
+        if cid in nonum:
+            owed[cid] = owed.get(cid, 0.0) + float(b.get("outstanding") or 0)
+    # Accurate + actionable: ONLY parties who actually OWE money (owed > 0). A
+    # party with no number who owes nothing is not a problem to nag the owner about.
+    out = [{"client_id": cid, "name": names.clean_display(nonum[cid].get("name") or "") or "Customer",
+            "outstanding": round(amt, 2)} for cid, amt in owed.items() if amt > 0]
     out.sort(key=lambda x: x["outstanding"], reverse=True)
     return {"parties": out, "count": len(out)}
 
@@ -3614,6 +3620,21 @@ _TODAY_CSS = """
  .flash.on{max-height:60px;opacity:1;padding:11px 14px;margin-top:12px}
  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:18px}
  @media(max-width:720px){.twocol{grid-template-columns:1fr}}
+ .cacts .call{background:#EDF3EC;color:#346538;border:1px solid #cfe4d0;font-variant-numeric:tabular-nums}
+ .cacts .call:hover{background:#e2eee2}
+ .cacts .warn{background:#FBF3DB;color:#7a5c12;border:1px solid #f0e3b8}
+ .nudgebtn{background:#956400;color:#fff;border:0;border-radius:8px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer;margin-left:4px}
+ .nudgebtn:hover{background:#7a5203}
+ .cfback{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;align-items:center;justify-content:center}
+ .cfbox{background:#fff;border-radius:14px;padding:22px 24px;max-width:460px;width:92%;max-height:88vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+ .cfbox h3{margin:0 0 6px;font-size:1.15rem}
+ button.ghost{background:#fff;color:#2F3437;border:1px solid #EAEAEA;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer}
+ button.ghost:hover{background:#f4f4f1}
+ .anrow{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #EAEAEA;flex-wrap:wrap}
+ .anrow:last-child{border-bottom:0}
+ .anmain{flex:1;min-width:120px}
+ .aninp{width:150px;font:inherit;padding:8px 10px;border:1px solid #EAEAEA;border-radius:7px;font-variant-numeric:tabular-nums}
+ .saved{color:#346538;font-weight:700}
 """
 
 
@@ -3629,6 +3650,17 @@ async def admin_today(token: str = Query(...), lang: str = Query("english")):
     body = """<div id="thead"><h1 class="hi">Loading...</h1></div>
 <div id="tflash" class="flash"></div>
 <div id="twrap"><div class="hcard" style="margin-top:18px">Loading your day...</div></div>
+
+<div id="addnum" class="cfback" style="display:none">
+  <div class="cfbox">
+    <h3>Add WhatsApp numbers</h3>
+    <div class="hint" style="margin:2px 0 10px">These customers owe you but have no number saved. Add a 10-digit mobile to start reminding them. A number in Tally always wins later.</div>
+    <div id="addnumlist"></div>
+    <div style="margin-top:16px;display:flex;gap:10px">
+      <button class="ghost" onclick="closeAddNum()">Done</button>
+    </div>
+  </div>
+</div>
 <script>
 const TOKEN = __TOKEN__;
 const EN = __EN__;
@@ -3641,16 +3673,34 @@ function short(n){ n=Number(n||0);
   if(n>=1000) return '\\u20b9'+(n/1000).toFixed(n>=10000?0:1).replace(/\\.0$/,'')+' K';
   return '\\u20b9'+Math.round(n).toLocaleString('en-IN'); }
 function flash(m){ const f=document.getElementById('tflash'); if(!f)return; f.textContent=m; f.classList.add('on'); setTimeout(()=>f.classList.remove('on'),4000); }
+let LOADED_ONCE = false;
 async function load(){
+  let data;
   try{
     const r = await fetch('/admin/today/data?token='+encodeURIComponent(TOKEN));
     if(!r.ok) throw new Error('http '+r.status);
-    T = await r.json();
+    data = await r.json();
   }catch(e){
-    document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">Could not load. <a href="#" onclick="load();return false">Retry</a></div>';
+    // Never blank the page: if we already showed something, keep it and just
+    // flash; only show the retry card on the very first failed load.
+    if(!LOADED_ONCE)
+      document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">Could not load your day. <a href="#" onclick="load();return false">Retry</a></div>';
+    else flash('Could not refresh just now. Showing your last view.');
     return;
   }
-  render();
+  T = data;
+  safeRender();
+}
+// A render error must NEVER leave a blank screen. Catch it, keep the last good
+// view (or a retry card), and report - so a bad data shape can't white-screen.
+function safeRender(){
+  try{ render(); LOADED_ONCE = true; }
+  catch(e){
+    try{ console.error('today render failed', e); }catch(_ ){}
+    if(!LOADED_ONCE)
+      document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">Something went wrong drawing this page. <a href="#" onclick="load();return false">Reload</a></div>';
+    else flash('Display hiccup - press Refresh view if it looks off.');
+  }
 }
 function heroCard(label, big, sub, cls){
   return '<div class="hcard '+(cls||'')+'"><div class="l">'+esc(label)+'</div><div class="n">'+big+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';
@@ -3690,15 +3740,21 @@ function render(){
     const late = c.days_late>0 ? '<span class="late">'+c.days_late+'d late</span>' : '';
     const grade = (c.grade && c.grade!=='new')
       ? ' <span class="rel" style="background:'+esc(c.grade_color||'#6b7770')+'22;color:'+esc(c.grade_color||'#6b7770')+'">'+esc(c.grade_label||'')+'</span>' : '';
-    const rem = c.has_number
-      ? '<button class="rem" onclick=\\'remind('+JSON.stringify(c.name)+',this)\\'>Remind</button>'
-      : '';
-    const op = '<a class="op" href="/admin/party?token='+encodeURIComponent(TOKEN)+'&client_id='+encodeURIComponent(c.client_id)+'&lang='+(EN?'english':'hinglish')+'">Open</a>';
+    // With a number: tap-to-call (shows the number) + Remind. Without: one tap to
+    // add the number, right here (no leaving the page).
+    let acts;
+    if(c.has_number){
+      const callLbl = c.phone ? ('Call '+c.phone) : 'Call';
+      acts = '<a class="op call" href="tel:'+esc(c.phone||'')+'">'+esc(callLbl)+'</a>'+
+             '<button class="rem" onclick=\\'remind('+JSON.stringify(c.name)+',this)\\'>Remind</button>';
+    } else {
+      acts = '<button class="op warn" onclick=\\'openAddNum('+JSON.stringify(c.client_id)+')\\'>Add number</button>';
+    }
     return '<div class="crow"><div class="crank">'+(i+1)+'</div>'+
-      '<div class="cmain"><div class="nm">'+esc(c.display)+late+grade+(c.has_number?'':' <span style="color:#956400;font-size:.75rem">no WhatsApp</span>')+'</div>'+
-      '<div class="mt">'+(c.days_late>0?(c.days_late+' days past due'):'')+'</div></div>'+
+      '<div class="cmain"><div class="nm">'+esc(c.display)+late+grade+'</div>'+
+      '<div class="mt">'+(c.days_late>0?(c.days_late+' days past due'):'')+(c.has_number?'':' \\u00b7 no WhatsApp number')+'</div></div>'+
       '<div class="camt">'+fmt(c.amount)+'</div>'+
-      '<div class="cacts">'+rem+op+'</div></div>';
+      '<div class="cacts">'+acts+'</div></div>';
   }).join('') : '<div class="empty">Nothing overdue right now. When bills cross their due date, the ones worth chasing show here, biggest first.</div>';
 
   let chaseHead = C.length
@@ -3722,13 +3778,15 @@ function render(){
     '<div class="amt">'+fmt(b.amount)+'</div></div>'
   )).join('') || '<div class="empty">No open bills.</div>';
 
-  // ── No-number nudge (the 146 fix, framed kindly) ─────────────────
+  // ── No-number nudge: ONLY the parties who OWE and have no number (not
+  // "every party with no number"). Opens an inline add-number panel - no leaving
+  // this page.
   let nudge='';
   const nn=(t.no_number&&t.no_number.count)||0;
   if(nn>0){
-    nudge = '<div class="nudge"><b>'+nn+' customer'+(nn>1?'s':'')+' who owe you have no WhatsApp number.</b> '+
-      'ASVA can only remind the ones you can message. Add their numbers to reach more of your money. '+
-      '<a href="/admin?token='+encodeURIComponent(TOKEN)+'&lang='+(EN?'english':'hinglish')+'#import">Add numbers &rarr;</a></div>';
+    nudge = '<div class="nudge"><b>'+nn+' customer'+(nn>1?'s':'')+' who owe you can\\u2019t be reached on WhatsApp.</b> '+
+      'Add their number to start reminders and recover more. '+
+      '<button class="nudgebtn" onclick="openAddNum()">Add numbers</button></div>';
   }
 
   document.getElementById('twrap').innerHTML =
@@ -3750,6 +3808,36 @@ async function remind(party, btn){
     else { flash('Could not send. Try again.'); }
   }catch(e){ flash('Could not send. Try again.'); }
   if(btn){ btn.disabled=false; btn.textContent='Remind'; }
+}
+// ── Inline "add a number" (never leaves this page) ───────────────────
+function openAddNum(focusId){
+  const P=((T&&T.no_number&&T.no_number.parties)||[]);
+  const box=document.getElementById('addnumlist');
+  if(!P.length){ box.innerHTML='<div class="empty">Everyone who owes you has a number. Nice.</div>'; }
+  else{
+    box.innerHTML = P.map(p=>(
+      '<div class="anrow" data-id="'+esc(p.client_id)+'">'+
+        '<div class="anmain"><div class="nm">'+esc(p.display)+'</div><div class="mt">owes '+fmt(p.amount)+'</div></div>'+
+        '<input class="aninp" inputmode="numeric" maxlength="10" placeholder="10-digit mobile" '+(p.client_id===focusId?'autofocus':'')+'>'+
+        '<button class="rem" onclick=\\'saveNum('+JSON.stringify(p.client_id)+',this)\\'>Save</button>'+
+      '</div>'
+    )).join('');
+  }
+  document.getElementById('addnum').style.display='flex';
+}
+function closeAddNum(){ document.getElementById('addnum').style.display='none'; load(); }
+async function saveNum(clientId, btn){
+  const row=btn.closest('.anrow'); const inp=row.querySelector('.aninp');
+  const num=(inp.value||'').replace(/\\D/g,'');
+  if(num.length!==10 || !'6789'.includes(num[0])){ inp.style.borderColor='#c0392b'; inp.focus(); return; }
+  btn.disabled=true; btn.textContent='...';
+  try{
+    const r=await fetch('/admin/set-number',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,client_id:clientId,number:num})});
+    if(r.ok){ row.innerHTML='<div class="anmain"><div class="nm">'+esc(row.querySelector('.nm')?row.querySelector('.nm').textContent:'')+'</div></div><span class="saved">\\u2713 Saved</span>';
+      T.no_number.parties=(T.no_number.parties||[]).filter(x=>x.client_id!==clientId);
+      T.no_number.count=Math.max(0,(T.no_number.count||1)-1); }
+    else { btn.disabled=false; btn.textContent='Save'; inp.style.borderColor='#c0392b'; }
+  }catch(e){ btn.disabled=false; btn.textContent='Save'; }
 }
 load();
 setInterval(load, 30000);
