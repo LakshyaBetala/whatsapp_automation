@@ -36,6 +36,25 @@ def inr(amount) -> str:
     return ("-" if n < 0 else "") + "₹" + s
 
 
+def balance_confirm_text(shop: str, amount, *, en: bool = False) -> str:
+    """A gentle, payment-free balance-confirmation for a customer. Asks them to
+    confirm what they owe (reconciliation), NOT to pay - so it never reads as yet
+    another dues reminder. Owner-initiated and rare by design."""
+    amt = inr(amount)
+    shop = shop or "your supplier"
+    if en:
+        return (f"Namaste, this is a message from {shop}.\n\n"
+                f"As per our records, {amt} is outstanding in your name. "
+                f"Could you please confirm if this is correct?\n\n"
+                f"If it matches your books, reply OK. If it looks different, "
+                f"just reply and let us know - we will check it together. Thank you.")
+    return (f"Namaste, {shop} ki taraf se.\n\n"
+            f"Hamare hisaab se aap ke naam par abhi {amt} baaki hai. "
+            f"Kya yeh sahi hai?\n\n"
+            f"Aap ke hisaab se theek ho to OK bhej dijiye. Alag lage to reply "
+            f"karke bataiye - hum saath me check kar lenge. Dhanyavaad.")
+
+
 def apply_discount(amount, pct, language: str = "hinglish"):
     """Given an outstanding `amount` and an early-payment discount `pct`,
     return (pay_amount, discount_line).

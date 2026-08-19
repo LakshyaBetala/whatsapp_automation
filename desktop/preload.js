@@ -41,4 +41,6 @@ contextBridge.exposeInMainWorld('asva', {
   changeCompany: (name) => ipcRenderer.invoke('change-company', name),
   // Real sync progress: {done, total, label} while Tally is being read.
   onSyncProgress: (cb) => ipcRenderer.on('sync-progress', (e, d) => cb(d)),
+  // Clicking a money-in notification asks the app to switch tabs: {tab}.
+  onFocusTab: (cb) => ipcRenderer.on('focus-tab', (e, d) => cb(d)),
 });

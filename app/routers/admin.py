@@ -2189,6 +2189,72 @@ async def admin_send_now(payload: SendNowPayload):
     return {"sent": ok, "detail": reply[:160] if reply else ""}
 
 
+class ConfirmBalancePayload(BaseModel):
+    token: str
+    client_id: str
+
+
+@router.post("/admin/confirm-balance")
+async def admin_confirm_balance(payload: ConfirmBalancePayload):
+    """Owner asks ONE customer to confirm their outstanding ('sahi hai?'). This is
+    the only ASVA message aimed at a customer other than bills/reminders, so it is
+    deliberately owner-initiated (never automatic) and deduped to at most once per
+    90 days per party - it must never feel like spam. The customer's reply lands
+    in the owner's normal inbox view; ASVA does not auto-reply."""
+    from app.services import whatsapp, templates
+    from app.models import MessageType, Plan, Lang
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    bid = biz["id"]
+    cr = (db.table("clients")
+          .select("id, name, whatsapp_number, language, last_balance_confirm_at")
+          .eq("id", payload.client_id).eq("business_id", bid).limit(1).execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="party not found")
+    client = cr.data[0]
+    if not client.get("whatsapp_number"):
+        return {"ok": False, "reason": "no_number",
+                "detail": "This customer has no WhatsApp number. Add one first."}
+
+    # Dedup: never ask the same customer more than once in 90 days.
+    last = client.get("last_balance_confirm_at")
+    if last:
+        try:
+            when = _dt.datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+            if (_dt.datetime.now(_dt.timezone.utc) - when).days < 90:
+                return {"ok": False, "reason": "recent",
+                        "detail": "Already asked this customer within the last 90 days."}
+        except (TypeError, ValueError):
+            pass
+
+    outstanding = 0.0
+    ob = (db.table("bills").select("outstanding")
+          .eq("business_id", bid).eq("client_id", client["id"])
+          .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
+    outstanding = float(sum(Decimal(str(b.get("outstanding") or 0)) for b in ob))
+    if outstanding <= 0:
+        return {"ok": False, "reason": "nothing_due",
+                "detail": "This customer has no outstanding to confirm."}
+
+    en = _is_en(client.get("language") or biz.get("msg_language") or "hinglish")
+    text = templates.balance_confirm_text(biz.get("business_name") or "", outstanding, en=en)
+    try:
+        res = await whatsapp.send_message(
+            business_id=bid, to_number=client["whatsapp_number"], message_text=text,
+            plan=Plan(biz.get("plan", "starter")), message_type=MessageType.balance_confirm,
+            client_id=client["id"], language=Lang.hi, channel="shop")
+    except Exception as e:
+        log.exception("confirm-balance send failed for %s", client.get("name"))
+        return {"ok": False, "reason": "send_failed", "detail": str(e)[:120]}
+    sent = bool(res and res.get("sent") is not False)
+    if sent:
+        db.table("clients").update(
+            {"last_balance_confirm_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        ).eq("id", client["id"]).execute()
+    return {"ok": sent, "sent": sent, "outstanding": outstanding,
+            "detail": "Balance-confirm sent." if sent else "Could not send right now."}
+
+
 class SetNumberPayload(BaseModel):
     token: str
     client_id: str
@@ -3210,6 +3276,11 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
       <div class="hint">{'This party is excluded: no reminders, and not shown in your chase list.' if is_excl else 'If this party will never pay, exclude them so they stop appearing in your chase list.'}</div></div>
     <button id="excltoggle" class="{'primary' if is_excl else 'danger'}" onclick="toggleExcl()">{'Bring back' if is_excl else 'Exclude'}</button>
   </div>
+  {'''<div class="remrow" style="margin-top:12px;padding-top:12px;border-top:1px solid #eee">
+    <div>Confirm balance with customer
+      <div class="hint">Ask this customer to confirm their outstanding ("sahi hai?"). Sent once (not more than every 90 days), only when you press it. Their reply comes to you; ASVA does not auto-reply.</div></div>
+    <button id="cfbal" class="ntbtn" onclick="confirmBalance()">Ask to confirm</button>
+  </div>''' if phone else ''}
   {batch_html}
 </div>
 
@@ -3405,6 +3476,20 @@ async function saveParty() {{
   const phone = document.getElementById('pm_phone').value.trim();
   if (!name) {{ alert('Enter the party name.'); return; }}
   await ntPost('/admin/party/edit', {{token: TOKEN, client_id: CID, name: name, whatsapp_number: phone}});
+}}
+async function confirmBalance() {{
+  const b = document.getElementById('cfbal'); if (!b) return;
+  if (!confirm('Send a balance-confirm message to this customer now?')) return;
+  b.disabled = true; b.textContent = 'Sending...';
+  let d = {{}};
+  try {{
+    const r = await fetch('/admin/confirm-balance', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID}})}});
+    d = await r.json().catch(() => ({{}}));
+  }} catch (e) {{ d = {{}}; }}
+  b.disabled = false;
+  if (d && d.ok) {{ b.textContent = 'Sent \\u2713'; }}
+  else {{ b.textContent = 'Ask to confirm'; alert((d && d.detail) || 'Could not send right now.'); }}
 }}
 const _pmSave = document.getElementById('pm_save'); if (_pmSave) _pmSave.onclick = saveParty;
 async function delParty() {{
@@ -4303,6 +4388,39 @@ async def admin_payments_clients(token: str = Query(...)):
         out.append({"client_id": c["id"], "name": nm, "outstanding": float(o)})
     out.sort(key=lambda x: (-x["outstanding"], x["name"].lower()))
     return {"clients": out}
+
+
+@router.get("/admin/notifications")
+async def admin_notifications(token: str = Query(...), since: str = Query("")):
+    """Money-in signal for the desktop 'ping'. Returns payment captures (customer
+    said they paid / sent a screenshot) newer than `since` - the moment a shop
+    owner most wants a nudge. The desktop app polls this and fires a native
+    notification for each new one. Best-effort - always returns a usable shape."""
+    biz = _biz_by_token(token)
+    db = require_db()
+    now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    events: list = []
+    try:
+        q = (db.table("pending_receipts")
+             .select("id, party_display, party_ledger, amount, created_at, status")
+             .eq("business_id", biz["id"])
+             .in_("status", ["pending", "confirmed"])
+             .order("created_at", desc=True).limit(20))
+        if since:
+            q = q.gt("created_at", since)
+        rows = q.execute().data or []
+        for r in rows:
+            events.append({
+                "id": r.get("id"),
+                "party": r.get("party_display") or r.get("party_ledger") or "A customer",
+                "amount": float(r.get("amount") or 0),
+                "created_at": r.get("created_at"),
+            })
+    except Exception:
+        log.debug("notifications fetch failed", exc_info=True)
+    # Oldest-first so the app shows them in the order they arrived.
+    events.reverse()
+    return {"now": now_iso, "events": events, "count": len(events)}
 
 
 class PromiseActionPayload(BaseModel):

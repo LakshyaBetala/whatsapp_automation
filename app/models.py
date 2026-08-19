@@ -45,6 +45,7 @@ class MessageType(str, Enum):
     welcome = "welcome"
     owner_alert = "owner_alert"
     bot_reply = "bot_reply"
+    balance_confirm = "balance_confirm"
 
 
 class SyncType(str, Enum):

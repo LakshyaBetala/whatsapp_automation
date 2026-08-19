@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.9.6",
+  "version": "1.9.7",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "Add a payment yourself: a new Add a payment button on the Payments tab records a payment for any customer, not only the ones who message you. You still confirm the amount and post it into Tally in one tap.\nQuieter and safer: if you do not open ASVA for a few days it pauses on its own and sends nothing, then picks up where it left off when you reopen it. A customer who asks to stop stays stopped until they ask again.\nReminders now go out steadily through the day instead of in a burst, which keeps your own WhatsApp number safe.\nPayments capture themselves more reliably, and a blurry or missing payment screenshot never drops a payment.\nA cleaner phone app with a Chase-today view."
+      "releaseNotes": "A new Today home: the first thing you see each morning is your day - money that came in, who to chase (biggest first, with how reliably each one pays), how much cash is likely this week, and how many days your money is stuck on average.\nASVA now knows your trade: pick your line (electricals, chemicals, hardware and more) once in setup, and customers with no credit period in Tally get sensible due dates automatically - electricals starts at 60 days. A real Tally credit period always still wins.\nFairer reliability: a customer is rated only on their own record with you, and one late bill among many paid on time no longer drags their score down.\nMoney-in alert: the moment a customer says they paid, your computer shows a notification so you never miss it.\nYour WhatsApp stays connected through updates: ASVA keeps a safe copy of your login so an update never quietly logs you out.\nAsk a customer to confirm their balance in one tap from their page (at most once every 90 days, only when you press it)."
     },
     "files": [
       "main.js",

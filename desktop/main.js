@@ -2,7 +2,7 @@
 // Supervises the backend + both WhatsApp services + the Tally watcher as
 // child processes (replacing START.bat and its cmd windows), and shows the
 // dashboard / QR setup / status in one window with a tray icon.
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification } = require('electron');
 const { spawn, spawnSync } = require('child_process');
 const http = require('http');
 const https = require('https');
@@ -479,6 +479,62 @@ function parseWa(ok, body) {
 // adds the version/machine and keeps last_seen fresh even if Tally is closed.
 let SERVER_VERSION = '';
 let WA_READY = null;   // shop WhatsApp connected? (reported to the health center)
+function httpGetJson(url, cb) {
+  let req;
+  try {
+    const u = new URL(url);
+    req = httpMod(url).request({
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname + u.search,
+      method: 'GET', timeout: 8000,
+      headers: { 'User-Agent': USER_AGENT },
+    }, (res) => {
+      let body = '';
+      res.on('data', (d) => (body += d));
+      res.on('end', () => { let j = {}; try { j = JSON.parse(body); } catch (e) {} cb(res.statusCode === 200, j); });
+    });
+  } catch (e) { return cb(false, {}); }
+  req.on('error', () => cb(false, {}));
+  req.on('timeout', () => { req.destroy(); cb(false, {}); });
+  req.end();
+}
+
+// ── Money-in ping ─────────────────────────────────────────────────────────
+// A shop owner's strongest habit trigger is "you got paid". The backend flags a
+// payment the moment a customer says they paid / sends a screenshot; we poll for
+// those and fire a native notification. Clicking it opens the Payments tab.
+// lastMoneySince starts at the server's clock (set on the first poll) so we
+// never replay old captures as a burst of pings when the app launches.
+let lastMoneySince = null;
+function pollMoneyIn() {
+  if (!CONFIG.token) return;
+  const since = lastMoneySince ? `&since=${encodeURIComponent(lastMoneySince)}` : '';
+  httpGetJson(`${CONFIG.backendUrl}/admin/notifications?token=${encodeURIComponent(CONFIG.token)}${since}`,
+    (ok, j) => {
+      if (!ok || !j) return;
+      if (j.now) lastMoneySince = j.now;         // advance the watermark
+      const events = Array.isArray(j.events) ? j.events : [];
+      if (!events.length) return;
+      if (!Notification || !Notification.isSupported || !Notification.isSupported()) return;
+      for (const e of events) {
+        try {
+          const amt = e.amount ? ('₹' + Number(e.amount).toLocaleString('en-IN')) : '';
+          const n = new Notification({
+            title: amt ? `Money in: ${amt}` : 'A customer says they paid',
+            body: `${e.party || 'A customer'} - open Payments to check and post to Tally.`,
+            silent: false,
+          });
+          n.on('click', () => {
+            try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch (_) {}
+            sendToWindow('focus-tab', { tab: 'payments' });
+          });
+          n.show();
+        } catch (_) { /* a failed ping must never crash the app */ }
+      }
+    });
+}
+
 function sendHeartbeat() {
   if (!CONFIG.token) return;
   try {
@@ -789,6 +845,9 @@ if (!app.requestSingleInstanceLock()) {
     // Heartbeat once the backend is up, then every 30 min.
     setTimeout(sendHeartbeat, 25000);
     setInterval(sendHeartbeat, 30 * 60 * 1000);
+    // Money-in ping: prime the watermark, then poll for new payment captures.
+    setTimeout(pollMoneyIn, 30000);
+    setInterval(pollMoneyIn, 25000);
     setupAutoUpdate();
   });
   // Window closed = ASVA closed. Stop everything and exit (no tray-only ghost).

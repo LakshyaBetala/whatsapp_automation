@@ -30,7 +30,7 @@ do $$ begin
   create type message_type as enum (
     'invoice', 'reminder', 'payment_confirmation', 'eod_digest',
     'post_payment_pitch', 'low_stock', 'monthly_pnl', 'welcome',
-    'owner_alert', 'bot_reply'
+    'owner_alert', 'bot_reply', 'balance_confirm'
   );
 exception when duplicate_object then null; end $$;
 

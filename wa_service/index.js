@@ -67,6 +67,34 @@ const WA_CHANNEL = process.env.WA_CHANNEL || 'shop';
 // login next to this file, so the i3 bot service is unchanged.
 const AUTH_ROOT = process.env.WA_AUTH_DIR || __dirname;
 const AUTH_DIR = path.join(AUTH_ROOT, '.baileys_auth', `session-${SESSION_ID}`);
+// A known-good snapshot of the session. The desktop app force-kills wa_service
+// (taskkill /F) on every auto-update; if that lands mid-saveCreds() the Baileys
+// auth files tear and the next launch cannot resume -> a QR appears and the shop
+// silently un-links ("session drops after each update"). We snapshot the session
+// whenever it is cleanly connected, and restore that snapshot instead of wiping
+// when the primary is corrupt or a stream error would otherwise force a re-scan.
+const AUTH_BAK = AUTH_DIR + '.bak';
+let restoredFromBackup = false;   // restore at most once per process, then trust it
+function _credsOk(dir) {
+    try { JSON.parse(fs.readFileSync(path.join(dir, 'creds.json'), 'utf8')); return true; }
+    catch (e) { return false; }
+}
+function backupAuth() {
+    try {
+        if (!_credsOk(AUTH_DIR)) return;
+        fs.rmSync(AUTH_BAK, { recursive: true, force: true });
+        fs.cpSync(AUTH_DIR, AUTH_BAK, { recursive: true });
+    } catch (e) { /* best-effort: a missing backup only costs one re-scan */ }
+}
+function restoreAuthFromBackup() {
+    try {
+        if (!_credsOk(AUTH_BAK)) return false;
+        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+        fs.cpSync(AUTH_BAK, AUTH_DIR, { recursive: true });
+        console.log('Restored WhatsApp session from last-good backup (no re-scan needed).');
+        return true;
+    } catch (e) { return false; }
+}
 
 // Silent pino-compatible logger (Baileys requires one; we don't want its noise).
 function mkLogger() {
@@ -304,6 +332,10 @@ async function start() {
     const myGen = ++gen;   // this socket's generation; stale events are dropped
     try {
         await loadBaileys();   // dynamic ESM import; idempotent, safe every start()
+        // Torn-write recovery: if the primary session is corrupt (e.g. killed
+        // mid-save on an auto-update) but a good backup exists, restore it so we
+        // resume WITHOUT a re-scan instead of showing a fresh QR.
+        if (!_credsOk(AUTH_DIR) && restoreAuthFromBackup()) restoredFromBackup = true;
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
         registered = !!(state.creds && state.creds.registered);
         const version = await waWebVersion();
@@ -359,6 +391,9 @@ async function start() {
                 reconnectFails = 0;
                 badSessionFails = 0;
                 console.log('WhatsApp CONNECTED (Baileys). Ready.');
+                // Snapshot this known-good session so the next auto-update can
+                // recover from a torn creds write without a re-scan.
+                setTimeout(backupAuth, 3000);
             }
             if (connection === 'close') {
                 clientReady = false;
@@ -382,7 +417,10 @@ async function start() {
                 if (code === DisconnectReason.loggedOut) {
                     // 401: genuinely unlinked from the phone (or phone offline
                     // 14+ days). Only THIS wipes - reconnecting would loop forever.
+                    // Wipe the backup too, so a stale snapshot can't resurrect a
+                    // session the owner deliberately unlinked.
                     try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
+                    try { fs.rmSync(AUTH_BAK, { recursive: true, force: true }); } catch (e) {}
                     registered = false;
                     reconnectFails = 0;
                     console.log('Logged out from the phone: session wiped, a fresh QR will appear.');
@@ -403,7 +441,17 @@ async function start() {
                         scheduleRestart(delay);
                         return;
                     }
+                    // Before wiping, try the last-good backup once: a torn write
+                    // from an update-time kill shows up as a persistent 500.
+                    if (!restoredFromBackup && restoreAuthFromBackup()) {
+                        restoredFromBackup = true;
+                        badSessionFails = 0;
+                        console.log('Repeated 500s - restored last-good session, retrying without a re-scan.');
+                        scheduleRestart(2000);
+                        return;
+                    }
                     try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
+                    try { fs.rmSync(AUTH_BAK, { recursive: true, force: true }); } catch (e) {}
                     registered = false;
                     reconnectFails = 0;
                     badSessionFails = 0;

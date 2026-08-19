@@ -722,6 +722,11 @@ function setLang(l) {
 }
 // The heartbeat tells us the server's saved language; on a fresh/re-paired laptop
 // adopt it so the app + chat stay in step without the owner re-choosing.
+// A money-in notification was clicked in the OS: jump to the tab it names.
+if (window.asva.onFocusTab) window.asva.onFocusTab((d) => {
+  const tab = (d && d.tab) === 'payments' ? 'payments' : 'today';
+  try { show(tab); } catch (e) {}
+});
 if (window.asva.onLang) window.asva.onLang((d) => {
   const l = d && d.language;
   if ((l === 'english' || l === 'hinglish') && l !== currentLang()) setLang(l);
@@ -928,6 +933,14 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '1.9.7': [
+    'A new Today home: the first thing you see each morning is your day - money that came in, who to chase (biggest first, with how reliably each one pays), how much cash is likely this week, and how many days your money is stuck on average.',
+    'ASVA now knows your trade: pick your line (electricals, chemicals, hardware and more) once in setup, and customers who have no credit period in Tally get sensible due dates automatically - electricals starts at 60 days. A real credit period in Tally always still wins.',
+    'Fairer reliability: a customer is rated only on their own record with you, and one late bill among many paid on time no longer drags their score down.',
+    'Money-in alert: the moment a customer says they paid, your computer shows a notification, so you never miss it.',
+    'Your WhatsApp stays connected through updates: ASVA now keeps a safe copy of your login so an update never quietly logs you out.',
+    'Ask a customer to confirm their balance in one tap from their page (sent at most once every 90 days, only when you press it).',
+  ],
   '1.9.6': [
     'Add a payment yourself: a new “+ Add a payment” button on the Payments tab records a payment for any customer, not only the ones who message you. You still confirm the amount and post it into Tally in one tap.',
     'Quieter and safer: if you do not open ASVA for a few days it pauses on its own and sends nothing, then picks up where it left off when you reopen it. A customer who asks to stop stays stopped until they ask again.',
