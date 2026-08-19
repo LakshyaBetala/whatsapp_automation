@@ -81,6 +81,39 @@ def test_receipts_totals_are_exact_no_fabricated_avg_days():
     assert "avg_days_to_pay" not in sc      # never fabricated
 
 
+def test_one_late_bill_among_many_paid_does_not_tank():
+    # The owner's rule: paid many, missed one -> stays Reliable. 9 not-due bills,
+    # 1 very overdue (70d), and a strong booked-payment history.
+    bills = [{"outstanding": 5000, "invoice_date": "2026-08-05", "due_date": "2026-09-05"}
+             for _ in range(9)]
+    bills.append({"outstanding": 5000, "invoice_date": "2026-05-01", "due_date": "2026-06-01"})  # 70d late
+    sc = _sc(
+        bills=bills,
+        receipts=[{"amount": 1000, "receipt_date": f"2026-0{m}-01"} for m in range(3, 8)])  # 5 payments
+    assert sc["grade"] == "reliable"       # NOT risky, despite one 70-day-old bill
+    assert sc["overdue_count"] == 1
+    assert sc["max_days_late"] == 70
+
+
+def test_mostly_overdue_with_little_history_is_risky():
+    # More bad than good -> the ratio does not rescue.
+    bills = [{"outstanding": 5000, "invoice_date": "2026-05-01", "due_date": "2026-06-01"}  # 70d
+             for _ in range(5)]
+    sc = _sc(bills=bills, receipts=[{"amount": 1000, "receipt_date": "2026-07-01"}])  # 1 payment
+    assert sc["grade"] == "risky"
+
+
+def test_very_old_straggler_with_good_history_is_watch_not_hidden():
+    # Great payer but one bill 120d old -> surfaced as Watch (not Reliable, not Risky).
+    bills = [{"outstanding": 5000, "invoice_date": "2026-08-05", "due_date": "2026-09-05"}
+             for _ in range(9)]
+    bills.append({"outstanding": 5000, "invoice_date": "2026-03-01", "due_date": "2026-04-01"})  # 131d
+    sc = _sc(
+        bills=bills,
+        receipts=[{"amount": 1000, "receipt_date": f"2026-0{m}-01"} for m in range(3, 8)])
+    assert sc["grade"] == "watch"
+
+
 def test_scorecard_text_is_cleanly_spaced():
     sc = _sc(bills=[{"outstanding": 5000, "invoice_date": "2026-05-01", "due_date": "2026-06-01"}])
     txt = scorecard.scorecard_text(sc, "Ramesh")

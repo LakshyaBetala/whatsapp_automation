@@ -149,6 +149,18 @@ def _verify_token(business_id: uuid.UUID, agent_token: str):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent_token")
     return db
 
+
+def _biz_default_credit_days(db, business_id) -> int:
+    """The shop's fallback credit period (trade category / explicit override) for
+    parties with no Tally BillCreditPeriod. Best-effort -> 30."""
+    from app.models import resolve_default_credit_days
+    try:
+        r = (db.table("businesses").select("category, default_credit_days")
+             .eq("id", str(business_id)).limit(1).execute()).data
+        return resolve_default_credit_days(r[0] if r else None)
+    except Exception:
+        return 30
+
 @router.get("/pending-refresh")
 async def pending_refresh(business_id: uuid.UUID, agent_token: str):
     """Agent polls this each watch tick. Returns whether the owner pressed
@@ -313,6 +325,7 @@ async def import_outstanding(payload: TallyImportPayload):
     version time out the agent)."""
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
+    biz_cd = _biz_default_credit_days(db, biz)   # trade-category fallback credit period
     _sync_company_name(db, biz, payload.company_name)
 
     clients_created = 0
@@ -369,8 +382,9 @@ async def import_outstanding(payload: TallyImportPayload):
                     # day-one blast; the owner can pause any party.
                     "reminders_enabled": True,
                 }
-                if credit_days:
-                    row["credit_days"] = credit_days
+                # Tally credit period wins; else the shop's trade-category default
+                # (never leave it null - due dates must be category-correct).
+                row["credit_days"] = credit_days or biz_cd
                 new_rows.append(row)
                 if phone:
                     phones_added += 1
@@ -383,9 +397,10 @@ async def import_outstanding(payload: TallyImportPayload):
                 if phone and phone != existing.get("whatsapp_number"):
                     updates["whatsapp_number"] = phone
                     phones_added += 1
-                # Adopt Tally credit terms only while the client still has
-                # the untouched default (30) - manual edits win
-                if credit_days and existing.get("credit_days", 30) == 30 and credit_days != 30:
+                # Adopt Tally credit terms only while the client still has an
+                # untouched fallback (null or the trade-category default) - a real
+                # Tally period or a manual edit always wins.
+                if credit_days and existing.get("credit_days") in (None, biz_cd) and credit_days != existing.get("credit_days"):
                     updates["credit_days"] = credit_days
                 if updates:
                     db.table("clients").update(updates).eq("id", existing["id"]).execute()
@@ -455,6 +470,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     instead of 2 lookups per voucher - Tokyo latency budget."""
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
+    biz_cd = _biz_default_credit_days(db, biz)   # trade-category fallback credit period
     _sync_company_name(db, biz, payload.company_name)
     # Liveness for the ops health monitor: the watcher posts here every ~60s.
     from app.services import license as _lic
@@ -508,7 +524,8 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                 invoice_date = date.fromisoformat(v.date)
                 if not existing_bill:
                     # New bill insert - due_date = invoice_date + client credit period
-                    credit_days = client.get("credit_days") or 30
+                    # (Tally BillCreditPeriod, else the shop's trade-category default).
+                    credit_days = client.get("credit_days") or biz_cd
                     due_date = invoice_date + timedelta(days=credit_days)
                     inserted_bill = db.table("bills").insert({
                         "business_id": biz,

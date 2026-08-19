@@ -68,22 +68,48 @@ def _days_between(a: _dt.date, iso) -> int | None:
         return None
 
 
-def _grade(max_days_late: int, broken: int, kept: int,
-           payments_count: int, open_count: int) -> str:
-    """Transparent, terms-adjusted, conservative. Never labels a no-history party
-    as bad; never calls a no-history party 'reliable' either."""
-    has_history = (kept + broken + payments_count) > 0
-    level = 0                                   # 0 reliable, 1 watch, 2 risky
-    if max_days_late > LATE_RISKY_DAYS:
-        level = 2
-    elif max_days_late > LATE_WATCH_DAYS:
-        level = 1
-    if broken >= 2:
-        level = max(level, 2)
-    elif broken >= 1:
-        level = max(level, 1)
-    if level == 0 and not has_history:
-        return GRADE_NEW                        # nothing overdue + no track record
+def compute_grade(*, open_count: int, overdue_count: int, max_days_late: int,
+                  broken: int, kept: int, payments_count: int,
+                  days_since_last_payment: int | None) -> str:
+    """Terms-adjusted, PROPORTION-based reliability. The core fairness rule the
+    owner asked for: one late bill among many paid on time must NOT drop the
+    grade. So lateness is judged by the SHARE of a party's bills that are overdue,
+    not by their single worst bill - and a recent payment rescues an old straggler.
+
+    Inputs are all provable internal signals (no invented "avg days to pay"):
+      open_count / overdue_count : how many open bills, and how many are past due
+                                   (due_date already includes the credit period).
+      max_days_late              : the oldest bill's days past due (context only).
+      broken / kept              : recorded promise outcomes.
+      payments_count             : receipts ASVA booked for this party.
+      days_since_last_payment    : recency of the last booked receipt.
+    """
+    # Severity of the WORST open bill (absolute, terms-adjusted lateness) and the
+    # broken-promise signal set the starting level.
+    sev = 2 if max_days_late > LATE_RISKY_DAYS else (1 if max_days_late > LATE_WATCH_DAYS else 0)
+    brk = 2 if broken >= 2 else (1 if broken >= 1 else 0)
+    level = max(sev, brk)                        # 0 reliable, 1 watch, 2 risky
+
+    # No overdue bill and no track record at all -> New (never graded bad).
+    if level == 0 and overdue_count == 0 and payments_count == 0 and kept == 0 and broken == 0:
+        return GRADE_NEW
+
+    # Fairness rescue (the rule the owner asked for): a PROVEN paying pattern -
+    # real receipts and/or kept promises heavily outweighing overdue bills and
+    # broken promises - means one late bill among many must NOT tank the grade.
+    # Only a genuine payment history (good > 0) can pull the level down; a party
+    # with no proof of payment is still judged by how late their bills are.
+    good = payments_count + kept                 # bills they actually cleared / kept
+    bad = overdue_count + broken                 # current problems
+    if good > 0:
+        ratio = good / (good + bad) if (good + bad) else 1.0
+        if ratio >= 0.8 and broken < 2:
+            # Mostly good -> Reliable, but keep a VERY old straggler visible as Watch
+            # instead of hiding it entirely.
+            level = 1 if (max_days_late > 90 and overdue_count > 0) else 0
+        elif ratio >= 0.5 and broken < 2:
+            level = min(level, 1)
+
     return [GRADE_RELIABLE, GRADE_WATCH, GRADE_RISKY][level]
 
 
@@ -91,13 +117,17 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" + ("" if n == 1 else "s")
 
 
-def _reasons(grade: str, open_count: int, max_days_late: int, oldest_age: int,
-             kept: int, broken: int, payments_count: int, last_payment) -> list[str]:
+def _reasons(grade: str, open_count: int, overdue_count: int, max_days_late: int,
+             oldest_age: int, kept: int, broken: int, payments_count: int,
+             last_payment) -> list[str]:
     if grade == GRADE_NEW:
         return ["Not enough payment history yet"]
     out: list[str] = []
-    if max_days_late > 0:
-        out.append(f"{_plural(open_count, 'open bill')}, oldest {_plural(max_days_late, 'day')} past due")
+    if overdue_count > 0:
+        # Name the SHARE so the owner sees why one late bill among many is fine.
+        share = (f"{overdue_count} of {open_count} bills overdue"
+                 if open_count != overdue_count else f"{_plural(open_count, 'open bill')} overdue")
+        out.append(f"{share}, oldest {_plural(max_days_late, 'day')} past due")
     elif open_count > 0:
         out.append(f"{_plural(open_count, 'open bill')}, none overdue")
     else:
@@ -129,6 +159,7 @@ def build_scorecard(db, business_id: str, client: dict, *,
     except Exception:
         open_bills = []
     open_count = 0
+    overdue_count = 0
     open_outstanding = Decimal(0)
     max_days_late = 0
     oldest_age = 0
@@ -139,6 +170,8 @@ def build_scorecard(db, business_id: str, client: dict, *,
         open_count += 1
         open_outstanding += out
         late = _days_between(today, b.get("due_date")) if b.get("due_date") else None
+        if late is not None and late > 0:
+            overdue_count += 1
         if late is not None and late > max_days_late:
             max_days_late = late
         age = _days_between(today, b.get("invoice_date")) if b.get("invoice_date") else None
@@ -179,14 +212,21 @@ def build_scorecard(db, business_id: str, client: dict, *,
     payments_count = len(receipts)
     total_recovered = sum((_d(r.get("amount")) for r in receipts), Decimal(0))
     last_payment_date = receipts[0].get("receipt_date") if receipts else None
+    days_since_last_payment = (_days_between(today, last_payment_date)
+                               if last_payment_date else None)
 
-    grade = _grade(max_days_late, broken, kept, payments_count, open_count)
+    grade = compute_grade(
+        open_count=open_count, overdue_count=overdue_count,
+        max_days_late=max_days_late, broken=broken, kept=kept,
+        payments_count=payments_count,
+        days_since_last_payment=days_since_last_payment)
     return {
         "grade": grade,
         "grade_label": _LABEL[grade],
         "badge": _BADGE[grade],
         "color": _COLOR[grade],
         "open_count": open_count,
+        "overdue_count": overdue_count,
         "open_outstanding": open_outstanding,
         "max_days_late": max_days_late,
         "oldest_age_days": oldest_age,
@@ -195,8 +235,8 @@ def build_scorecard(db, business_id: str, client: dict, *,
         "payments_count": payments_count,
         "total_recovered": total_recovered,
         "last_payment_date": last_payment_date,
-        "reasons": _reasons(grade, open_count, max_days_late, oldest_age,
-                            kept, broken, payments_count, last_payment_date),
+        "reasons": _reasons(grade, open_count, overdue_count, max_days_late,
+                            oldest_age, kept, broken, payments_count, last_payment_date),
     }
 
 

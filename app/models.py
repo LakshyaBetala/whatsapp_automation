@@ -89,6 +89,58 @@ PLAN_LIMITS: dict[Plan, dict[str, int]] = {
     Plan.max: {"debtors": 5000, "messages": 40000, "clients": 1000000, "price": 0, "bot": 1, "daily_cap": 300},
 }
 
+# ── Trade categories -> default credit period ─────────────────────────────
+# Tally rarely carries a per-ledger credit period, so when it is missing ASVA
+# falls back to the norm for the shop's trade (owner picks it once at setup and
+# can override the number). A REAL Tally BillCreditPeriod always wins per party.
+# Keys are the stored values; the labels are what the owner sees. "other" (and a
+# blank/unknown category) defaults to 30 days. These are sensible starting points
+# for Indian wholesale distribution, not hard rules - the owner can change the
+# number, and Tally overrides per party.
+CATEGORY_CREDIT_DAYS: dict[str, int] = {
+    "electricals": 60,   # lighting / electrical goods - 2 months is normal
+    "chemicals": 45,
+    "hardware": 45,      # building hardware, sanitary, paints
+    "pharma": 30,        # medical / pharma distribution - faster cycle
+    "textiles": 60,      # cloth / garments - longer credit
+    "fmcg": 15,          # groceries / fast-moving - short credit
+    "other": 30,
+}
+
+# Owner-facing labels for the trade picker (order preserved for the UI).
+CATEGORY_LABELS: dict[str, str] = {
+    "electricals": "Electricals & lighting",
+    "chemicals": "Chemicals",
+    "hardware": "Hardware / sanitary / paints",
+    "pharma": "Pharma / medical",
+    "textiles": "Textiles / garments",
+    "fmcg": "FMCG / groceries",
+    "other": "Other",
+}
+
+DEFAULT_CREDIT_DAYS = 30
+
+
+def credit_days_for_category(category: str | None) -> int:
+    """The fallback credit period for a trade. Unknown/blank -> 30 ('other')."""
+    return CATEGORY_CREDIT_DAYS.get((category or "").strip().lower(), DEFAULT_CREDIT_DAYS)
+
+
+def resolve_default_credit_days(business: dict | None) -> int:
+    """The effective fallback credit period for a shop: an explicit
+    default_credit_days wins; else the trade category's norm; else 30.
+    Used everywhere a party has no Tally BillCreditPeriod."""
+    if not business:
+        return DEFAULT_CREDIT_DAYS
+    explicit = business.get("default_credit_days")
+    try:
+        if explicit is not None and int(explicit) > 0:
+            return int(explicit)
+    except (TypeError, ValueError):
+        pass
+    return credit_days_for_category(business.get("category"))
+
+
 # Owner-facing plan labels (the enum values stay stable in the DB).
 PLAN_LABELS: dict[Plan, str] = {
     Plan.starter: "Basic",

@@ -37,8 +37,15 @@ async def import_outstanding(
     """
     db = require_db()
 
-    # Fetch the default credit_days from the DB (30 if not set)
-    DEFAULT_CREDIT_DAYS = 30
+    # The shop's fallback credit period: trade-category default (or explicit
+    # override), used for any party with no Tally BillCreditPeriod. 30 if unknown.
+    from app.models import resolve_default_credit_days
+    try:
+        _bizrow = (db.table("businesses").select("category, default_credit_days")
+                   .eq("id", business_id).limit(1).execute()).data
+        DEFAULT_CREDIT_DAYS = resolve_default_credit_days(_bizrow[0] if _bizrow else None)
+    except Exception:
+        DEFAULT_CREDIT_DAYS = 30
 
     clients_created = 0
     bills_imported = 0

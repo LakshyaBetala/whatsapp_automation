@@ -3516,6 +3516,7 @@ _TODAY_CSS = """
  .cmain .mt{color:#787774;font-size:.8rem;margin-top:2px;font-variant-numeric:tabular-nums}
  .camt{font-weight:700;font-variant-numeric:tabular-nums;font-size:1rem;white-space:nowrap}
  .late{display:inline-block;font-size:.72rem;font-weight:700;padding:1px 7px;border-radius:9999px;background:#FDEBEC;color:#9F2F2D;margin-left:6px}
+ .rel{display:inline-block;font-size:.7rem;font-weight:700;padding:1px 8px;border-radius:9999px;margin-left:6px;vertical-align:middle}
  .cacts{display:flex;gap:7px;flex-shrink:0}
  .cacts a,.cacts button{font-size:.8rem;padding:7px 12px;border-radius:7px;text-decoration:none;cursor:pointer}
  .cacts .rem{background:#0a7d33;color:#fff;border:0}
@@ -3602,12 +3603,14 @@ function render(){
   const C=t.chase||[];
   let chaseRows = C.length ? C.map((c,i)=>{
     const late = c.days_late>0 ? '<span class="late">'+c.days_late+'d late</span>' : '';
+    const grade = (c.grade && c.grade!=='new')
+      ? ' <span class="rel" style="background:'+esc(c.grade_color||'#6b7770')+'22;color:'+esc(c.grade_color||'#6b7770')+'">'+esc(c.grade_label||'')+'</span>' : '';
     const rem = c.has_number
       ? '<button class="rem" onclick=\\'remind('+JSON.stringify(c.name)+',this)\\'>Remind</button>'
       : '';
     const op = '<a class="op" href="/admin/party?token='+encodeURIComponent(TOKEN)+'&client_id='+encodeURIComponent(c.client_id)+'&lang='+(EN?'english':'hinglish')+'">Open</a>';
     return '<div class="crow"><div class="crank">'+(i+1)+'</div>'+
-      '<div class="cmain"><div class="nm">'+esc(c.display)+late+(c.has_number?'':' <span style="color:#956400;font-size:.75rem">no WhatsApp</span>')+'</div>'+
+      '<div class="cmain"><div class="nm">'+esc(c.display)+late+grade+(c.has_number?'':' <span style="color:#956400;font-size:.75rem">no WhatsApp</span>')+'</div>'+
       '<div class="mt">'+(c.days_late>0?(c.days_late+' days past due'):'')+'</div></div>'+
       '<div class="camt">'+fmt(c.amount)+'</div>'+
       '<div class="cacts">'+rem+op+'</div></div>';
@@ -3731,21 +3734,26 @@ async def admin_setup(token: str = Query(...), lang: str = Query("english")):
     """First-run wizard for a new shop: UPI + language + a starter batch in one
     screen, then a pointer to scan WhatsApp. Reuses /admin/accounts/save and
     /admin/batches. Existing shops can ignore it."""
+    from app.models import CATEGORY_LABELS
     biz = _biz_by_token(token)
     upi_cur = (biz.get("upi_vpa") or "").replace('"', "&quot;")
+    cat_opts = "".join(f'<option value="{k}">{v}</option>' for k, v in CATEGORY_LABELS.items())
     body = f"""
 <h1>ASVA setup</h1>
-<div class="muted">{biz['business_name']} - 3 chhote step, phir aap live.</div>
+<div class="muted">{biz['business_name']} - chhote step, phir aap live.</div>
 
 <div class="card" style="margin-top:20px;max-width:560px">
- <label>1. UPI ID (reminder me QR + link isi ka jayega)</label>
+ <label>1. Aap kis line me ho? (Your trade)</label>
+ <select id="cat" style="font:inherit;padding:10px 12px;border:1px solid #EAEAEA;border-radius:8px;background:#fff;width:100%;box-sizing:border-box">{cat_opts}</select>
+ <div class="hint" style="margin-top:6px">Isse un customers ke liye credit din set hote hain jinke Tally me credit period nahi hai. Electricals = 60 din, aur bhi. Tally me jahan period hai wahan wahi chalega.</div>
+ <label style="margin-top:16px">2. UPI ID (reminder me QR + link isi ka jayega)</label>
  <input id="upi" value="{upi_cur}" placeholder="e.g. yourshop@okhdfcbank">
- <label>2. Message language</label>
+ <label>3. Message language</label>
  <div class="seg" id="lang" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
    <button type="button" data-v="hinglish" class="on" style="border:0;padding:9px 16px;cursor:pointer">Hinglish</button>
    <button type="button" data-v="english" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">English</button>
  </div>
- <label style="margin-top:16px">3. Reminder tone</label>
+ <label style="margin-top:16px">4. Reminder tone</label>
  <div class="seg" id="tone" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
    <button type="button" data-v="gentle" style="border:0;padding:9px 16px;cursor:pointer">Gentle</button>
    <button type="button" data-v="standard" class="on" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">Standard</button>
@@ -3768,7 +3776,8 @@ async function finish() {{
   const msg = document.getElementById('msg'); msg.textContent = 'Saving...';
   try {{
     await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify({{token: TOKEN, upi_vpa: document.getElementById('upi').value}})}});
+      body: JSON.stringify({{token: TOKEN, upi_vpa: document.getElementById('upi').value,
+        category: document.getElementById('cat').value}})}});
     await fetch('/admin/batches', {{method:'POST', headers:{{'Content-Type':'application/json'}},
       body: JSON.stringify({{token: TOKEN, batches: [{{name:'Standard', style:TONE, lang:LANG, disc:0, upi:'', line:''}}]}})}});
     msg.textContent = 'Saved'; document.getElementById('donehint').style.display = 'block';
@@ -4484,10 +4493,13 @@ class AccountsPayload(BaseModel):
     bank_ifsc: Optional[str] = None
     bank_name: Optional[str] = None
     share_data: Optional[bool] = None
+    category: Optional[str] = None
+    default_credit_days: Optional[int] = None
 
 
 @router.post("/admin/accounts/save")
 async def admin_accounts_save(payload: AccountsPayload):
+    from app.models import CATEGORY_CREDIT_DAYS, credit_days_for_category
     biz = _biz_by_token(payload.token)
     db = require_db()
     # Only update the fields actually sent, so the data-sharing toggle (which
@@ -4505,6 +4517,22 @@ async def admin_accounts_save(payload: AccountsPayload):
             update[k] = cleaned or None
     if payload.share_data is not None:
         update["share_data"] = bool(payload.share_data)
+    # Trade category -> sets the fallback credit period for parties Tally has no
+    # BillCreditPeriod for. Picking a category seeds default_credit_days to that
+    # trade's norm; an explicit default_credit_days overrides it.
+    if payload.category is not None:
+        cat = payload.category.strip().lower()
+        if cat in CATEGORY_CREDIT_DAYS:
+            update["category"] = cat
+            if payload.default_credit_days is None:
+                update["default_credit_days"] = credit_days_for_category(cat)
+    if payload.default_credit_days is not None:
+        try:
+            d = int(payload.default_credit_days)
+            if 1 <= d <= 365:
+                update["default_credit_days"] = d
+        except (TypeError, ValueError):
+            pass
     if update:
         db.table("businesses").update(update).eq("id", biz["id"]).execute()
     return {"ok": True}

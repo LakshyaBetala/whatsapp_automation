@@ -66,6 +66,16 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
     db = require_db()
     is_import = payload.sync_type.value == "import"
 
+    # Shop's fallback credit period (trade-category default) for parties with no
+    # Tally BillCreditPeriod. Fetched once; best-effort -> 30.
+    from app.models import resolve_default_credit_days
+    try:
+        _bizrow = (db.table("businesses").select("category, default_credit_days")
+                   .eq("id", payload.business_id).limit(1).execute()).data
+        biz_cd = resolve_default_credit_days(_bizrow[0] if _bizrow else None)
+    except Exception:
+        biz_cd = 30
+
     bills_created = 0
     payments_applied = 0
     clients_created = 0
@@ -119,8 +129,8 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
                 )
                 continue
 
-        # Calculate due_date from client credit period
-        credit_days = client.get("credit_days", 30)
+        # Calculate due_date from client credit period (else the shop default)
+        credit_days = client.get("credit_days") or biz_cd
         due_date = voucher.date + timedelta(days=credit_days)
 
         bill_data = {

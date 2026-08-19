@@ -19,7 +19,7 @@ import datetime as _dt
 import logging
 from decimal import Decimal
 
-from app.services import aging, forecast, names, promises, proof
+from app.services import aging, forecast, names, promises, proof, scorecard
 
 log = logging.getLogger(__name__)
 
@@ -134,14 +134,25 @@ def build_today(db, business_id: str, business: dict, *,
     chase = []
     for e in overdue[:CHASE_LIMIT]:
         disp = names.clean_display(e["name"] or "") or (e["name"] or "-")
-        chase.append({
+        item = {
             "client_id": e["client_id"],
             "name": e["name"],
             "display": disp,
             "amount": float(e["total"]),
             "days_late": e["days_late"],
             "has_number": bool(e["phone"]),
-        })
+        }
+        # Reliability grade for the shown parties only (accurate: uses the party's
+        # own bills + promises + receipts). Best-effort - never breaks the page.
+        try:
+            sc = scorecard.build_scorecard(
+                db, business_id, {"id": e["client_id"], "name": e["name"]}, today=today)
+            item["grade"] = sc.get("grade")
+            item["grade_label"] = sc.get("grade_label")
+            item["grade_color"] = sc.get("color")
+        except Exception:
+            item["grade"] = None
+        chase.append(item)
 
     # ── Money in: yesterday + today (booked receipts) ─────────────────────
     y_amt, y_cnt = _receipts_sum(db, business_id, yesterday)
