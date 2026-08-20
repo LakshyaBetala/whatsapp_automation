@@ -971,6 +971,9 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.0.1': [
+    'Updating is calmer now: while ASVA installs a new version it shows a clear "Updating - I will reopen by myself in a minute, your data is safe" screen, and a "you are up to date, nothing was lost" note when it comes back. No more wondering if the app disappeared.',
+  ],
   '2.0.0': [
     'Your privacy, locked down: messages from anyone who is not your customer (family, friends, groups, unknown numbers) now never leave your computer. ASVA only ever sees a message when your own customer replies about a payment.',
     'The assistant is smarter: it welcomes a new lead once and then stays quiet, and hands the chat to you the moment someone is interested, so it never talks over your conversation.',
@@ -1469,8 +1472,16 @@ function applyUpdate() {
   // In "reinstall" mode the button opens the download page; otherwise it applies
   // a downloaded auto-update and restarts.
   if (_mustReinstall) { try { window.asva.openExternal(_reinstallUrl); } catch (e) {} return; }
+  const en = currentLang() === 'english';
   const btn = document.getElementById('updatebtn');
-  if (btn) { btn.textContent = 'Restarting...'; btn.disabled = true; }
+  const msg = document.getElementById('updatemsg');
+  // Set expectations the instant they click: ASVA is about to vanish and reopen.
+  if (msg) msg.innerHTML = en
+    ? '<b>Updating ASVA&hellip;</b> it will close and reopen on its own in about a minute. '
+      + 'Please wait - your data is safe.'
+    : '<b>ASVA update ho raha hai&hellip;</b> yeh khud band ho kar ek minute mein wapas khul '
+      + 'jayega. Intezaar karein - aapka data safe hai.';
+  if (btn) { btn.textContent = en ? 'Updating...' : 'Update ho raha hai...'; btn.disabled = true; }
   try { window.asva.installUpdate(); } catch (e) {}
 }
 if (window.asva.onUpdate) window.asva.onUpdate((u) => {
@@ -1505,10 +1516,12 @@ if (window.asva.onUpdate) window.asva.onUpdate((u) => {
         + '</div>'
       : '';
     msg.innerHTML = (en
-      ? '<b>A new version of ASVA' + v + ' is ready.</b> Your data and WhatsApp stay connected.'
-      : '<b>ASVA ka naya version' + v + ' taiyaar hai.</b> Aapka data aur WhatsApp juda rehta hai.') + nhtml;
+      ? '<b>A new version of ASVA' + v + ' is ready.</b> ASVA will close and reopen by '
+        + 'itself in about a minute - please wait for it. All your data and WhatsApp stay safe.'
+      : '<b>ASVA ka naya version' + v + ' taiyaar hai.</b> ASVA khud band ho kar ek minute mein '
+        + 'wapas khul jayega - thoda intezaar karein. Aapka poora data aur WhatsApp safe rehta hai.') + nhtml;
     btn.style.display = 'inline-block';
-    btn.textContent = en ? 'Restart to update' : 'Update ke liye restart karein';
+    btn.textContent = en ? 'Update now' : 'Abhi update karein';
     bar.style.display = 'flex';
   } else if (u.state === 'downloading') {
     const pct = u.percent ? ' (' + u.percent + '%)' : '';

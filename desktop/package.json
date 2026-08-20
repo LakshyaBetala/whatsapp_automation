@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.0.\n\nYour privacy, locked down: messages from anyone who is not your customer - family, friends, groups, unknown numbers - now never leave your computer. ASVA only ever receives a message when your own customer replies about a payment.\n\nSmoother updates: the \"ASVA cannot be closed\" message is fixed. ASVA closes its background parts on its own and installs quietly - nothing to close by hand.\n\nA new Today home: money that came in, who to chase (biggest first, with each customer's phone and one-tap Call), cash likely this week, and how many days your money is stuck. Honest counts, do-not-chase customers stay off the list, add a missing number right there, and the page recovers on its own instead of going blank.\n\nSmarter assistant: it pitches a new lead once and then stays quiet, and hands over to you the moment someone is interested, so it never talks over your conversation.\n\nAlso: trade-based due dates (electricals 60 days) when Tally has none, a fairer reliability score where one late bill among many paid does not drag a customer down, a money-in alert when a customer says they paid, and your WhatsApp login surviving updates."
+      "releaseNotes": "ASVA 2.0.1.\n\nUpdating is calmer now. While ASVA installs a new version it shows a clear screen: \"Updating - I will close and reopen by myself in about a minute. Your customers, bills and reminders are safe.\" When it comes back it confirms \"you are up to date, nothing was lost.\" No more wondering whether the app disappeared while it updated.\n\nEverything from 2.0 is included: your privacy locked down (only your own customers' messages ever reach ASVA), a smarter assistant that welcomes a lead once then hands the chat to you, the Today home, trade-based due dates, and a fairer reliability score."
     },
     "files": [
       "main.js",

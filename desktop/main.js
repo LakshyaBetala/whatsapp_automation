@@ -78,6 +78,10 @@ const AGENT_DIR = app.isPackaged ? path.join(process.resourcesPath, 'agent')
 const USER_DATA = app.getPath('userData');
 const DATA_CONFIG = path.join(USER_DATA, 'config.json');   // the live pairing
 const WA_AUTH_ROOT = path.join(USER_DATA, 'wa');           // WhatsApp login root
+// Remembers the last version we ran (in userData, survives updates) so that when a
+// silent update relaunches the app we can greet the owner with a "you're up to date,
+// nothing was lost" confirmation instead of an unexplained reopen.
+const VERSION_STAMP = path.join(USER_DATA, 'last_version.txt');
 // Every bundled agent child (watch, drain, --pair, --set-company, --diagnose)
 // inherits this via process.env, so they all read/write the same config.json.
 process.env.ASVA_CONFIG_PATH = DATA_CONFIG;
@@ -430,6 +434,62 @@ function stopAll() {
   }
 }
 
+// The version we're about to install (from update-downloaded), shown on the splash.
+let pendingUpdateVersion = '';
+let updateSplash = null;
+
+// The silent reinstall makes ASVA VANISH for 30-60s (no window, and Windows even
+// removes the Start-menu/search shortcut mid-install) before it reopens itself.
+// With no feedback that reads to a shopkeeper as "my app got deleted" - the exact
+// panic one owner hit on 2.0.0. This shows a clear "updating, will reopen, your
+// data is safe" splash + a durable OS notification that survives our process dying
+// during the reinstall, so the vanish always feels intentional, never like a loss.
+function showUpdatingSplash(version) {
+  const v = version ? ` to ${version}` : '';
+  try {
+    if (Notification && Notification.isSupported && Notification.isSupported()) {
+      new Notification({
+        title: `ASVA is updating${v}`,
+        body: 'Please wait about a minute. ASVA will close and reopen on its own. '
+            + 'Your customers, bills and reminders are all safe - nothing is lost.',
+        silent: false,
+      }).show();
+    }
+  } catch (_) {}
+  try {
+    if (updateSplash && !updateSplash.isDestroyed()) return;
+    updateSplash = new BrowserWindow({
+      width: 480, height: 300, frame: false, resizable: false, movable: false,
+      minimizable: false, maximizable: false, alwaysOnTop: true, center: true,
+      skipTaskbar: false, title: 'Updating ASVA', backgroundColor: '#0b1220',
+      icon: trayIcon(),
+      webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+    updateSplash.setMenuBarVisibility(false);
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+      *{box-sizing:border-box;margin:0} html,body{height:100%}
+      body{background:#0b1220;color:#e8eefc;font-family:Segoe UI,system-ui,Arial,sans-serif;
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        text-align:center;padding:28px;gap:14px;user-select:none}
+      .ring{width:46px;height:46px;border:4px solid rgba(255,255,255,.15);
+        border-top-color:#4f8cff;border-radius:50%;animation:spin 1s linear infinite}
+      @keyframes spin{to{transform:rotate(360deg)}}
+      h1{font-size:20px;font-weight:700;letter-spacing:.2px}
+      p{font-size:14px;line-height:1.55;color:#b9c4dc;max-width:380px}
+      .safe{font-size:13px;color:#8fe0a8;font-weight:600}
+      .wait{font-size:12px;color:#7c88a3;margin-top:2px}
+    </style></head><body>
+      <div class="ring"></div>
+      <h1>Updating ASVA${version ? (' to ' + version) : ''}&hellip;</h1>
+      <p>ASVA will close and reopen by itself in about a minute.</p>
+      <p class="safe">Your customers, bills and reminders are safe. Nothing is lost.</p>
+      <p class="wait">Please do not turn off the computer.</p>
+    </body></html>`;
+    updateSplash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    updateSplash.on('closed', () => { updateSplash = null; });
+  } catch (_) {}
+}
+
 // Apply a downloaded update WITHOUT the "ASVA cannot be closed" installer prompt.
 // Two things caused that prompt: (1) the window's close-confirm dialog blocked the
 // installer's close request, and (2) wa_service runs as ASVA.exe (ELECTRON_RUN_AS_NODE),
@@ -441,13 +501,18 @@ function applyUpdateAndQuit() {
   if (_updateApplying) return;
   _updateApplying = true;
   app.isQuitting = true;
+  // Show the reassuring "updating" splash BEFORE anything closes, and hide the main
+  // window so the splash is the only thing on screen during the changeover.
+  try { showUpdatingSplash(pendingUpdateVersion); } catch (e) {}
+  try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); } catch (e) {}
   try { stopAll(); } catch (e) {}
+  // A touch longer so the splash is clearly seen before the process is replaced.
   setTimeout(() => {
     try {
       if (autoUpdater) autoUpdater.quitAndInstall(true, true);   // isSilent, isForceRunAfter
       else app.quit();
     } catch (e) { try { app.quit(); } catch (_) {} }
-  }, 1500);
+  }, 2200);
 }
 
 // ── Health polling (done in main to avoid renderer CORS) ──────────────────
@@ -618,6 +683,31 @@ function pollStatus() {
     maybeKickStalledWatcher(ok);
     done();
   });
+}
+
+// After a silent auto-update the app relaunches on its own. If the version changed
+// since last run, greet the owner so the reopen reads as "updated + everything's
+// here", never as a mysterious fresh start. Best-effort; writes the new stamp either
+// way so the greeting fires exactly once per update.
+function maybeWelcomeAfterUpdate() {
+  try {
+    const cur = app.getVersion();
+    let prev = '';
+    try { prev = fs.readFileSync(VERSION_STAMP, 'utf8').trim(); } catch (_) {}
+    if (prev && prev !== cur) {
+      try {
+        if (Notification && Notification.isSupported && Notification.isSupported()) {
+          new Notification({
+            title: `ASVA updated to ${cur}`,
+            body: 'All your customers, bills and reminders are here - nothing was lost.',
+            silent: true,
+          }).show();
+        }
+      } catch (_) {}
+      sendToWindow('updated-welcome', { version: cur, from: prev });
+    }
+    try { fs.writeFileSync(VERSION_STAMP, cur); } catch (_) {}
+  } catch (_) {}
 }
 
 // ── Window + tray ─────────────────────────────────────────────────────────
@@ -837,6 +927,7 @@ function setupAutoUpdate() {
     sendToWindow('update', { state: 'downloading', percent: Math.round((p && p.percent) || 0) }));
   autoUpdater.on('update-downloaded', (info) => {
     updateReady = true;                        // closing the window now applies it
+    pendingUpdateVersion = (info && info.version) || '';  // shown on the updating splash
     sendToWindow('update', { state: 'ready', version: info && info.version, notes: notesOf(info) });
   });
   autoUpdater.on('update-not-available', () => sendToWindow('update', { state: 'current' }));
@@ -870,6 +961,8 @@ if (!app.requestSingleInstanceLock()) {
     startAll();
     createWindow();
     createTray();
+    // Greet the owner if we just relaunched from an update (after the UI has loaded).
+    setTimeout(maybeWelcomeAfterUpdate, 4000);
     pollStatus();
     setInterval(pollStatus, 5000);
     // Heartbeat once the backend is up, then every 30 min.
