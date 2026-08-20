@@ -51,14 +51,14 @@ async def _send_welcome(business_id: str, owner_name: str | None, code_display: 
         "From today I will read your TallyPrime and send your bills and payment reminders "
         "on WhatsApp from your own number, so you get paid faster without chasing anyone. "
         "Each evening I will send you a short summary, and you can ask me anything right here.\n\n"
-        "Let's get you set up. Your setup code is:\n"
-        f"{code_display}\n"
+        "Let's get you set up. Here is your setup code:\n\n"
+        f"```{code_display}```\n\n"
         "(valid 24 hours, one use)\n\n"
-        "On your Tally computer:\n"
-        "1. Open tryasva.com/download and install ASVA.\n"
-        "2. Type this code when it asks.\n"
-        "3. Pick your company and scan your WhatsApp.\n\n"
-        "That is all, about five minutes. Reply HELP any time to see what I can do."
+        "On your Tally computer:\n\n"
+        "1. Open *tryasva.com/download* and install ASVA\n"
+        "2. Type the code above when it asks\n"
+        "3. Pick your company and scan your WhatsApp\n\n"
+        "That is all, about five minutes. Reply *HELP* any time to see what I can do."
     )
     try:
         await whatsapp.notify_owner(business_id, body)

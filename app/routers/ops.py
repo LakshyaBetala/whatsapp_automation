@@ -217,6 +217,47 @@ async def ops_support(key: str = Query("")):
     return JSONResponse({"requests": support.list_recent(require_db(), 100)})
 
 
+@router.get("/assistant")
+async def ops_assistant(key: str = Query("")):
+    """The marketing/bot assistant switch + recent leads (founder-only)."""
+    if not _key_ok(key):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+    from app.services import assistant
+    db = require_db()
+    return JSONResponse({"enabled": assistant.assistant_enabled(db),
+                         "leads": assistant.recent_leads(db, 30)})
+
+
+class AssistantTogglePayload(BaseModel):
+    admin_key: str
+    enabled: bool
+
+
+@router.post("/assistant/toggle")
+async def ops_assistant_toggle(payload: AssistantTogglePayload):
+    """Founder flips the global auto-pitch switch. Owner commands are unaffected."""
+    if not _key_ok(payload.admin_key):
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    from app.services import assistant
+    assistant.set_assistant_enabled(require_db(), bool(payload.enabled))
+    return {"ok": True, "enabled": bool(payload.enabled)}
+
+
+class LeadResumePayload(BaseModel):
+    admin_key: str
+    from_number: str
+
+
+@router.post("/assistant/resume")
+async def ops_assistant_resume(payload: LeadResumePayload):
+    """Clear a lead's hand-over so the assistant handles it again from here."""
+    if not _key_ok(payload.admin_key):
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    from app.services import assistant
+    assistant.clear_handover(require_db(), payload.from_number)
+    return {"ok": True}
+
+
 class SupportResolvePayload(BaseModel):
     admin_key: str
     id: str
@@ -452,6 +493,18 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 </div>
 <div id="opsbanner" class="opsbanner" style="display:none"></div>
 <div id="pilotbar" style="display:none;background:#123524;color:#8fe0af;border:1px solid #1e5a3a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.9rem"></div>
+
+<div id="asstbar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;background:#0f1512;border:1px solid #2c4536;border-radius:10px;padding:11px 14px;margin-bottom:14px;font-size:.9rem">
+  <div>
+    <b style="color:#dfe8e2">ASVA assistant</b>
+    <span id="asststate" style="margin-left:8px;color:#9fb7a6">loading...</span>
+    <div style="color:#7d9488;font-size:.8rem;margin-top:2px">Auto-reply to new leads on the bot number. Owner commands (LIST, BILL...) always work. Pitches once, then hands over on YES for 12h.</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span id="asstleads" style="color:#7d9488;font-size:.82rem"></span>
+    <button id="assttgl" onclick="toggleAssistant()" style="background:#0a7d33;color:#fff;border:0;border-radius:8px;padding:8px 16px;cursor:pointer;font:inherit">...</button>
+  </div>
+</div>
 
 <div class="modal" id="addModal">
  <div class="card" id="addCard">
@@ -847,8 +900,35 @@ async function loadHealth(){
   }
 }
 
+let ASST_ON = true;
+async function loadAssistant(){
+  try{
+    const r = await fetch('/ops/assistant?key='+encodeURIComponent(KEY));
+    if(!r.ok) return;
+    const d = await r.json();
+    ASST_ON = !!d.enabled;
+    const now = Date.now();
+    const active = (d.leads||[]).filter(l=>l.handover_until && new Date(l.handover_until).getTime()>now).length;
+    document.getElementById('asststate').innerHTML = ASST_ON
+      ? '<span style="color:#7fe0a6">ON</span> - auto-replying to new leads'
+      : '<span style="color:#e0a06a">OFF</span> - you are handling leads by hand';
+    document.getElementById('asstleads').textContent =
+      (d.leads||[]).length + ' leads' + (active? (' - '+active+' in hand-over'):'');
+    const b=document.getElementById('assttgl');
+    b.textContent = ASST_ON ? 'Turn OFF' : 'Turn ON';
+    b.style.background = ASST_ON ? '#7a3a2a' : '#0a7d33';
+  }catch(e){}
+}
+async function toggleAssistant(){
+  const b=document.getElementById('assttgl'); b.disabled=true;
+  try{ await post('/ops/assistant/toggle',{admin_key:KEY,enabled:!ASST_ON}); }catch(e){}
+  b.disabled=false; loadAssistant();
+}
+
 setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString();},1000);
 showTab('health');
+loadAssistant();
+setInterval(loadAssistant, 30000);
 loadSupport();   // populate the Requests badge on boot, whatever tab is open
 setInterval(()=>{ if(TAB==='health') loadHealth(); else if(TAB==='requests') loadSupport(); else load(); }, 30000);
 setInterval(loadSupport, 60000);   // keep the pending-requests badge fresh on any tab

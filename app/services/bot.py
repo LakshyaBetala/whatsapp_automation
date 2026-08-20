@@ -137,15 +137,29 @@ def _lead_interested() -> str:
             "The pilot is free till 15 September. Welcome aboard!")
 
 
-def _prospect_reply(from_number: str, text: str, upper: str) -> str:
-    """A non-owner messaged the ASVA marketing/bot number (off the poster). Never
-    bounce them - invite them, in English. A YES routes to the human follow-up."""
+def _prospect_reply(db, from_number: str, text: str, upper: str) -> str:
+    """A non-owner messaged the ASVA marketing/bot number (off the poster).
+
+    SMART and non-spammy (this is what stops the bot talking over a live sales
+    chat): pitch exactly ONCE, then stay quiet. The moment the lead says YES we
+    hand over to a human and go silent for a window, so the founder's own
+    conversation is never interrupted. The founder's global switch can also mute
+    the auto-pitch entirely.
+    """
+    from app.services import assistant
+    if not assistant.assistant_enabled(db):
+        return ""                                   # founder muted the auto-pitch
     tokens = set(re.findall(r"[A-Z]+", upper))
-    if tokens & _JOIN_WORDS:
-        log.info("ASVA lead (interested): %s", text[:120])
+    is_yes = bool(tokens & _JOIN_WORDS)
+    decision = assistant.decide_prospect(db, from_number, is_yes)
+    if decision == assistant.PITCH:
+        log.info("ASVA lead (first pitch): %s", text[:80])
+        return _lead_pitch()
+    if decision == assistant.HANDOVER:
+        log.info("ASVA lead (interested -> hand over): %s", text[:80])
         return _lead_interested()
-    log.info("ASVA lead (inquiry): %s", text[:120])
-    return _lead_pitch()
+    log.info("ASVA lead (silent, already handled)")
+    return ""                                       # already pitched / human on it
 
 
 def _checkpoint_hold(db, business_id: str, cp: dict, arg: str) -> str | None:
@@ -323,6 +337,49 @@ async def _handle_shop_inbound(
     return ""   # the shop number NEVER replies to a customer
 
 
+# Read/summary commands that show Tally data and would look empty/broken before
+# the first sync. When the owner is paired but has never synced, we answer these
+# with a friendly "press Tally refresh" instead of "no customers". Action commands
+# (BILL/PAID/STOP...) are NOT gated - a shop can use non-Tally bills before syncing.
+_NEEDS_SYNC = {"LIST", "DIGEST", "REPORT", "SUMMARY", "AAJ", "SENT", "REMINDED",
+               "RECOVERED", "RECOVERY", "WAPASI", "CASH", "FORECAST", "AAVAK",
+               "CARD", "REPORTCARD", "TERMS", "HISAB", "CHECK"}
+
+
+def _sync_state(db, business_id: str) -> str:
+    """'never' (paired, no Tally sync yet), 'stale' (synced but not today), or
+    'fresh'. Best-effort -> 'fresh' so an unknown state never blocks a command."""
+    try:
+        r = (db.table("tally_syncs").select("synced_at")
+             .eq("business_id", business_id).order("synced_at", desc=True)
+             .limit(1).execute()).data
+        if not r:
+            return "never"
+        from datetime import datetime, timezone, timedelta
+        ist = timezone(timedelta(hours=5, minutes=30))
+        ts = datetime.fromisoformat(str(r[0]["synced_at"]).replace("Z", "+00:00"))
+        return "fresh" if ts.astimezone(ist).date() == datetime.now(ist).date() else "stale"
+    except Exception:
+        return "fresh"
+
+
+def _first_sync_help(lang: str) -> str:
+    """Paired but never synced: point the owner at the ONE step that loads data."""
+    if lang == "english":
+        return ("You are all paired, nice work!\n\n"
+                "One last step to load your data:\n\n"
+                "1. Open ASVA on your Tally computer (keep Tally running)\n"
+                "2. Press *Tally refresh* at the top left\n\n"
+                "It takes 2 to 3 minutes. Then send *LIST* and I will show you "
+                "exactly who owes you money.")
+    return ("Aap pair ho gaye, badhiya!\n\n"
+            "Bas ek aakhri step, phir data aa jayega:\n\n"
+            "1. Apne Tally computer par ASVA kholein (Tally chalu rakhein)\n"
+            "2. Upar baayein *Tally refresh* dabayein\n\n"
+            "2 se 3 minute lagenge. Phir *LIST* bhejein aur main aapko dikhaunga "
+            "kis kis par paisa baaki hai.")
+
+
 async def handle(
     from_number: str,
     text: str,
@@ -372,7 +429,7 @@ async def handle(
         # The marketing number IS this bot number, so a non-owner here is almost
         # always a PROSPECT off the poster. Invite them into the funnel instead of
         # bouncing them - every bounced message is a lost sale.
-        return _prospect_reply(from_number, text, upper)
+        return _prospect_reply(db, from_number, text, upper)
 
     # ── Bot assistant is a paid feature (Basic plan does NOT include it) ──
     if channel == "bot" and is_owner and not plan_has_bot(business.get("plan")):
@@ -444,6 +501,13 @@ async def handle(
         # REMIND). Done here, after the checkpoint/photo words, so nothing above
         # is affected.
         upper = _canon_command(upper)
+
+        # ── First-run guard: paired but Tally never synced ────────────
+        # A read/summary command would look broken with no data yet, so guide the
+        # owner to the one step that unlocks everything instead of "no customers".
+        first_word = upper.split(None, 1)[0] if upper else ""
+        if first_word in _NEEDS_SYNC and _sync_state(db, business_id) == "never":
+            return _first_sync_help(lang)
 
         # ── LIST ──────────────────────────────────────────────────────
         if upper == "LIST":
