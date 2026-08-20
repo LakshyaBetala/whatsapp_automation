@@ -413,6 +413,45 @@ a:focus-visible,.btn:focus-visible,.buy:focus-visible,.navcta:focus-visible,summ
 .soon.live{background:var(--wash);color:var(--accent-d);border-color:var(--accent)}
 """
 
+# ── "super clean" pass: same look as live (fonts, green, layout, phone mock),
+# but the AI-slop tells removed and everything calmer/crisper. Appended AFTER the
+# base CSS so these rules win the cascade. Served at /preview for review; folded
+# into CSS on approval.
+CLEAN_OVERRIDES = """
+/* calmer, crisper surfaces */
+:root{--sh:0 1px 2px rgba(12,26,16,.04);--sh-lift:0 8px 22px -14px rgba(12,26,16,.18);
+  --hair:#e6e9e3;--muted:#33443a}
+body{font-size:1.02rem}
+/* no bouncy hover-lift anywhere - just a quiet border shift */
+.card{box-shadow:none;transition:border-color .15s ease}
+.card:hover{transform:none;box-shadow:none;border-color:#cbd5cc}
+.btn-p,.btn-s,.navcta,.buy{box-shadow:none;transition:background .15s ease,border-color .15s ease}
+.btn-p:hover,.btn-s:hover,.navcta:hover,.buy:hover{transform:none;box-shadow:none}
+.btn-p:hover,.navcta:hover{background:var(--accent-d)}
+.btn-s:hover{border-color:var(--accent)}
+/* clean highlight - drop the gradient-underline box */
+.hl{background:none;color:var(--accent-d);padding:0;font-weight:800}
+/* plain strip: crisp card, clean emphasis (no shadowed green pill on inline words) */
+.plain{box-shadow:none;background:var(--paper);border-color:var(--hair)}
+.plain p b{background:none;color:var(--accent-d);box-shadow:none;padding:0}
+/* phone mock: calm - no float, no pulsing glow */
+.mock .phone{animation:none;box-shadow:0 18px 42px -22px rgba(12,26,16,.28)}
+.mock .halo{animation:none;opacity:.45}
+.mock .tag2{box-shadow:none}
+/* flatten heavy shadows to crisp hairlines */
+.stats,.simple .st,.flow .row,.panel,.req .r,.faq details,.compare,.plan{box-shadow:none}
+.plan.best{box-shadow:none}
+.plan.best:hover{box-shadow:none}
+.stats .s{border-right:1px solid var(--hair)}
+/* dividers: hairline, not heavy black */
+.marq{padding:12px 0;border-top:1px solid var(--ink)}
+.marq .track{animation-duration:50s;font-weight:600;opacity:.9}
+footer.ft{border-top:1px solid var(--ink)}
+.ft .base{border-top:1px solid var(--hair)}
+.badge{border-width:1.5px}
+"""
+
+
 REVEAL_JS = """
 <script>
 (function(){var els=document.querySelectorAll('.reveal');
@@ -453,6 +492,8 @@ def _footer() -> str:
   <div class="col"><div class="h">Get started</div>
     <a href="/download">Download for Windows</a><a href="{WA_TRY}">Talk to us on WhatsApp</a>
     <a href="mailto:{CONTACT_EMAIL}">Email us</a></div>
+  <div class="col"><div class="h">Legal</div>
+    <a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a></div>
 </div>
 <div class="base"><span>&copy; 2026 Almmatix. {SITE_NAME} is an Almmatix product.</span>
   <span><a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a></span></div>
@@ -1204,6 +1245,147 @@ def _guide() -> str:
         body=body)
 
 
+_LEGAL_CSS = """
+.legal{max-width:760px;margin:0 auto;padding:8px 0 24px}
+.legal h1{font-size:2.1rem;letter-spacing:-.02em;margin:0 0 6px}
+.legal .upd{color:var(--faint);font-size:.9rem;margin-bottom:28px}
+.legal h2{font-size:1.25rem;letter-spacing:-.01em;margin:34px 0 10px}
+.legal p,.legal li{color:var(--ink-2,#3a4a41);line-height:1.7;font-size:1.02rem}
+.legal ul{margin:8px 0 8px 2px;padding-left:20px}
+.legal li{margin:6px 0}
+.legal .box{border:1px solid var(--hair,#e4e9e5);border-radius:14px;padding:22px 24px;margin:22px 0;background:var(--paper-2,#fbfcfb)}
+.legal .box h3{margin:0 0 10px;font-size:1.05rem}
+.legal strong{color:var(--ink)}
+.legal a{color:#16a34a;font-weight:600}
+"""
+
+
+def _legal_body(title: str, updated: str, inner: str) -> str:
+    return (f'<section class="sec"><div class="wrap"><div class="legal">'
+            f'<h1>{title}</h1><div class="upd">Last updated {updated}</div>'
+            f'{inner}</div></div></section><style>{_LEGAL_CSS}</style>')
+
+
+def _privacy():
+    inner = f"""
+<p><strong>ASVA is a collections assistant for shops that use TallyPrime.</strong> It runs on the
+shop owner's own computer, next to their Tally, and its only job is to help the shop get its
+outstanding payments back. This page explains, in plain words, exactly what data ASVA touches and
+what it never touches. If anything here is unclear, email <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
+
+<div class="box"><h3>What ASVA can and cannot see on WhatsApp</h3>
+<p><strong>ASVA never sees:</strong></p>
+<ul>
+  <li>What the shop owner types. The owner's own messages are never read.</li>
+  <li>Any group chat, status, or broadcast. All ignored.</li>
+  <li>Messages from anyone who is not a customer of the shop. Ignored and not saved.</li>
+</ul>
+<p><strong>ASVA only acts when</strong> a customer the shop already bills replies about a payment
+(for example "paid", or a payment screenshot). That is placed in the owner's Payments tab for the
+owner to review and confirm. Nothing is posted to Tally without the owner's confirmation.</p>
+<p><strong>The AI only ever looks at photos of bills and payment screenshots</strong>, to read the
+amount. It never reads any text message.</p></div>
+
+<h2>Who is responsible for the data</h2>
+<p>The shop is the owner of its customer and ledger data (the data fiduciary). ASVA acts only as a
+processor on the shop's instructions, to send reminders and record payments the shop confirms. The
+shop's Tally data stays in the shop's Tally, on the shop's computer.</p>
+
+<h2>What data ASVA stores, and why</h2>
+<ul>
+  <li><strong>Customer name, number, and outstanding amount</strong> from the shop's Tally, so ASVA
+      knows who to remind and how much.</li>
+  <li><strong>Reminders and bills sent</strong>, and their delivery status, so the shop has a record.</li>
+  <li><strong>Payments a customer reports</strong> (a "paid" message or screenshot) until the owner
+      confirms or clears them.</li>
+  <li>ASVA does <strong>not</strong> store personal chats, group messages, or the content of
+      messages from people who are not the shop's customers.</li>
+</ul>
+
+<h2>Payment reminders and promise-to-pay</h2>
+<p>Reminders go out from the shop's own WhatsApp number, on a schedule based on each customer's
+credit terms. When a customer replies with a payment promise ("I will pay Friday") or says they
+paid, ASVA records that so the shop can follow up. A customer can reply <strong>STOP</strong> at any
+time to opt out of reminders; that choice is respected until the customer opts back in.</p>
+
+<h2>Sharing</h2>
+<p>ASVA does not sell customer data. Data is not shared with other shops or third parties, except the
+minimum needed to deliver a message (the WhatsApp delivery network) and to run the service securely.</p>
+
+<h2>Retention and deletion</h2>
+<p>Generated bill PDFs are deleted after they are sent. A shop can ask us to delete its data at any
+time by emailing <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>; we remove the shop's clients,
+bills, messages, and payment records. A customer can ask the shop, or us, to remove their number.</p>
+
+<h2>Security</h2>
+<p>Access to shop data is restricted and scoped to each shop. The shop's WhatsApp login stays on the
+shop's own computer. We use industry-standard measures to protect data in transit and at rest.</p>
+
+<h2>Your rights</h2>
+<p>Under India's data-protection law, a person can ask to access, correct, or delete their personal
+data, and can withdraw consent. Requests go to <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>
+and we act on them promptly.</p>
+
+<h2>Contact</h2>
+<p>ASVA is a product of Almmatix. For any privacy question or request, email
+<a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
+"""
+    return page_shell(
+        path="/privacy",
+        title="Privacy Policy | ASVA",
+        description="How ASVA handles your data. ASVA never reads your personal chats or groups, only acts on customer payment messages, and never posts to Tally without your confirmation.",
+        keywords="ASVA privacy policy, ASVA data, does ASVA read my messages, ASVA DPDP, ASVA security",
+        body=_legal_body("Privacy Policy", "21 August 2026", inner))
+
+
+def _terms():
+    inner = f"""
+<p>These terms cover the use of ASVA, a collections assistant for shops using TallyPrime, provided by
+Almmatix. By installing or using ASVA, the shop agrees to these terms.</p>
+
+<h2>What ASVA does</h2>
+<p>ASVA reads outstanding balances from the shop's TallyPrime, sends bills and payment reminders from
+the shop's own WhatsApp number, records payments customers report, and helps the shop post confirmed
+receipts back into Tally. ASVA never posts anything to Tally without the shop owner's confirmation.</p>
+
+<h2>The shop stays in control</h2>
+<ul>
+  <li>The shop decides who to remind and can pause any customer at any time.</li>
+  <li>Every payment is confirmed by the owner before it is posted to Tally.</li>
+  <li>Tally remains the accounting record; ASVA does not change the shop's books on its own.</li>
+</ul>
+
+<h2>Acceptable use</h2>
+<p>The shop will use ASVA only to communicate with its own genuine customers about genuine dues, in
+line with WhatsApp's policies and applicable law. Misuse (spam, messaging people who are not the
+shop's customers, or harassment) is not permitted and may lead to suspension.</p>
+
+<h2>Pilot and availability</h2>
+<p>ASVA is currently offered on a free pilot. We aim for high availability but do not guarantee
+uninterrupted service. Reminders depend on the shop's computer, internet, WhatsApp connection, and
+Tally being available.</p>
+
+<h2>Liability</h2>
+<p>ASVA is a tool to help a shop collect faster. The shop remains responsible for its own accounting,
+credit decisions, and customer relationships. To the extent permitted by law, Almmatix is not liable
+for indirect or consequential losses arising from use of ASVA.</p>
+
+<h2>Data</h2>
+<p>Our handling of data is described in the <a href="/privacy">Privacy Policy</a>, which forms part of
+these terms.</p>
+
+<h2>Changes and contact</h2>
+<p>We may update these terms; material changes will be notified. Questions:
+<a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>
+"""
+    return page_shell(
+        path="/terms",
+        title="Terms of Service | ASVA",
+        description="The terms for using ASVA, the collections assistant for TallyPrime shops. You stay in control: ASVA never posts to Tally without your confirmation.",
+        keywords="ASVA terms of service, ASVA terms, ASVA agreement",
+        body=_legal_body("Terms of Service", "21 August 2026", inner))
+
+
 PAGES = {
     "/": _home,
     "/how-it-works": _how,
@@ -1212,6 +1394,8 @@ PAGES = {
     "/use-cases": _use_cases,
     "/guide": _guide,
     "/download": _download,
+    "/privacy": _privacy,
+    "/terms": _terms,
 }
 
 
@@ -1402,6 +1586,18 @@ def home_page():
     return _serve("/")
 
 
+@router.get("/preview", response_class=HTMLResponse)
+@router.get("/preview/{path:path}", response_class=HTMLResponse)
+def preview_page(path: str = ""):
+    """TEMPORARY: the 'super clean' pass of any page, for review before it goes
+    live. Renders the real page (real fonts, real content) with CLEAN_OVERRIDES
+    appended so the cascade wins. /preview = home; /preview/pricing = pricing, etc."""
+    p = "/" + path if path else "/"
+    html = render(p)   # returns the full HTML string (bypasses the marketing redirect)
+    return HTMLResponse(html.replace(f"<style>{CSS}</style>",
+                                     f"<style>{CSS}{CLEAN_OVERRIDES}</style>"))
+
+
 @router.get("/how-it-works", response_class=HTMLResponse)
 def how_page():
     return _serve("/how-it-works")
@@ -1425,6 +1621,16 @@ def use_cases_page():
 @router.get("/guide", response_class=HTMLResponse)
 def guide_page():
     return _serve("/guide")
+
+
+@router.get("/privacy", response_class=HTMLResponse)
+def privacy_page():
+    return _serve("/privacy")
+
+
+@router.get("/terms", response_class=HTMLResponse)
+def terms_page():
+    return _serve("/terms")
 
 
 @router.get("/sitemap.xml")

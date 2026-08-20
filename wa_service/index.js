@@ -137,6 +137,51 @@ function postJson(urlStr, bodyObj, timeoutMs = 30000) {
     });
 }
 
+// GET JSON with Node's built-in http/https (no global fetch dependency).
+function getJson(urlStr, timeoutMs = 20000) {
+    return new Promise((resolve, reject) => {
+        let u;
+        try { u = new URL(urlStr); } catch (e) { return reject(e); }
+        const lib = u.protocol === 'https:' ? https : http;
+        const req = lib.request({
+            hostname: u.hostname,
+            port: u.port || (u.protocol === 'https:' ? 443 : 80),
+            path: u.pathname + u.search, method: 'GET', timeout: timeoutMs,
+        }, (res) => {
+            let data = '';
+            res.on('data', (d) => (data += d));
+            res.on('end', () => { let json = {}; try { json = JSON.parse(data); } catch (e) {} resolve({ status: res.statusCode, json }); });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(new Error('request timeout')); });
+        req.end();
+    });
+}
+
+// ── Privacy allow-list (shop channel only) ────────────────────────────────
+// The shop's own customer numbers, fetched from the backend. When loaded, the
+// shop's WhatsApp only forwards messages FROM these numbers to the server; a
+// message from anyone else (family, friends, unknown) is dropped right here and
+// never leaves the laptop. Fail-OPEN: until the list has loaded (or if a fetch
+// fails), we keep forwarding so a real customer's reply is never missed.
+const WA_TOKEN = process.env.WA_TOKEN || '';
+let allowSet = null;                 // null = not loaded yet -> fail open
+function _last10(n) { const d = String(n || '').replace(/\D/g, ''); return d.length > 10 ? d.slice(-10) : d; }
+async function refreshAllowlist() {
+    if (WA_CHANNEL !== 'shop' || !WA_TOKEN) return;   // only the customer-facing number filters
+    try {
+        const r = await getJson(`${BACKEND_URL}/webhooks/allowlist?token=${encodeURIComponent(WA_TOKEN)}`);
+        if (r && r.json && Array.isArray(r.json.numbers)) {
+            // Only adopt a non-empty list; an empty result (backend hiccup / not
+            // synced yet) must NOT silence a shop that does have customers.
+            if (r.json.numbers.length > 0) {
+                allowSet = new Set(r.json.numbers.map(_last10));
+                console.log(`Allow-list loaded: ${allowSet.size} customer numbers (personal messages stay on this laptop).`);
+            }
+        }
+    } catch (e) { /* keep the previous list; fail open if never loaded */ }
+}
+
 let sock = null;
 let qrCodeData = null;   // data: URL of the current QR (null once connected)
 let clientReady = false;
@@ -290,6 +335,15 @@ async function handleInbound(msg) {
         // Ignore groups, status broadcasts, newsletters.
         if (jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.endsWith('@newsletter')) return;
         const sender = resolveSender(msg.key);
+
+        // Privacy filter: on the customer-facing number, only forward messages
+        // from the shop's OWN customers. Anything from a non-customer (family,
+        // friends, unknown) is dropped here and never sent to the server. Fail
+        // open while the allow-list has not loaded yet (allowSet === null).
+        if (WA_CHANNEL === 'shop' && allowSet && !allowSet.has(_last10(sender))) {
+            return;
+        }
+
         const text = textOf(msg.message);
 
         // Bill photos: forward image so the backend can OCR it.
@@ -609,3 +663,10 @@ app.listen(PORT, () => {
     console.log(`WhatsApp Background Service (Baileys) running on port ${PORT} [channel=${WA_CHANNEL}, session=${SESSION_ID}]`);
     console.log(`Forwarding inbound messages to ${BACKEND_URL}/webhooks/aisensy`);
 });
+
+// Load the privacy allow-list shortly after boot, then refresh every 10 min so
+// new customers are picked up. Shop channel only; no-op without a token.
+if (WA_CHANNEL === 'shop' && WA_TOKEN) {
+    setTimeout(refreshAllowlist, 8000);
+    setInterval(refreshAllowlist, 10 * 60 * 1000);
+}

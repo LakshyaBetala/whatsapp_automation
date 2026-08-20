@@ -234,6 +234,10 @@ const SPECS = {
               // detection never fires. Falls back to shop config's backend_url.
               env: { ...NODE_ENV, PORT: '3001', SESSION_ID: 'default', WA_CHANNEL: 'shop',
                      BACKEND_URL: CONFIG.backendUrl || 'http://localhost:8000',
+                     // Token lets wa_service pull this shop's customer allow-list, so
+                     // it forwards ONLY customer messages and personal chats never
+                     // leave the laptop. Omitted -> filter off (fails open).
+                     WA_TOKEN: CONFIG.token || '',
                      WA_AUTH_DIR: WA_AUTH_ROOT } },
   watcher: agentService(['--watch']),
   drainer: agentService(['--drain-outbox']),

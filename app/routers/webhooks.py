@@ -117,6 +117,47 @@ async def verify_webhook(
     return PlainTextResponse(content="Forbidden", status_code=403)
 
 
+@router.get("/allowlist")
+async def wa_allowlist(token: str = Query(default="")):
+    """The shop's own customer numbers (last 10 digits) for the given agent token.
+
+    Privacy: the shop's wa_service uses this to forward ONLY messages from its
+    customers. Messages from anyone else - family, friends, unknown numbers -
+    are then never sent to the server at all; they stay on the shop's laptop.
+    This is the shop's own data going back to the shop's own machine.
+
+    Best-effort: any error returns an empty list, and wa_service fails OPEN
+    (keeps forwarding) so a hiccup never silently drops a real customer's reply.
+    """
+    from app.db import get_client
+    from app.services import phones
+    db = get_client()
+    if db is None or not token:
+        return {"numbers": []}
+    try:
+        biz = (db.table("businesses").select("id")
+               .eq("agent_token", token).limit(1).execute()).data
+        if not biz:
+            return {"numbers": []}
+        bid = biz[0]["id"]
+        nums: set[str] = set()
+        start = 0
+        while True:
+            rows = (db.table("clients").select("whatsapp_number")
+                    .eq("business_id", bid).range(start, start + 999).execute()).data or []
+            for r in rows:
+                n = phones.last10(r.get("whatsapp_number") or "")
+                if len(n) == 10:
+                    nums.add(n)
+            if len(rows) < 1000:
+                break
+            start += 1000
+        return {"numbers": sorted(nums)}
+    except Exception:
+        log.debug("allowlist build failed", exc_info=True)
+        return {"numbers": []}
+
+
 # ── POST: Inbound message processing ─────────────────────────────────
 
 @router.post("/aisensy")

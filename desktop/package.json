@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "1.9.9",
+  "version": "2.0.0",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "Smoother updates: fixed the \"ASVA cannot be closed\" message that could pop up while updating. ASVA now closes its background parts on its own and installs the update quietly, so you no longer have to close anything by hand.\n\nAlso in recent updates: a cleaner, sturdier Today screen - Who to chase shows each customer's phone number with one-tap Call next to Remind; add a missing number right on Today for the customers who owe you but have no WhatsApp; honest counts (only customers who OWE you and have no number, never every party); do-not-chase customers stay off the chase list; opening a payment no longer leaves Today stuck on another page; and the page recovers on its own instead of going blank. Plus trade-based due dates (electricals 60 days) when Tally has none, a fairer reliability score where one late bill among many paid does not drag a customer down, a money-in alert when a customer says they paid, your WhatsApp login surviving updates, and a one-tap 'confirm your balance' you can send at most once every 90 days."
+      "releaseNotes": "ASVA 2.0.\n\nYour privacy, locked down: messages from anyone who is not your customer - family, friends, groups, unknown numbers - now never leave your computer. ASVA only ever receives a message when your own customer replies about a payment.\n\nSmoother updates: the \"ASVA cannot be closed\" message is fixed. ASVA closes its background parts on its own and installs quietly - nothing to close by hand.\n\nA new Today home: money that came in, who to chase (biggest first, with each customer's phone and one-tap Call), cash likely this week, and how many days your money is stuck. Honest counts, do-not-chase customers stay off the list, add a missing number right there, and the page recovers on its own instead of going blank.\n\nSmarter assistant: it pitches a new lead once and then stays quiet, and hands over to you the moment someone is interested, so it never talks over your conversation.\n\nAlso: trade-based due dates (electricals 60 days) when Tally has none, a fairer reliability score where one late bill among many paid does not drag a customer down, a money-in alert when a customer says they paid, and your WhatsApp login surviving updates."
     },
     "files": [
       "main.js",
