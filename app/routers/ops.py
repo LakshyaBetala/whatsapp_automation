@@ -511,7 +511,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <button class="x" onclick="closeAdd()">&times;</button>
   <h3>Onboard a shop</h3>
   <p class="sub">Creates the business, its licence key and a private agent token.</p>
-  <div class="fld"><label>Shop / business name</label><input id="f_biz" placeholder="Rishab Trading Company"></div>
+  <div class="fld"><label>Shop / business name</label><input id="f_biz" placeholder="Business name"></div>
   <div class="fld"><label>Owner name</label><input id="f_owner" placeholder="Owner"></div>
   <div class="fld"><label>WhatsApp number (10-digit)</label><input id="f_wa" inputmode="numeric" placeholder="9876543210"></div>
   <div class="row2">

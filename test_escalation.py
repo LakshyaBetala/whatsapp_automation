@@ -1,5 +1,5 @@
-"""Escalation ladder: tone firms up with days overdue; promise breaks bump it;
-the formal letter is firm but never a legal threat."""
+"""Owner-approved escalation: tier_for is a severity LABEL only (never auto-changes
+a customer message); the owner-triggered formal letter is firm but never a threat."""
 from app.services import escalation as esc
 
 
@@ -21,22 +21,11 @@ def test_broken_promise_bumps_to_at_least_firm():
     assert esc.tier_for(60, promise_broken=True) == esc.FINAL    # already final, stays
 
 
-def test_intro_line_tone_rises():
-    biz = "ACME"
-    assert "reminder" in esc.intro_line(esc.GENTLE, biz, en=True).lower()
-    assert "overdue" in esc.intro_line(esc.STANDARD, biz, en=True).lower()
-    assert "past due" in esc.intro_line(esc.FIRM, biz, en=True).lower()
-    assert "final" in esc.intro_line(esc.FINAL, biz, en=True).lower()
-    # Hinglish variants exist and are non-empty
-    for t in (esc.GENTLE, esc.STANDARD, esc.FIRM, esc.FINAL):
-        assert esc.intro_line(t, biz, en=False)
-
-
-def test_closing_line_only_for_firm_and_final():
-    assert esc.closing_line(esc.GENTLE, en=True) == ""
-    assert esc.closing_line(esc.STANDARD, en=True) == ""
-    assert esc.closing_line(esc.FIRM, en=True)
-    assert esc.closing_line(esc.FINAL, en=True)
+def test_no_auto_tone_helpers_exist():
+    # Guard the product decision: there must be NO function that auto-escalates a
+    # customer message's tone. Only the owner-triggered letter escalates.
+    assert not hasattr(esc, "intro_line")
+    assert not hasattr(esc, "closing_line")
 
 
 def test_formal_letter_is_firm_not_a_threat():

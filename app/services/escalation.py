@@ -1,14 +1,16 @@
-"""Escalation ladder: the reminder tone firms up as an invoice ages.
+"""Owner-approved escalation - NOT automatic.
 
-Deliberately *light* and owner-safe:
-- Tone escalates gentle -> standard -> firm -> final with days past due.
-- A broken promise bumps the tier up (to at least 'firm').
-- The top rung is a FINAL reminder in the owner's own voice, and an
-  owner-triggered formal reminder LETTER (see formal_letter_text) - NEVER an
-  automated legal threat. Debt-collection messaging in India is constrained
-  (harassment / defamation), so anything stronger stays owner-approved.
+Deliberate product decision: ASVA never makes its reminder tone harsher on its
+own. Every cadence reminder stays the same polite message; the cadence (e.g. a
+reminder every 7 days while overdue) is what repeats, not the harshness. A firmer,
+formal message goes out ONLY when the OWNER explicitly triggers it (LETTER
+<name>). Debt-collection messaging in India is constrained (harassment /
+defamation), so anything stronger than a normal reminder stays owner-approved and
+is never an automated legal threat.
 
-Pure functions, no I/O, so they are trivially testable and cannot break a send.
+`tier_for` is a read-only severity LABEL (used to gently flag very-overdue parties
+to the owner so THEY can decide to send a letter). It never changes what a
+customer receives automatically. Pure functions; no I/O.
 """
 from __future__ import annotations
 
@@ -17,8 +19,8 @@ _ORDER = [GENTLE, STANDARD, FIRM, FINAL]
 
 
 def tier_for(days_overdue: int | None, promise_broken: bool = False) -> str:
-    """Pick the tone tier from how many days past due the oldest bill is.
-    A broken promise escalates to at least 'firm'."""
+    """A severity LABEL from days past due (for flagging to the OWNER only, never
+    to auto-change a customer message). A broken promise labels at least 'firm'."""
     d = int(days_overdue or 0)
     if d <= 7:
         t = GENTLE
@@ -31,34 +33,6 @@ def tier_for(days_overdue: int | None, promise_broken: bool = False) -> str:
     if promise_broken and _ORDER.index(t) < _ORDER.index(FIRM):
         t = FIRM
     return t
-
-
-def intro_line(tier: str, biz: str, en: bool) -> str:
-    """The header line under the greeting. Tone rises with the tier; still
-    respectful at every rung."""
-    if en:
-        return {
-            GENTLE:   f"A payment reminder from {biz}.",
-            STANDARD: f"A reminder from {biz}: this payment is now overdue.",
-            FIRM:     f"From {biz}: this payment is well past due. Please arrange it at the earliest.",
-            FINAL:    f"From {biz}: a final reminder. Please clear this now to avoid further follow-up.",
-        }[tier]
-    return {
-        GENTLE:   f"{biz} ki taraf se payment ka vinamra reminder.",
-        STANDARD: f"{biz} ki taraf se reminder: yeh payment ab overdue ho gaya hai.",
-        FIRM:     f"{biz} ki taraf se: yeh payment kaafi overdue hai. Kripya jaldi arrange karein.",
-        FINAL:    f"{biz} ki taraf se: aakhri reminder. Aage follow-up se bachne ke liye kripya abhi clear karein.",
-    }[tier]
-
-
-def closing_line(tier: str, en: bool) -> str:
-    """An extra firm nudge for the top two rungs only. Empty for gentle/standard
-    (so an on-time-ish party never gets a hard line)."""
-    if tier == FIRM:
-        return "Please treat this as urgent." if en else "Kripya ise urgent samjhein."
-    if tier == FINAL:
-        return "Kindly clear this immediately." if en else "Kripya ise turant clear karein."
-    return ""
 
 
 def formal_letter_text(shop: str, party: str, amount: str, days_overdue: int,

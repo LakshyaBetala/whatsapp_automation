@@ -1006,6 +1006,7 @@ def _manual_bill_body(client_name: str, business_name: str, invoice_number: str,
     """Customer message for an owner-added bill (photo or text), in ONE language:
     pure English when the shop is set to English, otherwise pure Hinglish. Keeps
     an English shop from sending a Hinglish line (and vice versa)."""
+    business_name = names.clean_business(business_name)   # no Tally FY suffix to the customer
     if english:
         lines = [f"Hello {client_name},",
                  f"Your new bill from {business_name}.", "",
@@ -1488,7 +1489,9 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
     total = entry["total"]
     bills = entry["bills"]
     today = date.today()
-    biz_name = business.get("business_name", "")
+    # Customer-facing: strip any Tally FY/date suffix so the message reads
+    # "from ACME TRADERS", never "from ACME TRADERS - (from 1-Apr-2019)".
+    biz_name = names.clean_business(business.get("business_name", ""))
     # Professional copy in the party's reminder-batch language (Hinglish default).
     from app.services.batches import resolve_batch
     batch = resolve_batch(business, client.get("reminder_batch"))
@@ -1497,22 +1500,13 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
     def _age(b) -> int:
         return (today - date.fromisoformat(str(b["invoice_date"]))).days
 
-    def _overdue(b) -> int:
-        dd = b.get("due_date")
-        try:
-            return (today - date.fromisoformat(str(dd)[:10])).days if dd else _age(b)
-        except (TypeError, ValueError):
-            return _age(b)
-
-    # Escalation ladder: the tone firms up with how far past due the OLDEST bill
-    # is (gentle -> standard -> firm -> final). Respectful at every rung; the
-    # hardest rung is still the owner's own voice, never a legal threat.
-    from app.services import escalation
-    tier = escalation.tier_for(max((_overdue(b) for b in bills), default=0))
-    intro = escalation.intro_line(tier, biz_name, en)
-
+    # Tone is DELIBERATELY constant and polite on every cadence send. ASVA never
+    # escalates the tone on its own - a firmer, formal message goes out ONLY when
+    # the owner explicitly triggers it (LETTER <name>). The cadence itself (e.g. a
+    # reminder every 7 days while overdue) is what repeats; the wording does not
+    # get harsher automatically.
     if en:
-        lines = [f"Dear {name},", intro, ""]
+        lines = [f"Dear {name},", f"A payment reminder from {biz_name}.", ""]
         if len(bills) == 1:
             b = bills[0]
             lines.append(f"Invoice {b.get('invoice_number') or '-'}: {inr(total)} outstanding ({_age(b)} days).")
@@ -1524,7 +1518,7 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
                 lines.append(f"- and {len(bills) - 4} more")
             lines.append(f"Total outstanding: {inr(total)}")
     else:
-        lines = [f"Namaste {name} ji,", intro, ""]
+        lines = [f"Namaste {name} ji,", f"{biz_name} ki taraf se payment ka vinamra reminder.", ""]
         if len(bills) == 1:
             b = bills[0]
             lines.append(f"Bill {b.get('invoice_number') or '-'} ka {inr(total)} baaki hai ({_age(b)} din).")
@@ -1575,10 +1569,6 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
         lines += ["", discount_line]
     if batch.get("line"):
         lines += ["", batch["line"]]
-    # Firm/final rungs add one urgent line; gentle/standard stay soft.
-    _close = escalation.closing_line(tier, en)
-    if _close:
-        lines += ["", _close]
     lines += ["", ("Once paid, kindly reply PAID. Thank you."
                    if en else "Payment ho jaye to PAID reply karein. Dhanyavaad.")]
 
@@ -1724,13 +1714,13 @@ async def _handle_letter(business: dict, arg: str, *, lang: str = "english") -> 
             return int(entry.get("oldest_days") or 0)
     max_od = max((_od(b) for b in entry["bills"]), default=int(entry.get("oldest_days") or 0))
     en = _biz_is_en(business_id)
+    shop = names.clean_business(business.get("business_name", ""))
     letter = escalation.formal_letter_text(
-        business.get("business_name", ""), client.get("name", "Customer"),
-        inr(entry["total"]), max_od, en=en)
+        shop, client.get("name", "Customer"), inr(entry["total"]), max_od, en=en)
     result = await whatsapp.send_template(
         business_id=business_id, to_number=phone, campaign_name="manual_remind_hi",
-        template_params=[client.get("name", ""), business.get("business_name", ""), inr(entry["total"])],
-        business_name=business.get("business_name", ""), plan=Plan(business["plan"]),
+        template_params=[client.get("name", ""), shop, inr(entry["total"])],
+        business_name=shop, plan=Plan(business["plan"]),
         message_type=MessageType.reminder, client_id=client.get("id"),
         bill_id=entry["bills"][0]["id"], language=Lang(client.get("language") or "hi"),
         message_text=letter, priority=True)

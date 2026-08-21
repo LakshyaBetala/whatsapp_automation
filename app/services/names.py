@@ -83,6 +83,30 @@ def _cap(w: str) -> str:
     return w[:i] + w[i].upper() + w[i + 1:].lower()
 
 
+_FY_SUFFIX_RE = re.compile(
+    r"(?:\s*[-–]\s*\((?:from\s+[^)]*|as\s+at[^)]*|\d{1,4}\s*[-/]\s*\d{1,4})\))+\s*$",
+    re.IGNORECASE,
+)
+
+
+def clean_business(raw: str) -> str:
+    """A Tally COMPANY name -> the clean shop name a customer should see.
+
+    Tally company names often carry financial-year / date markers that must never
+    reach a customer's WhatsApp (fictional examples):
+      'ACME TRADERS - (from 1-Apr-2019) - (from 1-Apr-2020)' -> 'ACME TRADERS'
+      'EXAMPLE AGENCIES - (from 1-Apr-24)'                   -> 'EXAMPLE AGENCIES'
+      'SAMPLE CHEMICALS - (25-26)'                           -> 'SAMPLE CHEMICALS'
+    Conservative: only strips trailing ' - (from ...)' / ' - (as at ...)' /
+    ' - (YY-YY)' markers, so a legitimate name like 'ACME (India)' is untouched,
+    and never returns empty (falls back to the trimmed original)."""
+    s = (raw or "").strip()
+    if not s:
+        return s
+    cleaned = _FY_SUFFIX_RE.sub("", s).strip(" -–,")
+    return cleaned or s
+
+
 def clean_display(raw: str) -> str:
     """A messy Tally ledger name -> the human name the owner recognizes.
 

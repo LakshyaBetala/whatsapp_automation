@@ -221,3 +221,20 @@ def test_real_shop_owner_typed_lookups():
     assert REAL[names.resolve("deepak", REAL)["index"]] == "New Deepak Hardware (Main)"
     assert REAL[names.resolve("kumar prov", REAL)["index"]] == "Kumar Provision Stores"
     assert names.resolve("zzz", REAL)["status"] == "none"
+
+
+# ── clean_business: strip Tally FY/date suffixes from customer-facing names ──
+def test_clean_business_strips_fy_suffixes():
+    from app.services.names import clean_business
+    assert clean_business("EXAMPLE AGENCIES - (from 1-Apr-24)") == "EXAMPLE AGENCIES"
+    assert clean_business(
+        "ACME TRADERS - (from 1-Apr-2019) - (from 1-Apr-2020) - (from 1-Apr-2021)"
+    ) == "ACME TRADERS"
+    assert clean_business("SAMPLE CHEMICALS - (25-26)") == "SAMPLE CHEMICALS"
+    assert clean_business("DEMO SALES AND SERVICES - (from 1-Apr-24)") == "DEMO SALES AND SERVICES"
+    # leaves a clean name untouched, incl. legitimate parentheses
+    assert clean_business("GENERIC TRADING COMPANY") == "GENERIC TRADING COMPANY"
+    assert clean_business("ACME (India)") == "ACME (India)"
+    # never returns empty
+    assert clean_business("") == ""
+    assert clean_business("   ") == ""

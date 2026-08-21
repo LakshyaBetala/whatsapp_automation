@@ -93,6 +93,10 @@ async def _generate_and_deliver(
     bill = bill_resp.data
     client = bill.get("clients") or {}
     biz = bill.get("businesses") or {}
+    # Customer-facing shop name with any Tally FY/date suffix stripped, so a bill
+    # never reads "from ACME TRADERS - (from 1-Apr-2019)".
+    from app.services import names as _names
+    shop_name = _names.clean_business(biz.get("business_name", ""))
 
     # Calculate previous outstanding for this client (excluding this bill)
     prev_resp = (
@@ -117,7 +121,7 @@ async def _generate_and_deliver(
     if not have_direct and not pdf_url:
         try:
             pdf_url = await pdf_service.generate_invoice_pdf(
-                business_name=biz.get("business_name", ""),
+                business_name=shop_name,
                 business_phone=biz.get("whatsapp_number", ""),
                 upi_vpa=biz.get("upi_vpa"),
                 client_name=client.get("name", "Customer"),
@@ -150,7 +154,7 @@ async def _generate_and_deliver(
         tpl_name, body = render(
             "invoice", lang,
             client=client.get("name", "Customer"),
-            business=biz.get("business_name", ""),
+            business=shop_name,
             invoice_number=invoice_num,
             amount=amount_str,
             date=date.fromisoformat(str(bill["invoice_date"])).strftime("%d-%m-%Y"),
@@ -181,12 +185,12 @@ async def _generate_and_deliver(
                 campaign_name=tpl_name,
                 template_params=[
                     client.get("name", "Customer"),
-                    biz.get("business_name", ""),
+                    shop_name,
                     invoice_num,
                     amount_str,
                     date.fromisoformat(str(bill["invoice_date"])).strftime("%d-%m-%Y"),
                 ],
-                business_name=biz.get("business_name", ""),
+                business_name=shop_name,
                 plan=plan,
                 message_type=MessageType.invoice,
                 client_id=client.get("id"),
