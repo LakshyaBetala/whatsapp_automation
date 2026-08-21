@@ -113,6 +113,37 @@ def test_post_internal_error_still_returns_200(monkeypatch):
     assert r.json() == {"ok": True, "error": "internal"}
 
 
+# ── Security: bot-channel impersonation gate ─────────────────────────────
+
+def test_bot_channel_without_secret_is_rejected_when_secret_configured(monkeypatch):
+    """A stranger POSTing channel=bot (owner commands) must NOT be processed once a
+    webhook secret is configured. This is the impersonation hole the secret closes."""
+    monkeypatch.setattr(webhooks.settings, "aisensy_webhook_secret", "shh")
+    handle = AsyncMock(return_value="SECRET DEBTOR LIST")
+    with patch("app.services.bot.handle", handle):
+        r = client.post("/webhooks/aisensy", json={
+            "data": {"sender": "919876543210", "message": "LIST", "messageId": "z1", "channel": "bot"},
+        })  # no x-webhook-secret header
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    handle.assert_not_called()          # owner handler never ran, no data leaked
+
+
+def test_bot_channel_with_correct_secret_is_processed(monkeypatch):
+    monkeypatch.setattr(webhooks.settings, "aisensy_webhook_secret", "shh")
+    db = FakeDB({"businesses": [BIZ], "messages": []})
+    monkeypatch.setattr(webhooks, "require_db", lambda: db)
+    monkeypatch.setattr(webhooks, "_match_row", lambda db, table, field, val: BIZ if table == "businesses" else None)
+    handle = AsyncMock(return_value="ok")
+    with patch("app.services.bot.handle", handle):
+        r = client.post("/webhooks/aisensy",
+                        json={"data": {"sender": "919876543210", "message": "LIST",
+                                       "messageId": "z2", "channel": "bot"}},
+                        headers={"x-webhook-secret": "shh"})
+    assert r.status_code == 200
+    handle.assert_awaited_once()
+
+
 # ── POST: dedup by messageId ─────────────────────────────────────────────
 
 def test_post_processes_new_message_and_records_it(monkeypatch):

@@ -21,17 +21,44 @@ AiSensy retries on non-200, causing duplicate processing.
 from __future__ import annotations
 
 import logging
+import secrets as _secrets
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from app.config import settings
-from app.db import require_db
+from app.db import require_db, get_client
 from app.services import bot
 from app.services.bot import _match_row
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+def _secret_ok(supplied: str | None) -> bool:
+    """Constant-time check of the shared inbound-webhook secret."""
+    configured = (settings.aisensy_webhook_secret or "").strip()
+    return bool(configured) and bool(supplied) and _secrets.compare_digest(
+        supplied.strip(), configured)
+
+
+def _token_is_a_business(agent_token: str | None) -> bool:
+    """True if this agent_token belongs to a real paired shop. Authenticates that
+    a legitimate shop install (not a random internet client) forwarded the inbound
+    message, without shipping a shared fleet secret. Best-effort: DB down -> False."""
+    tok = (agent_token or "").strip()
+    if not tok:
+        return False
+    try:
+        db = get_client()
+        if db is None:
+            return False
+        r = (db.table("businesses").select("id").eq("agent_token", tok)
+             .limit(1).execute()).data
+        return bool(r)
+    except Exception:
+        log.debug("agent-token check failed", exc_info=True)
+        return False
 
 
 def _record_inbound(db, sender: str, message_id: str) -> None:
@@ -168,15 +195,6 @@ async def aisensy_inbound(request: Request):
     which causes duplicate processing. Errors are logged, never surfaced.
     """
     try:
-        # Optional shared-secret check
-        if settings.aisensy_webhook_secret:
-            token = request.headers.get("x-webhook-secret") or request.query_params.get(
-                "secret"
-            )
-            if token != settings.aisensy_webhook_secret:
-                log.warning("Rejected webhook with bad secret")
-                return {"ok": True}  # Still 200 - don't trigger retry
-
         body = await request.json()
         sender, text, message_id = _extract(body)
         data = body.get("data") or body
@@ -185,6 +203,42 @@ async def aisensy_inbound(request: Request):
         # Which number received this: "shop" (customer-facing) or "bot"
         # (owner-only ASVA assistant). Defaults to shop for backward compat.
         channel = data.get("channel") or "shop"
+
+        # ── Authentication ────────────────────────────────────────────────
+        # This endpoint is public (the BSP/wa_service POSTs here), so it MUST NOT
+        # trust the client-supplied `channel`. Without this gate, anyone could POST
+        # {sender:<a shop's number>, channel:"bot", message:"LIST"} and have the
+        # OWNER command handler run + get the reply back = full impersonation.
+        #   - bot channel (owner commands: LIST/PAID/BILL/STOP): the ASVA assistant
+        #     number runs on OUR host, so it can carry the shared secret. REQUIRE it.
+        #   - shop channel (silent customer capture): each shop's wa_service carries
+        #     its own agent_token; require it to map to a real paired shop. Older
+        #     builds that predate the token header are allowed through (logged) so
+        #     customer capture never breaks mid-rollout - tightened once the fleet
+        #     ships the token-sending wa_service.
+        configured_secret = (settings.aisensy_webhook_secret or "").strip()
+        secret_hdr = request.headers.get("x-webhook-secret") or request.query_params.get("secret")
+        agent_tok = request.headers.get("x-agent-token")
+        # A supplied-but-WRONG secret is always rejected (any channel) - it signals
+        # tampering, never a legitimate caller.
+        if configured_secret and secret_hdr is not None and not _secret_ok(secret_hdr):
+            log.warning("Rejected inbound with a wrong webhook secret")
+            return {"ok": True}                         # 200 so the BSP won't retry
+        if channel == "bot":
+            # Owner commands (LIST/PAID/BILL/STOP) are high-value: once a secret is
+            # configured, require it. Our ASVA assistant number sends it; a stranger
+            # cannot. Until it is configured on this server, allow but warn loudly.
+            if configured_secret:
+                if not _secret_ok(secret_hdr):
+                    log.warning("Rejected BOT-channel inbound without a valid secret (sender=%s)", sender)
+                    return {"ok": True}
+            else:
+                log.warning("BOT-channel inbound processed with NO webhook secret configured "
+                            "- set AISENSY_WEBHOOK_SECRET to close owner-command impersonation")
+        else:  # shop channel: prove a real paired shop forwarded it (once shops send it)
+            if agent_tok is not None and not _token_is_a_business(agent_tok):
+                log.warning("Rejected SHOP-channel inbound with an unknown agent token")
+                return {"ok": True}
 
         if not sender or (not text and not media_b64):
             log.info("Ignoring webhook with no actionable message")

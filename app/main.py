@@ -7,9 +7,12 @@ DB-backed endpoints will report the missing configuration clearly.
 from __future__ import annotations
 
 import logging
+import time as _time
+from collections import deque
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app import scheduler
 from app.config import settings
@@ -46,11 +49,21 @@ async def lifespan(_: FastAPI):
         log.info("Shutdown complete.")
 
 
+# In production, hide the interactive API docs + schema. They reveal the full
+# endpoint surface (e.g. the inbound webhook, ops/admin routes) to anyone on the
+# internet; there is no reason a shop or a stranger needs them. Left ON in dev.
+_docs = None if settings.is_production else "/docs"
+_redoc = None if settings.is_production else "/redoc"
+_openapi = None if settings.is_production else "/openapi.json"
+
 app = FastAPI(
     title="ASVA",
-    version="0.2.0",
+    version=settings.app_version,
     summary="Automatic WhatsApp bills, reminders and EOD digest from TallyPrime.",
     lifespan=lifespan,
+    docs_url=_docs,
+    redoc_url=_redoc,
+    openapi_url=_openapi,
 )
 
 # Router order matters for /docs readability
@@ -67,6 +80,54 @@ app.include_router(ops.router)                # /ops - operator command center (
 app.include_router(mobile.router)             # /m - read-only mobile companion (PWA)
 app.include_router(downloads.router)          # /download - public software download page
 app.include_router(site.router)               # public marketing site: / , /how-it-works, /features, /pricing, /use-cases, sitemap, robots
+
+
+# ── Per-IP rate limit for the PUBLIC, unauthenticated endpoints ────────────
+# Only the inbound webhook and the allow-list are reachable without a credential,
+# so only they need a brute-force / spam brake. In-process sliding window (fine:
+# the app runs a single worker). Cloudflare sits in front, so the real client is
+# CF-Connecting-IP. Generous limits - a busy shop's genuine traffic never trips.
+_RL_RULES = {"/webhooks/aisensy": (120, 60), "/webhooks/allowlist": (30, 60)}
+_rl_hits: dict[str, deque] = {}
+
+
+def _client_ip(request: Request) -> str:
+    return (request.headers.get("cf-connecting-ip")
+            or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or (request.client.host if request.client else "?"))
+
+
+@app.middleware("http")
+async def _guard(request: Request, call_next):
+    path = request.url.path
+    rule = _RL_RULES.get(path)
+    if rule:
+        limit, window = rule
+        key = f"{path}|{_client_ip(request)}"
+        now = _time.monotonic()
+        q = _rl_hits.setdefault(key, deque())
+        while q and now - q[0] > window:
+            q.popleft()
+        if len(q) >= limit:
+            # 200 for the webhook (a non-200 makes the BSP retry = worse); 429 else.
+            if path == "/webhooks/aisensy":
+                return JSONResponse({"ok": True, "throttled": True})
+            return JSONResponse({"error": "rate limited"}, status_code=429)
+        q.append(now)
+        if len(_rl_hits) > 5000:                      # cheap unbounded-growth guard
+            for k in [k for k, v in _rl_hits.items() if not v or now - v[-1] > 300]:
+                _rl_hits.pop(k, None)
+    resp = await call_next(request)
+    # Security headers on every response. no-referrer matters most: tokens ride in
+    # some URLs (?token=, ?key=), and this stops them leaking via the Referer header
+    # when an admin page links out.
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    if settings.is_production:
+        resp.headers.setdefault("Strict-Transport-Security",
+                                "max-age=31536000; includeSubDomains")
+    return resp
 
 
 @app.get("/api")

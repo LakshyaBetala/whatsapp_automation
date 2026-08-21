@@ -1,4 +1,5 @@
 import logging
+import secrets
 import uuid
 from datetime import date, timedelta
 from typing import List, Optional
@@ -145,7 +146,8 @@ def _verify_token(business_id: uuid.UUID, agent_token: str):
     resp = db.table("businesses").select("agent_token").eq("id", str(business_id)).execute()
     if not resp.data:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Business not found")
-    if resp.data[0].get("agent_token") != agent_token:
+    stored = resp.data[0].get("agent_token") or ""
+    if not secrets.compare_digest(str(stored), str(agent_token or "")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent_token")
     return db
 

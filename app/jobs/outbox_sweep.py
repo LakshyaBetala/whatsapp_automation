@@ -58,6 +58,45 @@ def within_send_window(now: datetime | None = None) -> bool:
     return settings.send_window_start_hour <= now.hour < settings.send_window_end_hour
 
 
+async def expire_stale() -> None:
+    """Expire queued rows older than EXPIRE_HOURS, on the QUEUING host, regardless
+    of whether any shop is online.
+
+    Why this exists: on the thin-client split the shop delivers its own queue and
+    also runs the age-expiry (inside outbox.pull). So while a shop laptop is OFF
+    for days, NOTHING expires - the queue just grows, and when the laptop finally
+    comes back it would try to deliver days-old reminders. This server-side sweep
+    caps the backlog at EXPIRE_HOURS no matter how long a shop is dark, so a
+    reconnecting shop never blasts stale reminders. It only EXPIRES (never sends),
+    so it is safe to run on the VPS where delivery is disabled."""
+    from app.db import get_client
+    db = get_client()
+    if db is None:
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=EXPIRE_HOURS)).isoformat()
+    try:
+        rows = (db.table("wa_outbox")
+                .select("id, business_id, message_db_id, attempts")
+                .eq("status", "queued").lt("created_at", cutoff)
+                .limit(2000).execute()).data or []
+    except Exception:
+        log.warning("outbox expire_stale query failed", exc_info=True)
+        return
+    for r in rows:
+        try:
+            db.table("wa_outbox").update(
+                {"status": "failed", "last_error": "expired (stale > %dh)" % EXPIRE_HOURS,
+                 "attempts": int(r.get("attempts") or 0)}
+            ).eq("id", r["id"]).execute()
+            if r.get("message_db_id"):
+                db.table("messages").update({"delivery_status": "expired"}).eq(
+                    "id", r["message_db_id"]).execute()
+        except Exception:
+            log.warning("could not expire outbox row %s", r.get("id"), exc_info=True)
+    if rows:
+        log.info("outbox expire_stale: expired %d stale queued rows", len(rows))
+
+
 def _is_transient(exc: Exception) -> bool:
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
         return True  # wa_service not running

@@ -191,6 +191,7 @@ async def _drain_once(config: dict) -> int:
             if sent:
                 await asyncio.sleep(random.uniform(8, 20))   # human pacing
             status, err = "sent", None
+            attempts = int(it.get("attempts", 0)) + 1
             try:
                 resp = await http.post(f"{wa}/api/wa/send", json=it["payload"])
                 resp.raise_for_status()
@@ -199,13 +200,21 @@ async def _drain_once(config: dict) -> int:
                     raise RuntimeError(data.get("error", "wa_service reported failure"))
                 sent += 1
             except Exception as exc:                          # noqa: BLE001
+                # Transient (WhatsApp session down / service not up) -> keep queued
+                # and retry next cycle. A per-message failure (wa_service returned
+                # success:false, e.g. not on WhatsApp) is permanent -> mark failed
+                # and CONTINUE so one bad recipient never blocks the rest.
                 status = "queued" if _drain_transient(exc) else "failed"
                 err = str(exc)[:300]
             await http.post(f"{base}/license/outbox/ack",
                             json={"agent_token": token, "id": it["id"],
-                                  "status": status, "attempts": it.get("attempts", 0) + 1,
+                                  "status": status, "attempts": attempts,
                                   "error": err})
-            if status == "queued":
+            # Only STOP the batch when the WhatsApp session is genuinely down and
+            # nothing has sent yet - hammering a down session is pointless. A
+            # permanent per-message failure does NOT stop the batch (we continue to
+            # the next row), so one poison recipient can't starve newer reminders.
+            if status == "queued" and sent == 0:
                 break               # shop WhatsApp offline - stop, retry next cycle
     return sent
 

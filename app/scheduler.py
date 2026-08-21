@@ -131,6 +131,21 @@ def start() -> AsyncIOScheduler:
     else:
         log.info("Outbox send DISABLED (ENABLE_OUTBOX_SEND=false)")
 
+    # Outbox stale-expiry: cap the queue at EXPIRE_HOURS even while a shop laptop
+    # is OFF for days (its own pull-time expiry can't run then). Expires only -
+    # never sends - so it belongs on the queuing host (send_via_outbox=true, the
+    # VPS) and is safe there even though delivery is disabled. Runs every 15 min.
+    if settings.send_via_outbox or settings.enable_outbox_send:
+        sched.add_job(
+            _tracked("outbox_expiry", outbox_sweep.expire_stale),
+            IntervalTrigger(minutes=15),
+            id="outbox_expiry",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+
     # Health watchdog: build the snapshot, check the bot WhatsApp, and email the
     # operator about anything that needs attention (server/bot/shop WhatsApp
     # down, stuck queues, high failure rate). Runs on the HOST only.

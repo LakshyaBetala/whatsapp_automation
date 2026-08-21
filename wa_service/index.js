@@ -108,7 +108,7 @@ function mkLogger() {
 const logger = mkLogger();
 
 // POST JSON with Node's built-in http/https (no global fetch dependency).
-function postJson(urlStr, bodyObj, timeoutMs = 30000) {
+function postJson(urlStr, bodyObj, timeoutMs = 30000, extraHeaders = {}) {
     return new Promise((resolve, reject) => {
         let u;
         try { u = new URL(urlStr); } catch (e) { return reject(e); }
@@ -119,7 +119,8 @@ function postJson(urlStr, bodyObj, timeoutMs = 30000) {
             port: u.port || (u.protocol === 'https:' ? 443 : 80),
             path: u.pathname + u.search,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length },
+            headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length,
+                       ...(extraHeaders || {}) },
             timeout: timeoutMs,
         }, (res) => {
             let data = '';
@@ -165,6 +166,10 @@ function getJson(urlStr, timeoutMs = 20000) {
 // never leaves the laptop. Fail-OPEN: until the list has loaded (or if a fetch
 // fails), we keep forwarding so a real customer's reply is never missed.
 const WA_TOKEN = process.env.WA_TOKEN || '';
+// Shared secret proving a BOT-channel forward really came from our own ASVA
+// assistant number (set on the host bot service + backend). Shop channel proves
+// itself with WA_TOKEN instead, so this stays empty on shop laptops.
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 let allowSet = null;                 // null = not loaded yet -> fail open
 function _last10(n) { const d = String(n || '').replace(/\D/g, ''); return d.length > 10 ? d.slice(-10) : d; }
 async function refreshAllowlist() {
@@ -360,9 +365,15 @@ async function handleInbound(msg) {
         }
         if (!text && !media_base64) return;
 
+        // Authenticate this forward so the public webhook can trust it (see the
+        // backend's aisensy_inbound gate): the bot number carries the shared
+        // WEBHOOK_SECRET; a shop carries its own agent token.
+        const inHdrs = {};
+        if (WEBHOOK_SECRET) inHdrs['x-webhook-secret'] = WEBHOOK_SECRET;
+        if (WA_TOKEN) inHdrs['x-agent-token'] = WA_TOKEN;
         const resp = await postJson(`${BACKEND_URL}/webhooks/aisensy`, {
             data: { sender, message: text, messageId: msg.key.id, media_base64, media_type, channel: WA_CHANNEL },
-        });
+        }, 30000, inHdrs);
         const reply = (resp.json && typeof resp.json.reply === 'string') ? resp.json.reply : '';
         const via = jid.endsWith('@lid') ? ` (lid ${jid.split('@')[0]})` : '';
         console.log(`Inbound from ${sender}${via}: "${text.slice(0, 40)}" -> backend ${resp.status}, reply ${reply.length} chars`);
