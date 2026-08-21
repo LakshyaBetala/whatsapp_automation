@@ -700,7 +700,7 @@ function maybeWelcomeAfterUpdate() {
           new Notification({
             title: `ASVA updated to ${cur}`,
             body: 'All your customers, bills and reminders are here - nothing was lost.',
-            silent: true,
+            silent: false,
           }).show();
         }
       } catch (_) {}
@@ -904,7 +904,14 @@ function setupAutoUpdate() {
   catch (e) { console.error('[update] electron-updater not available:', (e && e.message) || e); return; }
 
   autoUpdater.autoDownload = true;           // fetch quietly in the background
-  autoUpdater.autoInstallOnAppQuit = true;   // also apply on the next normal quit
+  // NEVER let electron-updater install silently on quit. Its built-in
+  // quit-install runs inside before-quit as the process dies, so it CANNOT show
+  // our "updating" splash or notification - the app just vanishes for 30-60s,
+  // which reads to a shopkeeper as "ASVA got deleted" (the exact panic we fix).
+  // With this OFF, EVERY install goes through applyUpdateAndQuit() (splash +
+  // durable notification), whether triggered by the "Restart to update" button
+  // or by closing/quitting the app while an update is downloaded.
+  autoUpdater.autoInstallOnAppQuit = false;
   // Differential (delta) downloads are ON: an update fetches only the CHANGED
   // bytes, which is fast when a release is small. Two rules keep it that way and
   // avoid the "stuck at 9%" that a HUGE delta caused through Cloudflare:

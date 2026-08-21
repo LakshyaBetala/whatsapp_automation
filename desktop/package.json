@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.0.3.\n\nCleaner messages: your shop name in every customer message now shows on its own, without the Tally financial-year tag that used to appear after it.\n\nClearer setup: at first sync, the company you pick is now easy to read (the name was showing in white before).\n\nSteadier WhatsApp: if a second copy of ASVA ever starts, it now steps aside instead of knocking your WhatsApp offline.\n\nOwner control: send a firm, formal reminder to one customer only when YOU decide, with LETTER <name> on the ASVA assistant. ASVA never gets harsher on its own.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.0.4.\n\nSmoother updates: ASVA now always shows the clear \"Updating, I will reopen by myself in a minute, your data is safe\" screen while it updates, and a note when it is back. It never installs quietly in the background any more, so the app never seems to vanish.\n\nCleaner messages: your shop name in every customer message shows on its own, without the Tally financial-year tag that used to appear after it.\n\nClearer setup: at first sync, the company you pick is now easy to read (the name was showing in white before).\n\nSteadier WhatsApp: if a second copy of ASVA ever starts, it now steps aside instead of knocking your WhatsApp offline.\n\nOwner control: send a firm, formal reminder to one customer only when YOU decide, with LETTER <name> on the ASVA assistant. ASVA never gets harsher on its own.\n\nFree for every shop until 30 September 2026."
     },
     "files": [
       "main.js",
