@@ -159,45 +159,68 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     text = (text or "").strip()
 
     # Remember every inbound reply (best-effort, before we act on it) so the
-    # party's story on the tracker and the payment-behaviour dataset both accrue.
-    _is_shot = bool(media_b64) and len(text) < 4
+    # party's story on the tracker accrues. Images are labelled generically here;
+    # only after classification (below) do we know if it was really a payment.
+    _has_img = bool(media_b64) and len(text) < 4
     try:
         conversations.record(require_db(), business_id, client_id,
-                             "[payment screenshot]" if _is_shot else text,
-                             intent="screenshot" if _is_shot else None)
+                             "[image]" if _has_img else text,
+                             intent="image" if _has_img else None)
     except Exception:
         pass
 
-    # 1. A screenshot with no clear instruction: treat as payment proof. Try to
-    #    read the amount off it (UPI/bank) so it can go straight to the Payments tab.
+    # 1. An image with no clear instruction. It might be a payment screenshot -
+    #    but it might just as easily be a product photo, a selfie, or a bill they
+    #    were sent. Classify FIRST; only treat it as a payment (queue + pause) when
+    #    it genuinely is one. Anything else is forwarded to the owner untouched,
+    #    with reminders LEFT RUNNING - so an unrelated photo never silences a debtor
+    #    or drops a bogus amount into the Payments tab.
     if media_b64 and len(text) < 4:
-        amount = payer = ref = None
-        conf = None
+        pe = None
         try:
             from app.services import ocr
             pe = await ocr.extract_payment(media_b64, media_type)
-            if pe:
-                amount, payer, ref, conf = pe.amount, pe.payer, pe.ref, pe.confidence
         except Exception:
             log.exception("screenshot OCR failed")
+
+        # (a) Could not classify (OCR off / call failed): we have NO evidence this
+        #     is a payment, so do not pause. Show the owner and let them decide.
+        if pe is None:
+            await _forward_proof(business_id, name, media_b64, media_type,
+                f"{name} sent a photo. ASVA could not read it to tell if it is a payment, "
+                f"so reminders are UNCHANGED. Have a look - if they did pay, reply PAID {name} "
+                f"to record it; otherwise reply to {name} yourself.")
+            return True
+
+        # (b) Classified as NOT a payment (product photo, selfie, bill, etc.):
+        #     never pause, never queue. Just surface it to the owner.
+        if not pe.is_payment:
+            what = {"bill": "a bill/invoice", "other": "a photo"}.get(pe.kind or "other", "a photo")
+            await _forward_proof(business_id, name, media_b64, media_type,
+                f"{name} sent {what} (not a payment proof). Reminders are UNCHANGED. "
+                f"Have a look - if it is actually a payment, reply PAID {name} to record it.")
+            return True
+
+        # (c) A genuine payment proof. Pause on grace + log the claim.
+        amount, payer, ref, conf = pe.amount, pe.payer, pe.ref, pe.confidence
         promises.create(require_db(), business_id, client_id, kind="paid_claim",
                         hold_until=_grace_hold(), amount=amount,
                         raw_text="[payment screenshot]", source="screenshot")
-        # Build the ONE caption, then send the image with it - a single owner
-        # message, never two.
-        if _queue_payment(business_id, client, amount, ocr_payer=payer,
-                          ocr_ref=ref, ocr_confidence=conf):
+        if amount and _queue_payment(business_id, client, amount, ocr_payer=payer,
+                                     ocr_ref=ref, ocr_confidence=conf):
             caption = (
                 f"{name} sent a payment screenshot for {inr(amount)}. It is in your "
                 f"Payments tab - check the account and post it into Tally. Reminders "
                 f"paused for {settings.promise_grace_days} days. Reply CHASE {name} to resume.")
         else:
+            # A payment proof we could not read an amount off: forward it, pause on
+            # grace, but never queue a guessed amount.
             caption = (
-                f"{name} sent a payment screenshot. ASVA PAUSED their reminders for "
-                f"{settings.promise_grace_days} days (nothing was replied to {name}). "
-                f"When the money lands, reply PAID {name} to record it (you confirm the "
-                f"amount + account in the app, then it posts to Tally). "
-                f"Reply CHASE {name} to resume now, or message {name} yourself.")
+                f"{name} sent a payment screenshot but ASVA could not read the amount. "
+                f"Reminders paused for {settings.promise_grace_days} days (nothing was replied "
+                f"to {name}). Check the image, then reply PAID {name} <amount> to record it "
+                f"(you confirm the account in the app, then it posts to Tally). "
+                f"Reply CHASE {name} to resume now.")
         await _forward_proof(business_id, name, media_b64, media_type, caption)
         return True
 

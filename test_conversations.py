@@ -108,17 +108,23 @@ def test_capture_reply_records_the_inbound(monkeypatch):
     assert db.inserted[0]["business_id"] == "b1" and db.inserted[0]["client_id"] == "c1"
 
 
-def test_capture_reply_records_screenshot(monkeypatch):
+def test_capture_reply_records_image(monkeypatch):
     from app.services import replies
+    import app.services.ocr as ocr
     db = FakeDB()
     monkeypatch.setattr(replies, "require_db", lambda: db)
     monkeypatch.setattr(replies.promises, "create", lambda *a, **k: {"id": "p1"})
 
     async def _noop(*a, **k):
         return None
+    async def _fake_pay(b64, mt="image/jpeg"):
+        return None                       # keep the test off the live Gemini API
+    monkeypatch.setattr(ocr, "extract_payment", _fake_pay)
     monkeypatch.setattr(replies, "_forward_proof", _noop)
     monkeypatch.setattr(replies.whatsapp, "notify_owner", _noop)
 
     client = {"id": "c1", "name": "Ramesh", "business_id": "b1"}
     asyncio.run(replies.capture_reply(client, "", media_b64="ZmFrZQ=="))
-    assert any(r["intent"] == "screenshot" for r in db.inserted)
+    # An inbound image is recorded to the conversation (labelled generically until
+    # it is classified). It is no longer pre-labelled "screenshot".
+    assert any(r["intent"] == "image" for r in db.inserted)

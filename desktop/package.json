@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.0.1.\n\nUpdating is calmer now. While ASVA installs a new version it shows a clear screen: \"Updating - I will close and reopen by myself in about a minute. Your customers, bills and reminders are safe.\" When it comes back it confirms \"you are up to date, nothing was lost.\" No more wondering whether the app disappeared while it updated.\n\nEverything from 2.0 is included: your privacy locked down (only your own customers' messages ever reach ASVA), a smarter assistant that welcomes a lead once then hands the chat to you, the Today home, trade-based due dates, and a fairer reliability score."
+      "releaseNotes": "ASVA 2.0.2.\n\nSmarter payment reading: when a customer sends a photo, ASVA now checks whether it is really a payment (a UPI/bank/cheque proof) before doing anything. A product photo, a selfie or a bill no longer gets mistaken for a payment - so your reminders are never paused by accident and no wrong amount lands in your Payments tab. If it is a payment but the amount is not clear, ASVA shows it to you and asks you to confirm.\n\nReminders keep flowing: fixed a case where one undelivered message could hold up a shop's whole reminder queue, and the queue now clears old messages on its own even if the shop laptop was off for days.\n\nAlso includes the calmer updates from 2.0.1 and the privacy + assistant improvements from 2.0."
     },
     "files": [
       "main.js",

@@ -96,37 +96,55 @@ async def extract_bill(image_b64: str, media_type: str = "image/jpeg") -> Option
 
 
 class PaymentExtract(BaseModel):
-    amount: Optional[float] = None       # rupees paid
+    is_payment: bool = False             # is this image ACTUALLY proof of a payment?
+    kind: Optional[str] = None           # upi / bank / cheque / bill / other
+    amount: Optional[float] = None       # rupees paid (only when is_payment)
     payer: Optional[str] = None          # name on the UPI/bank screenshot
     ref: Optional[str] = None            # UPI reference / UTR / txn id (proof + dedupe key)
     confidence: float = 0.0              # 0-1 how sure the read is (drives auto-prefill vs "please check")
 
 
+# Classify FIRST, extract second. A customer in a reminder thread may send all
+# sorts of images - a product photo, a selfie, a photographed bill, a meme - not
+# just a UPI receipt. Blindly "reading an amount" off a non-payment image
+# hallucinates a number, queues a bogus receipt, and wrongly pauses a debtor's
+# reminders. So the model must first say whether this is genuinely proof of a
+# payment before any amount is trusted.
 _PAY_PROMPT = (
-    "This is a screenshot a customer sent to prove they paid (a UPI app like "
-    "GPay/PhonePe/Paytm, a bank transfer, or a cheque). Extract as JSON:\n"
-    "- amount: the RUPEE amount paid (number only, no commas/symbols; null if unclear)\n"
-    "- payer: the name of the person/firm who PAID (the sender), or null\n"
-    "- ref: the UPI reference number / UTR / transaction id (digits, often 12), or null\n"
-    "- confidence: 0.0-1.0, how sure you are of the amount (1 = crisp and certain, "
-    "low = blurry/ambiguous)\n"
-    "Return only these fields.")
+    "A customer sent this image during a payment-reminder chat. FIRST decide if it "
+    "is genuine PROOF OF PAYMENT: a UPI app success screen (GPay/PhonePe/Paytm/BHIM), "
+    "a bank transfer/NEFT/IMPS confirmation, or a cheque. Return JSON:\n"
+    "- is_payment: true ONLY if it clearly shows the customer paid/transferred money "
+    "(a completed/success transaction). A product photo, selfie, a bill/invoice they "
+    "were sent, a screenshot of a chat, or anything ambiguous -> false.\n"
+    "- kind: one of \"upi\", \"bank\", \"cheque\", \"bill\", \"other\".\n"
+    "- amount: the RUPEE amount PAID (number only, no commas/symbols). null unless "
+    "is_payment is true and the amount is legible.\n"
+    "- payer: the name of the person/firm who PAID (the sender), or null.\n"
+    "- ref: the UPI reference / UTR / transaction id (digits, often 12), or null.\n"
+    "- confidence: 0.0-1.0 for the amount (1 = crisp and certain; low = blurry/ambiguous; "
+    "0 if not a payment).\n"
+    "Never guess. Return only these fields.")
 _PAY_SCHEMA = {
     "type": "OBJECT",
     "properties": {
+        "is_payment": {"type": "BOOLEAN"},
+        "kind": {"type": "STRING", "nullable": True},
         "amount": {"type": "NUMBER", "nullable": True},
         "payer": {"type": "STRING", "nullable": True},
         "ref": {"type": "STRING", "nullable": True},
         "confidence": {"type": "NUMBER"},
     },
+    "required": ["is_payment"],
 }
 
 
 async def extract_payment(image_b64: str, media_type: str = "image/jpeg") -> Optional[PaymentExtract]:
-    """Read a payment screenshot: amount + payer + UPI reference + a confidence
-    score. Returns None if not configured / unreadable. The confidence is a
-    SUGGESTION for the app (high -> prefill the amount; low -> ask the owner to
-    check). ASVA never posts to Tally on this alone - the owner always confirms."""
+    """Classify + read an image a customer sent. Returns None if not configured /
+    the call failed (caller then treats the image as 'unknown'). When it succeeds,
+    `is_payment` says whether it is genuinely a payment proof - the caller must
+    NOT pause reminders or queue a receipt unless it is. The confidence is a
+    SUGGESTION for the app; ASVA never posts to Tally on this alone."""
     if not is_configured():
         return None
     payload = {
@@ -149,11 +167,17 @@ async def extract_payment(image_b64: str, media_type: str = "image/jpeg") -> Opt
             data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"]
         raw = json.loads(text)
+        is_pay = bool(raw.get("is_payment"))
         amt = raw.get("amount")
         amt = float(amt) if amt is not None else None
+        # Trust an amount ONLY when the model says it is a payment. This is the
+        # guard against a hallucinated number off a non-payment photo.
+        amt = amt if (is_pay and amt and amt > 0) else None
         return PaymentExtract(
-            amount=amt if (amt and amt > 0) else None,
-            payer=(raw.get("payer") or None),
+            is_payment=is_pay,
+            kind=(str(raw.get("kind")).strip().lower() or None) if raw.get("kind") else None,
+            amount=amt,
+            payer=(raw.get("payer") or None) if is_pay else None,
             ref=(str(raw.get("ref")).strip() or None) if raw.get("ref") else None,
             confidence=float(raw.get("confidence") or 0.0),
         )

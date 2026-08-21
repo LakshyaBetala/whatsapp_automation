@@ -150,24 +150,62 @@ def test_gemini_off_degrades_to_silent(monkeypatch):
 
 
 # ── screenshot ──────────────────────────────────────────────────────────────
-def test_screenshot_forwards_proof_and_holds(monkeypatch):
+def test_image_unreadable_forwards_without_holding(monkeypatch):
+    # OCR off / failed (extract_payment returns None): we cannot tell if it is a
+    # payment, so reminders are LEFT RUNNING and the owner is shown the photo.
     rec = _setup(monkeypatch)
     out = _run("", media_b64="ZmFrZQ==", media_type="image/jpeg")
-    assert rec.proof and rec.proof[0][0] == "b1" and rec.proof[0][1] == "Ramesh Traders"
-    assert rec.created and rec.created[0]["source"] == "screenshot"
-    # ONE owner message: the screenshot image carries the full caption; there is
-    # no separate text nudge (that was the duplicate).
-    assert "screenshot" in rec.proof[0][2].lower()
-    assert rec.owner == []
     assert out is True
+    assert rec.proof and rec.proof[0][0] == "b1" and rec.proof[0][1] == "Ramesh Traders"
+    assert rec.created == []                       # no paid_claim, no pause
+    assert "unchanged" in rec.proof[0][2].lower()
+    assert rec.owner == []
 
 
-def test_screenshot_with_readable_amount_queues_a_receipt(monkeypatch):
-    # When ASVA can read the amount off the screenshot, it goes to the Payments tab.
+def test_non_payment_image_does_not_hold_or_queue(monkeypatch):
+    # A product photo / selfie / bill: classified is_payment=False -> never pause,
+    # never queue a receipt. Just surface it to the owner.
     import app.services.ocr as ocr
     rec = _setup(monkeypatch)
     async def fake_pay(b64, mt="image/jpeg"):
-        return ocr.PaymentExtract(amount=310.0, payer="Ramesh", ref="123456789012", confidence=0.95)
+        return ocr.PaymentExtract(is_payment=False, kind="other", amount=None, confidence=0.0)
+    monkeypatch.setattr(ocr, "extract_payment", fake_pay)
+    queued = []
+    monkeypatch.setattr(replies.rq, "create_pending",
+                        lambda db, bid, **kw: queued.append(kw) or {"id": "r1"})
+    out = _run("", media_b64="ZmFrZQ==", media_type="image/jpeg")
+    assert out is True
+    assert queued == []                            # nothing queued
+    assert rec.created == []                        # reminders NOT paused
+    assert rec.proof and "not a payment" in rec.proof[0][2].lower()
+
+
+def test_payment_image_no_amount_holds_but_does_not_queue(monkeypatch):
+    # A genuine payment proof we cannot read an amount off: pause on grace, forward
+    # it, but never queue a guessed amount.
+    import app.services.ocr as ocr
+    rec = _setup(monkeypatch)
+    async def fake_pay(b64, mt="image/jpeg"):
+        return ocr.PaymentExtract(is_payment=True, kind="upi", amount=None, confidence=0.3)
+    monkeypatch.setattr(ocr, "extract_payment", fake_pay)
+    queued = []
+    monkeypatch.setattr(replies.rq, "create_pending",
+                        lambda db, bid, **kw: queued.append(kw) or {"id": "r1"})
+    out = _run("", media_b64="ZmFrZQ==", media_type="image/jpeg")
+    assert out is True
+    assert queued == []                            # no bogus amount
+    assert rec.created and rec.created[0]["source"] == "screenshot"   # paused
+    assert "could not read the amount" in rec.proof[0][2].lower()
+
+
+def test_screenshot_with_readable_amount_queues_a_receipt(monkeypatch):
+    # When ASVA can read the amount off a genuine payment screenshot, it goes to
+    # the Payments tab.
+    import app.services.ocr as ocr
+    rec = _setup(monkeypatch)
+    async def fake_pay(b64, mt="image/jpeg"):
+        return ocr.PaymentExtract(is_payment=True, kind="upi", amount=310.0,
+                                  payer="Ramesh", ref="123456789012", confidence=0.95)
     monkeypatch.setattr(ocr, "extract_payment", fake_pay)
     queued = []
     monkeypatch.setattr(replies.rq, "create_pending",

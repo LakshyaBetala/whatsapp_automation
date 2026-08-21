@@ -113,6 +113,43 @@ Added `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
 
 ---
 
+## 2b. Payment capture / promise-to-pay robustness (2.0.2)
+
+**Problem found.** `replies.capture_reply` treated *any* image with a short
+caption as a payment screenshot: it ran an "extract the amount" prompt, created a
+`paid_claim` (which **pauses that debtor's reminders**), and — if the model
+returned any number — queued a receipt in the Payments tab. A product photo, a
+selfie, or a photographed bill would therefore silence a debtor and could drop a
+hallucinated amount into Payments, mislabelled "sent a payment screenshot".
+
+**Fix (`app/services/ocr.py`, `app/services/replies.py`).** The vision model now
+**classifies first** (`is_payment` + `kind` = upi/bank/cheque/bill/other) and an
+amount is trusted only when `is_payment` is true. `capture_reply` branches:
+- **can't classify** (OCR off / call failed) → forward the photo, **do not pause**,
+  ask the owner to look / reply PAID if it was a payment;
+- **not a payment** (product/selfie/bill) → forward, **do not pause, do not queue**;
+- **payment, amount read** → queue to Payments + pause on grace + notify (as before);
+- **payment, amount unclear** → forward + pause on grace, but **never queue a
+  guessed amount** (owner replies `PAID <name> <amount>`).
+Tests: `test_replies.py::test_non_payment_image_*`, `test_payment_image_no_amount_*`,
+`test_image_unreadable_*`.
+
+**Reviewed and confirmed already-robust (no change):**
+- `receipts_queue.create_pending` dedups one OPEN receipt per party (pending/
+  confirmed), which prevents the double-post; degrades gracefully if the OCR
+  columns aren't migrated.
+- `allocate_fifo` is exact-to-the-paisa, never over-allocates, flags surplus
+  on-account.
+- `promise_followup` marks a promise **kept** only when Tally has cleared the
+  bills; on any query error it assumes unpaid and **resumes** reminders (never
+  silently marks paid); dormant shops are skipped; `followup_sent_at` blocks
+  double-processing.
+- The keyword `PAID`/`PAID <amt>` fast path and the free-text intent classifier
+  already gate on confidence and forward disputes/unclear to the owner without
+  pausing.
+
+---
+
 ## 3. Deploy plan (operator go-ahead required — production changes)
 
 1. **Clear RISHAB's 33 stale queued rows** (psycopg2 UPDATE → `cancelled`).
