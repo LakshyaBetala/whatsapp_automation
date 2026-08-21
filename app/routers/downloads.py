@@ -18,7 +18,7 @@ import os
 import secrets
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.config import settings
 from app.db import get_client
@@ -99,6 +99,42 @@ def _latest_version() -> str:
     return settings.app_version
 
 
+@router.get("/download/latest")
+def download_latest():
+    """Public installer, redirect to the CURRENT versioned exe (immutable URL) with
+    no-store. Versioned targets never go stale in a CDN cache, and no-store keeps
+    the redirect itself always pointing at the newest build - so the website button
+    can never serve an old installer (the bug where a shop got 1.9.6 while the feed
+    was on 2.0.4). Falls back to serving the legacy stable file if unpublished."""
+    updates_dir = os.path.join(settings.downloads_dir or "downloads", "updates")
+    yml = os.path.join(updates_dir, "latest.yml")
+    fn = None
+    try:
+        with open(yml, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s.startswith("path:"):
+                    cand = s.split(":", 1)[1].strip().strip('"\'')
+                    if cand and "/" not in cand and "\\" not in cand and ".." not in cand \
+                            and os.path.exists(os.path.join(updates_dir, cand)):
+                        fn = cand
+                    break
+    except Exception:
+        fn = None
+    if fn:
+        r = RedirectResponse(url=f"/updates/{fn}", status_code=302)
+        r.headers["Cache-Control"] = "no-store, max-age=0"
+        return r
+    p = _newest_installer()
+    if not p or not os.path.exists(p):
+        raise HTTPException(status_code=404,
+                            detail="Not available yet - the host has not published this file.")
+    resp = FileResponse(p, filename="ASVA-Setup.exe",
+                        media_type="application/vnd.microsoft.portable-executable")
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
+
+
 @router.get("/download/{name}")
 def download_file(name: str, token: str = Query("")):
     real = ALLOWED.get(name)
@@ -161,7 +197,7 @@ def download_page(token: str = Query("")):
     size = f"{os.path.getsize(p) / 1e6:.0f} MB" if ready else ""
     # The installer is public and carries no secret, so the button always works.
     if ready:
-        btn = (f'<a class="btn btn-p" href="/download/ASVA-Setup.exe">'
+        btn = (f'<a class="btn btn-p" href="/download/latest">'
                f'Download ASVA for Windows ({size})</a>')
         note = ''
     else:
