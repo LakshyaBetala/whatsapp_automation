@@ -90,12 +90,12 @@ _KNOWN_CMDS = [
     "PAID", "LIST", "HISAB", "CHECK", "STOP", "START", "TERMS", "REMIND",
     "PROMISES", "CHASE", "EXCLUDE", "INCLUDE", "BILL", "RECOVERED", "TEAM",
     "SUPPORT", "HELP", "MENU", "BAND", "SOOCHI", "CHALU", "SHURU", "YAAD",
-    "CASH", "FORECAST", "CARD", "REPORTCARD", "SCORE", "SCORECARD",
+    "CASH", "FORECAST", "CARD", "REPORTCARD", "SCORE", "SCORECARD", "LETTER", "NOTICE",
 ]
 # Verbs that take a party name, so the suggestion can show a real example.
 _CMD_TAKES_NAME = {"PAID", "CHECK", "STOP", "START", "TERMS", "REMIND", "CHASE",
                    "EXCLUDE", "INCLUDE", "BAND", "CHALU", "SHURU", "YAAD", "SOOCHI",
-                   "SCORE", "SCORECARD"}
+                   "SCORE", "SCORECARD", "LETTER", "NOTICE"}
 
 
 def _suggest_command(text: str, lang: str) -> str:
@@ -601,6 +601,11 @@ async def handle(
         remind_match = re.match(r"REMIND\s+(.+)", upper)
         if remind_match:
             return await _handle_remind(business, remind_match.group(1).strip())
+
+        # ── LETTER <name> - owner-approved FORMAL reminder letter (top rung) ──
+        letter_match = re.match(r"(?:LETTER|NOTICE)\s+(.+)", upper)
+        if letter_match:
+            return await _handle_letter(business, letter_match.group(1).strip(), lang=lang)
 
         # ── PROMISES - who has claimed payment or promised a date ────
         if upper in ("PROMISES", "PROMISE"):
@@ -1492,8 +1497,22 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
     def _age(b) -> int:
         return (today - date.fromisoformat(str(b["invoice_date"]))).days
 
+    def _overdue(b) -> int:
+        dd = b.get("due_date")
+        try:
+            return (today - date.fromisoformat(str(dd)[:10])).days if dd else _age(b)
+        except (TypeError, ValueError):
+            return _age(b)
+
+    # Escalation ladder: the tone firms up with how far past due the OLDEST bill
+    # is (gentle -> standard -> firm -> final). Respectful at every rung; the
+    # hardest rung is still the owner's own voice, never a legal threat.
+    from app.services import escalation
+    tier = escalation.tier_for(max((_overdue(b) for b in bills), default=0))
+    intro = escalation.intro_line(tier, biz_name, en)
+
     if en:
-        lines = [f"Dear {name},", f"A payment reminder from {biz_name}.", ""]
+        lines = [f"Dear {name},", intro, ""]
         if len(bills) == 1:
             b = bills[0]
             lines.append(f"Invoice {b.get('invoice_number') or '-'}: {inr(total)} outstanding ({_age(b)} days).")
@@ -1505,7 +1524,7 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
                 lines.append(f"- and {len(bills) - 4} more")
             lines.append(f"Total outstanding: {inr(total)}")
     else:
-        lines = [f"Namaste {name} ji,", f"{biz_name} ki taraf se payment ka vinamra reminder.", ""]
+        lines = [f"Namaste {name} ji,", intro, ""]
         if len(bills) == 1:
             b = bills[0]
             lines.append(f"Bill {b.get('invoice_number') or '-'} ka {inr(total)} baaki hai ({_age(b)} din).")
@@ -1556,6 +1575,10 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
         lines += ["", discount_line]
     if batch.get("line"):
         lines += ["", batch["line"]]
+    # Firm/final rungs add one urgent line; gentle/standard stay soft.
+    _close = escalation.closing_line(tier, en)
+    if _close:
+        lines += ["", _close]
     lines += ["", ("Once paid, kindly reply PAID. Thank you."
                    if en else "Payment ho jaye to PAID reply karein. Dhanyavaad.")]
 
@@ -1669,6 +1692,54 @@ async def _handle_remind(business: dict, arg: str) -> str:
         return f"'{arg}' matches more than one party: {names}. Type the full name."
     ok, line = await _send_consolidated_reminder(business, matches[0], priority=True)
     return ("Reminder sent:\n" if ok else "") + line
+
+
+async def _handle_letter(business: dict, arg: str, *, lang: str = "english") -> str:
+    """LETTER <name>: owner-approved FORMAL reminder letter to one party (the top
+    rung of the escalation ladder). The owner explicitly triggers it, so it is
+    never an automated legal threat - just a firm, businesslike letter."""
+    from app.services import escalation
+    from datetime import date as _date
+    business_id = business["id"]
+    agg = await _open_bills_by_client(business_id)
+    if not agg:
+        return "No pending bills. All clear!"
+    matches = [e for e in agg.values() if arg.lower() in (e["client"].get("name") or "").lower()]
+    if not matches:
+        return f"No pending bills for '{arg}'. Try: CHECK {arg}"
+    if len(matches) > 1:
+        names = ", ".join(e["client"].get("name", "?") for e in matches[:5])
+        return f"'{arg}' matches more than one party: {names}. Type the full name."
+    entry = matches[0]
+    client = entry["client"]
+    phone = client.get("whatsapp_number")
+    if not phone:
+        return f"{client.get('name','This party')} has no WhatsApp number saved."
+    today = _date.today()
+    def _od(b) -> int:
+        dd = b.get("due_date")
+        try:
+            return (today - _date.fromisoformat(str(dd)[:10])).days if dd else int(entry.get("oldest_days") or 0)
+        except (TypeError, ValueError):
+            return int(entry.get("oldest_days") or 0)
+    max_od = max((_od(b) for b in entry["bills"]), default=int(entry.get("oldest_days") or 0))
+    en = _biz_is_en(business_id)
+    letter = escalation.formal_letter_text(
+        business.get("business_name", ""), client.get("name", "Customer"),
+        inr(entry["total"]), max_od, en=en)
+    result = await whatsapp.send_template(
+        business_id=business_id, to_number=phone, campaign_name="manual_remind_hi",
+        template_params=[client.get("name", ""), business.get("business_name", ""), inr(entry["total"])],
+        business_name=business.get("business_name", ""), plan=Plan(business["plan"]),
+        message_type=MessageType.reminder, client_id=client.get("id"),
+        bill_id=entry["bills"][0]["id"], language=Lang(client.get("language") or "hi"),
+        message_text=letter, priority=True)
+    who = client.get("name", "the party")
+    if result.get("queued"):
+        return f"Formal letter to {who} is queued, it will go from your shop number shortly."
+    if result.get("sent"):
+        return f"Formal letter sent to {who}."
+    return f"Could not send the letter to {who}: {_send_fail_note(result)}"
 
 
 def _fmt_hour12(h: int) -> str:
