@@ -458,6 +458,14 @@ async def import_outstanding(payload: TallyImportPayload):
         except Exception as e:
             errors.append(f"Bulk OB-bill insert failed for {len(chunk)} rows: {str(e)}")
 
+    # First time a shop's data lands, welcome the owner (once). Best-effort - a
+    # failed welcome must never fail the import.
+    try:
+        from app.services import assistant
+        await assistant.welcome_owner_if_new(db, biz)
+    except Exception:
+        log.warning("first-sync welcome skipped", exc_info=True)
+
     return {
         "clients_created": clients_created,
         "credit_balances": credit_balances,
@@ -781,6 +789,7 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     # the new bill on its next tick).
     created_parties = 0
     if payload.parties:
+        biz_cd = _biz_default_credit_days(db, biz)   # trade-category fallback (never null)
         new_rows = []
         for p in payload.parties:
             if not p.name:
@@ -802,9 +811,12 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
                 "whatsapp_number": _normalize_phone(p.whatsapp_number),
                 "tally_guid": (p.tally_guid or "").strip() or None,
                 "reminders_enabled": True,
+                # clients.credit_days is NOT NULL: always fall back to the shop's
+                # trade-category default so a new party with no Tally credit period
+                # never fails the whole insert chunk (was: omitted -> constraint
+                # violation -> no new parties created for that shop).
+                "credit_days": cd or biz_cd,
             }
-            if cd:
-                row["credit_days"] = cd
             new_rows.append(row)
         for chunk in _chunked(new_rows, 200):
             try:

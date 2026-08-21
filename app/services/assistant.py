@@ -158,3 +158,117 @@ def recent_leads(db, limit: int = 25) -> list[dict]:
                 .order("updated_at", desc=True).limit(limit).execute()).data or []
     except Exception:
         return []
+
+
+# ── Onboarding nudges: welcome a shop once it syncs, chase one that hasn't ──────
+# Both message the OWNER on the bot number (never a customer), are sent at most
+# once per shop (dedup stamps from migration 048), and degrade silently if that
+# migration is not applied.
+
+def _owner_is_english(biz: dict) -> bool:
+    v = (biz.get("owner_language") or biz.get("msg_language") or "").strip().lower()
+    return v not in ("hinglish", "hindi", "hi")
+
+
+_WELCOME_EN = (
+    "Namaste. ASVA is all set up and reading your Tally. I have loaded your "
+    "customers and what each one owes you.\n\n"
+    "From now on I remind them on WhatsApp from your own number, and every night I "
+    "send you one summary: who paid and who to chase.\n\n"
+    "Reply *LIST* to see who owes you right now, or *DIGEST* for tonight's summary. "
+    "I am here whenever you need me.")
+_WELCOME_HI = (
+    "Namaste. ASVA poori tarah set ho gaya hai aur aapki Tally padh raha hai. "
+    "Aapke customers aur unka baaki amount load ho gaya hai.\n\n"
+    "Ab main aapke apne number se unhe WhatsApp par reminder bhejta rahunga, aur roz "
+    "raat ek summary dunga: kisne pay kiya aur kise chase karna hai.\n\n"
+    "Abhi kaun kitna dena hai dekhne ke liye *LIST* likhein, ya aaj ki summary ke "
+    "liye *DIGEST*. Zaroorat ho toh yahin batayein.")
+
+_NUDGE_EN = (
+    "Namaste. Your ASVA is ready but not activated yet.\n\n"
+    "Please open ASVA on the computer where TallyPrime runs and press *Refresh* "
+    "once. That loads your customers and outstanding, and your setup is done.\n\n"
+    "Do this soon so your setup code stays valid. Reply here if you need any help, "
+    "we will guide you.")
+_NUDGE_HI = (
+    "Namaste. Aapka ASVA taiyaar hai lekin abhi activate nahi hua.\n\n"
+    "Kripya jis computer par TallyPrime chalta hai wahan ASVA kholein aur ek baar "
+    "*Refresh* dabayein. Isse aapke customers aur baaki amount load ho jayenge aur "
+    "setup poora ho jayega.\n\n"
+    "Yeh jaldi kar lein taaki aapka setup code valid rahe. Madad chahiye toh yahin "
+    "reply karein, hum guide kar denge.")
+
+
+async def welcome_owner_if_new(db, business_id: str) -> bool:
+    """Send the one-time 'you're all set' welcome the first time a shop's Tally
+    data syncs. Dedup on businesses.welcomed_at (stamped BEFORE the send so a retry
+    can never double-welcome). Best-effort; never raises into the caller."""
+    try:
+        r = (db.table("businesses")
+             .select("id, whatsapp_number, welcomed_at, owner_language, msg_language")
+             .eq("id", str(business_id)).limit(1).execute()).data
+        if not r:
+            return False
+        biz = r[0]
+        if biz.get("welcomed_at") or not biz.get("whatsapp_number"):
+            return False
+        try:
+            db.table("businesses").update({"welcomed_at": _now().isoformat()}) \
+                .eq("id", str(business_id)).execute()
+        except Exception:
+            return False                      # column missing (048 not applied)
+        from app.services import whatsapp
+        await whatsapp.notify_owner(str(business_id),
+                                    _WELCOME_EN if _owner_is_english(biz) else _WELCOME_HI)
+        log.info("Sent first-sync welcome to business %s", business_id)
+        return True
+    except Exception:
+        log.warning("welcome_owner_if_new failed", exc_info=True)
+        return False
+
+
+async def nudge_unsynced(db) -> int:
+    """Nudge shops paired in the last week (agent token + owner WhatsApp) that have
+    still loaded NO Tally data, so they open ASVA + Refresh before the setup code
+    lapses. Once per shop (unsynced_nudge_at). The 7-day floor keeps this off old
+    stale/test rows; returns how many were nudged."""
+    try:
+        now = _now()
+        floor = (now - _dt.timedelta(days=7)).isoformat()      # only recent signups
+        ceil = (now - _dt.timedelta(hours=3)).isoformat()      # give them a few hours first
+        rows = (db.table("businesses")
+                .select("id, whatsapp_number, owner_language, msg_language")
+                .not_.is_("agent_token", "null")
+                .not_.is_("whatsapp_number", "null")
+                .is_("unsynced_nudge_at", "null")
+                .gt("created_at", floor).lt("created_at", ceil)
+                .limit(200).execute()).data or []
+    except Exception:
+        return 0
+    from app.services import whatsapp
+    sent = 0
+    for biz in rows:
+        bid = biz.get("id")
+        if not bid:
+            continue
+        try:
+            c = (db.table("clients").select("id", count="exact")
+                 .eq("business_id", bid).limit(1).execute())
+            if c.data:                        # already has data -> synced, skip
+                continue
+        except Exception:
+            continue
+        try:
+            db.table("businesses").update({"unsynced_nudge_at": now.isoformat()}) \
+                .eq("id", bid).execute()
+        except Exception:
+            return sent                       # column missing (048 not applied) -> stop
+        try:
+            await whatsapp.notify_owner(bid, _NUDGE_EN if _owner_is_english(biz) else _NUDGE_HI)
+            sent += 1
+        except Exception:
+            log.warning("unsynced nudge send failed for %s", bid, exc_info=True)
+    if sent:
+        log.info("onboarding nudge: nudged %d unsynced shop(s)", sent)
+    return sent

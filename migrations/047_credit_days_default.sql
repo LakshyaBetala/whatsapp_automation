@@ -1,0 +1,12 @@
+-- 047: give clients.credit_days a DB-level default.
+--
+-- The column is NOT NULL. Several insert paths (Tally auto-create of a new party,
+-- the manual "add client" form, the bot BILL flow) could omit it for a party with
+-- no credit period, which failed the WHOLE insert with
+--   null value in column "credit_days" ... violates not-null constraint
+-- and, for the Tally refresh, silently stopped ALL new parties for that shop from
+-- being created. The app now always supplies a value; this default is the belt-
+-- and-suspenders so no current or future insert path can ever hit that again.
+-- 30 days = DEFAULT_CREDIT_DAYS (app/models.py). Adding a default is a metadata-
+-- only change (no table rewrite, no lock) and does not touch existing rows.
+ALTER TABLE clients ALTER COLUMN credit_days SET DEFAULT 30;

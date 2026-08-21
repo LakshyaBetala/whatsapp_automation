@@ -24,7 +24,7 @@ from datetime import date
 
 from app.config import settings
 from app.db import require_db
-from app.models import Lang, MessageType, Plan, plan_has_bot
+from app.models import DEFAULT_CREDIT_DAYS, Lang, MessageType, Plan, plan_has_bot
 from app.services import checkpoint, i18n, names, promises, proof, replies
 from app.services import payments as payments_service
 from app.services import upi, whatsapp
@@ -931,6 +931,7 @@ async def _confirm_photo_bill(business: dict) -> str:
             "business_id": business_id,
             "name": pb["party_name"],
             "whatsapp_number": pb.get("phone"),
+            "credit_days": DEFAULT_CREDIT_DAYS,   # NOT NULL column - never omit
         }).execute()
         client = new_client.data[0]
 
@@ -1053,6 +1054,7 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
             "business_id": business_id,
             "name": party_name,
             "whatsapp_number": phone,
+            "credit_days": DEFAULT_CREDIT_DAYS,   # NOT NULL column - never omit
         }).execute().data[0]
 
     invoice_date = date.today()

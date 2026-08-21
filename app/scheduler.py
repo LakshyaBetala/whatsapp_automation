@@ -15,9 +15,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.db import get_client
-from app.jobs import (eod_digest, keepalive, monitor, outbox_sweep,
-                      promise_followup, reminder_checkpoint, reminder_sweep,
-                      subscription_check)
+from app.jobs import (eod_digest, keepalive, monitor, onboarding_nudge,
+                      outbox_sweep, promise_followup, reminder_checkpoint,
+                      reminder_sweep, subscription_check)
 from app.services import monitoring
 
 log = logging.getLogger(__name__)
@@ -144,6 +144,18 @@ def start() -> AsyncIOScheduler:
             max_instances=1,
             coalesce=True,
             misfire_grace_time=300,
+        )
+
+    # Onboarding nudge: chase paired-but-never-synced shops to finish setup before
+    # their code lapses. Owner-facing (goes from the bot number), so it rides with
+    # the EOD digest deployment. Hourly; each shop nudged at most once.
+    if settings.enable_eod_digest:
+        sched.add_job(
+            _tracked("onboarding_nudge", onboarding_nudge.run),
+            CronTrigger(minute=20),
+            id="onboarding_nudge",
+            replace_existing=True,
+            misfire_grace_time=1800,
         )
 
     # Health watchdog: build the snapshot, check the bot WhatsApp, and email the

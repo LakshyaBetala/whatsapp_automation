@@ -22,7 +22,8 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import require_db
 from app.jobs.reminder_sweep import STYLE_CADENCE
-from app.models import PLAN_LABELS, PLAN_LIMITS, Plan, recommend_plan
+from app.models import (DEFAULT_CREDIT_DAYS, PLAN_LABELS, PLAN_LIMITS, Plan,
+                        recommend_plan)
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["admin"])
@@ -2737,15 +2738,15 @@ async def admin_party_create(payload: PartyCreatePayload):
         raise HTTPException(status_code=400, detail="Enter the party name.")
     phone = (_norm_phone_admin(payload.whatsapp_number)
              if (payload.whatsapp_number or "").strip() else None)
+    cd = payload.credit_days
+    cd = int(cd) if (cd and 1 <= int(cd) <= 730) else DEFAULT_CREDIT_DAYS
     row = {
         "business_id": biz["id"],
         "name": name,
         "whatsapp_number": phone,
         "reminders_enabled": True,
+        "credit_days": cd,          # NOT NULL column - never omit
     }
-    cd = payload.credit_days
-    if cd and 1 <= int(cd) <= 730:
-        row["credit_days"] = int(cd)
     ins = db.table("clients").insert(row).execute()
     return {"ok": True, "client_id": ins.data[0]["id"], "name": name}
 
