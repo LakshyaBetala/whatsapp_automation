@@ -62,6 +62,30 @@ def _token_ok(token: str | None) -> bool:
         return False
 
 
+def _newest_installer() -> str | None:
+    """The exe the auto-update feed currently serves, read from updates/latest.yml
+    (its 'path:' names the current build). Single source of truth so the website
+    Download button always matches the published version and never goes stale.
+    Falls back to the legacy stable file if the feed is not published."""
+    updates_dir = os.path.join(settings.downloads_dir or "downloads", "updates")
+    yml = os.path.join(updates_dir, "latest.yml")
+    try:
+        with open(yml, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s.startswith("path:"):
+                    fn = s.split(":", 1)[1].strip().strip('"\'')
+                    if fn and "/" not in fn and "\\" not in fn and ".." not in fn:
+                        p = os.path.join(updates_dir, fn)
+                        if os.path.exists(p):
+                            return p
+                    break
+    except Exception:
+        pass
+    legacy = _path("ASVA-Setup.exe")
+    return legacy if os.path.exists(legacy) else None
+
+
 def _latest_version() -> str:
     db = get_client()
     if db is not None:
@@ -83,8 +107,10 @@ def download_file(name: str, token: str = Query("")):
     if name not in PUBLIC and not _token_ok(token):
         raise HTTPException(status_code=403,
                             detail="This download needs your ASVA link. Ask your ASVA contact for it.")
-    p = _path(real)
-    if not os.path.exists(p):
+    # The installer button always serves the CURRENT published build (the exe the
+    # auto-update feed points to), so a new release never leaves it on an old file.
+    p = _newest_installer() if name == "ASVA-Setup.exe" else _path(real)
+    if not p or not os.path.exists(p):
         raise HTTPException(status_code=404,
                             detail="Not available yet - the host has not published this file.")
     media = ("application/vnd.microsoft.portable-executable"
