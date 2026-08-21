@@ -2190,6 +2190,54 @@ async def admin_send_now(payload: SendNowPayload):
     return {"sent": ok, "detail": reply[:160] if reply else ""}
 
 
+class LetterPayload(BaseModel):
+    token: str
+    client_id: str
+
+
+@router.post("/admin/letter-preview")
+async def admin_letter_preview(payload: LetterPayload):
+    """Show the EXACT formal reminder that would go to this party - no send. The
+    owner reads it and decides; escalation is never automatic."""
+    from app.services import bot
+    biz = _biz_by_token(payload.token)
+    business = {"id": biz["id"], "business_name": biz.get("business_name", ""),
+               "plan": biz.get("plan", "starter")}
+    try:
+        return await bot.letter_for_client(business, payload.client_id, send=False)
+    except Exception as e:
+        log.exception("letter-preview failed for %s", payload.client_id)
+        return {"ok": False, "detail": str(e)[:120]}
+
+
+@router.post("/admin/send-letter")
+async def admin_send_letter(payload: LetterPayload):
+    """Send the owner-approved formal reminder to ONE party (the Escalate button).
+    Owner-triggered only, after they have seen the preview."""
+    from app.services import bot
+    biz = _biz_by_token(payload.token)
+    # Same fresh-WhatsApp-down guard as Send now: don't quietly queue if the shop
+    # number is known-disconnected right now.
+    if biz.get("wa_ready") is False and biz.get("wa_checked_at"):
+        from datetime import datetime, timezone
+        try:
+            ts = datetime.fromisoformat(str(biz["wa_checked_at"]).replace("Z", "+00:00"))
+            fresh = (datetime.now(timezone.utc) - ts).total_seconds() < 20 * 60
+        except (TypeError, ValueError):
+            fresh = False
+        if fresh:
+            return {"ok": False, "wa_down": True,
+                    "detail": "Your shop WhatsApp is not connected, so this cannot go out. "
+                              "Open WhatsApp Setup, scan the QR to reconnect, then try again."}
+    business = {"id": biz["id"], "business_name": biz.get("business_name", ""),
+               "plan": biz.get("plan", "starter")}
+    try:
+        return await bot.letter_for_client(business, payload.client_id, send=True)
+    except Exception as e:
+        log.exception("send-letter failed for %s", payload.client_id)
+        return {"ok": False, "detail": str(e)[:120]}
+
+
 class ConfirmBalancePayload(BaseModel):
     token: str
     client_id: str
@@ -3212,6 +3260,17 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
     phone = c.get("whatsapp_number")
     phone_html = esc(phone) if phone else '<span style="color:#c0392b">number nahi hai</span>'
+    # The number is shown as text above (dial it on your phone). Add a WhatsApp
+    # button: on the desktop app (no dialer) it is the way to reach the customer -
+    # message or voice-call them from the PC; on a phone it still works.
+    _wa_digits = re.sub(r"\D", "", phone or "")
+    if len(_wa_digits) == 10:
+        _wa_digits = "91" + _wa_digits
+    phone_actions = ""
+    if phone:
+        phone_actions = (
+            f' <a class="ntbtn" style="text-decoration:none" target="_blank" rel="noopener"'
+            f' href="https://wa.me/{_wa_digits}">WhatsApp</a>')
     is_excl = bool(c.get("excluded"))
     toggle_label = "Reminder OFF karein" if rem_on else "Reminder ON karein"
     toggle_cls = "danger" if rem_on else "primary"
@@ -3273,7 +3332,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
 <div class="card" style="margin-bottom:18px">
   <div class="remrow">
-    <div>WhatsApp: <b>{phone_html}</b> &nbsp;&middot;&nbsp; Reminder:
+    <div>WhatsApp: <b>{phone_html}</b>{phone_actions} &nbsp;&middot;&nbsp; Reminder:
       <b id="remstate" style="color:{'#0a7d33' if rem_on else '#c0392b'}">{'ON' if rem_on else 'OFF'}</b></div>
     <button id="remtoggle" class="{toggle_cls}" onclick="toggleRem()">{toggle_label}</button>
   </div>
@@ -3288,7 +3347,31 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
       <div class="hint">Ask this customer to confirm their outstanding ("sahi hai?"). Sent once (not more than every 90 days), only when you press it. Their reply comes to you; ASVA does not auto-reply.</div></div>
     <button id="cfbal" class="ntbtn" onclick="confirmBalance()">Ask to confirm</button>
   </div>''' if phone else ''}
+  {f'''<div class="remrow" style="margin-top:12px;padding-top:12px;border-top:1px solid #eee">
+    <div>Send a formal reminder
+      <div class="hint">A firm, businesslike letter for a customer who is well past due. You see the exact message first and decide. ASVA never sends this on its own and never gets harsher by itself.</div></div>
+    <button id="escbtn" class="danger" onclick="openEscalate()">Send formal reminder</button>
+  </div>''' if (phone and open_bills) else ''}
   {batch_html}
+</div>
+
+<div class="modal" id="escmodal" onclick="if(event.target===this)closeM('escmodal')">
+  <div class="modalbox">
+    <h3 style="margin:0 0 4px">Send a formal reminder</h3>
+    <div class="hint" style="margin-bottom:8px">A firmer, businesslike letter for a customer who is well past due. Here is exactly what happens:</div>
+    <ol style="margin:0 0 12px 18px;padding:0;font-size:.9rem;line-height:1.6;color:#4a5350">
+      <li><b>You read it below.</b> These are the exact words ASVA will send.</li>
+      <li><b>You press Send.</b> Nothing goes out until you do.</li>
+      <li><b>ASVA sends it once</b>, from your own WhatsApp number, to this customer only.</li>
+      <li><b>That is all.</b> ASVA does not repeat it and never gets harsher on its own. The customer's reply comes straight to you.</li>
+    </ol>
+    <div id="escmeta" class="hint" style="margin-bottom:8px;font-weight:600;color:#1d2420"></div>
+    <div id="escpreview" style="white-space:pre-wrap;background:#f7f6f3;border:1px solid #eaeaea;border-radius:8px;padding:12px;font-size:.92rem;line-height:1.55;max-height:40vh;overflow:auto"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="ntbtn" onclick="closeM('escmodal')">Cancel</button>
+      <button id="escsend" class="danger" onclick="sendLetter()">Send this letter</button>
+    </div>
+  </div>
 </div>
 
 <h2>Bills <button class="ntbtn ntadd" onclick="ntAdd()">+ Add bill</button>{'' if is_tally else ' <button class="ntbtn ntpay" onclick="ntPay()">₹ Record payment</button>'}</h2>
@@ -3371,6 +3454,46 @@ async function toggleExcl() {{
 }}
 function openM(id) {{ document.getElementById(id).classList.add('show'); }}
 function closeM(id) {{ document.getElementById(id).classList.remove('show'); }}
+// Escalate = owner-approved formal reminder to THIS party. Preview first, then
+// the owner decides. ASVA never sends this on its own.
+async function openEscalate() {{
+  const b = document.getElementById('escbtn');
+  if (b) {{ b.disabled = true; b.textContent = 'Preparing...'; }}
+  let d = null;
+  try {{
+    const r = await fetch('/admin/letter-preview', {{method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID}})}});
+    d = await r.json();
+  }} catch (e) {{ d = null; }}
+  if (b) {{ b.disabled = false; b.textContent = 'Send formal reminder'; }}
+  if (!d || !d.ok) {{ alert((d && d.detail) || 'Could not prepare the letter.'); return; }}
+  document.getElementById('escmeta').textContent =
+    'To ' + d.name + '  \\u00b7  \\u20b9' + d.amount + ' outstanding'
+    + (d.days_overdue > 0 ? ('  \\u00b7  ' + d.days_overdue + ' days overdue') : '');
+  document.getElementById('escpreview').textContent = d.text;
+  const s = document.getElementById('escsend');
+  if (!d.has_number) {{ s.disabled = true; s.textContent = 'No WhatsApp number'; }}
+  else {{ s.disabled = false; s.textContent = 'Send formal reminder'; }}
+  openM('escmodal');
+}}
+async function sendLetter() {{
+  const s = document.getElementById('escsend');
+  s.disabled = true; s.textContent = 'Sending...';
+  let d = null;
+  try {{
+    const r = await fetch('/admin/send-letter', {{method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_id: CID}})}});
+    d = await r.json();
+  }} catch (e) {{ d = null; }}
+  if (!d || !d.ok) {{
+    s.disabled = false; s.textContent = 'Send formal reminder';
+    alert((d && d.detail) || 'Could not send right now.'); return;
+  }}
+  closeM('escmodal');
+  alert(d.detail || 'Formal reminder sent.');
+}}
 function ntNum(s) {{
   const a = parseFloat(String(s).replace(/[,₹\\s]/g, ''));
   return (a > 0) ? a : null;
@@ -3665,6 +3788,11 @@ async def admin_today(token: str = Query(...), lang: str = Query("english")):
 <script>
 const TOKEN = __TOKEN__;
 const EN = __EN__;
+// This same page opens inside the ASVA desktop app (no phone dialer) AND on a
+// phone browser on the LAN. A tel: link is dead on a PC, so on desktop we offer
+// Copy number + WhatsApp instead of Call.
+const IS_DESKTOP = /Electron|ASVA-Desktop/i.test(navigator.userAgent || '');
+function waDigits(p){ let d=String(p||'').replace(/\\D/g,''); if(d.length===10) d='91'+d; return d; }
 let T = null;
 function esc(s){ return String(s==null?'':s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
 function fmt(n){ try{ return '\\u20b9'+Number(Math.round(n||0)).toLocaleString('en-IN'); }catch(e){ return '\\u20b9'+n; } }
@@ -3741,19 +3869,26 @@ function render(){
     const late = c.days_late>0 ? '<span class="late">'+c.days_late+'d late</span>' : '';
     const grade = (c.grade && c.grade!=='new')
       ? ' <span class="rel" style="background:'+esc(c.grade_color||'#6b7770')+'22;color:'+esc(c.grade_color||'#6b7770')+'">'+esc(c.grade_label||'')+'</span>' : '';
-    // With a number: tap-to-call (shows the number) + Remind. Without: one tap to
-    // add the number, right here (no leaving the page).
+    // The number is ALWAYS shown as plain text below the name, so the owner can
+    // read it and dial on his phone on ANY device. The action button then differs:
+    //  - on a phone, one tap Calls (tel:);
+    //  - in the desktop app (a PC has no dialer, so tel: is dead), WhatsApp opens
+    //    the chat with this customer - where he can message OR voice-call them.
+    // Plus Remind (ASVA sends its reminder) on both. No number: one tap to add it.
     let acts;
     if(c.has_number){
-      const callLbl = c.phone ? ('Call '+c.phone) : 'Call';
-      acts = '<a class="op call" href="tel:'+esc(c.phone||'')+'">'+esc(callLbl)+'</a>'+
+      const contact = IS_DESKTOP
+        ? '<a class="op call" target="_blank" rel="noopener" href="https://wa.me/'+esc(waDigits(c.phone))+'">WhatsApp</a>'
+        : '<a class="op call" href="tel:'+esc(c.phone||'')+'">Call</a>';
+      acts = contact +
              '<button class="rem" onclick=\\'remind('+JSON.stringify(c.name)+',this)\\'>Remind</button>';
     } else {
       acts = '<button class="op warn" onclick=\\'openAddNum('+JSON.stringify(c.client_id)+')\\'>Add number</button>';
     }
+    const numline = (c.has_number && c.phone) ? (' \\u00b7 '+esc(c.phone)) : (c.has_number?'':' \\u00b7 no WhatsApp number');
     return '<div class="crow"><div class="crank">'+(i+1)+'</div>'+
       '<div class="cmain"><div class="nm">'+esc(c.display)+late+grade+'</div>'+
-      '<div class="mt">'+(c.days_late>0?(c.days_late+' days past due'):'')+(c.has_number?'':' \\u00b7 no WhatsApp number')+'</div></div>'+
+      '<div class="mt">'+(c.days_late>0?(c.days_late+' days past due'):'')+numline+'</div></div>'+
       '<div class="camt">'+fmt(c.amount)+'</div>'+
       '<div class="cacts">'+acts+'</div></div>';
   }).join('') : '<div class="empty">Nothing overdue right now. When bills cross their due date, the ones worth chasing show here, biggest first.</div>';

@@ -1732,6 +1732,62 @@ async def _handle_letter(business: dict, arg: str, *, lang: str = "english") -> 
     return f"Could not send the letter to {who}: {_send_fail_note(result)}"
 
 
+async def letter_for_client(business: dict, client_id: str, *, send: bool) -> dict:
+    """Build (send=False) or send (send=True) the owner-approved FORMAL reminder
+    for ONE party, identified by client_id (the desktop Escalate button uses this,
+    so there is never the name ambiguity the LETTER command can hit).
+
+    send=False returns a preview the owner reads and decides on; send=True actually
+    delivers it. Escalation is ALWAYS owner-initiated here - ASVA never sends this
+    on its own and never escalates the tone by itself. Mirrors _handle_letter."""
+    from app.services import escalation
+    from datetime import date as _date
+    business_id = business["id"]
+    agg = await _open_bills_by_client(business_id)
+    entry = agg.get(client_id)
+    if not entry:
+        return {"ok": False, "detail": "No pending bills for this party. Nothing to escalate."}
+    client = entry["client"]
+    today = _date.today()
+
+    def _od(b) -> int:
+        dd = b.get("due_date")
+        try:
+            return (today - _date.fromisoformat(str(dd)[:10])).days if dd else int(entry.get("oldest_days") or 0)
+        except (TypeError, ValueError):
+            return int(entry.get("oldest_days") or 0)
+
+    max_od = max((_od(b) for b in entry["bills"]), default=int(entry.get("oldest_days") or 0))
+    en = _biz_is_en(business_id)
+    shop = names.clean_business(business.get("business_name", ""))
+    amount = inr(entry["total"])
+    name = client.get("name", "Customer")
+    tier = escalation.tier_for(max_od)
+    letter = escalation.formal_letter_text(shop, name, amount, max_od, en=en)
+    phone = client.get("whatsapp_number")
+
+    if not send:
+        return {"ok": True, "name": name, "amount": amount, "days_overdue": max_od,
+                "tier": tier, "text": letter, "has_number": bool(phone)}
+
+    if not phone:
+        return {"ok": False,
+                "detail": f"{name} has no WhatsApp number saved. Add a number first."}
+    result = await whatsapp.send_template(
+        business_id=business_id, to_number=phone, campaign_name="manual_remind_hi",
+        template_params=[name, shop, amount],
+        business_name=shop, plan=Plan(business["plan"]),
+        message_type=MessageType.reminder, client_id=client.get("id"),
+        bill_id=entry["bills"][0]["id"], language=Lang(client.get("language") or "hi"),
+        message_text=letter, priority=True)
+    if result.get("queued"):
+        return {"ok": True, "queued": True,
+                "detail": f"Formal reminder to {name} is queued, it will go from your shop number shortly."}
+    if result.get("sent"):
+        return {"ok": True, "sent": True, "detail": f"Formal reminder sent to {name}."}
+    return {"ok": False, "detail": f"Could not send to {name}: {_send_fail_note(result)}"}
+
+
 def _fmt_hour12(h: int) -> str:
     """23 -> '11 PM', 9 -> '9 AM', 0 -> '12 AM'."""
     ampm = "AM" if h < 12 else "PM"
