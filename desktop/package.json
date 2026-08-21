@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.0.4.\n\nSmoother updates: ASVA now always shows the clear \"Updating, I will reopen by myself in a minute, your data is safe\" screen while it updates, and a note when it is back. It never installs quietly in the background any more, so the app never seems to vanish.\n\nCleaner messages: your shop name in every customer message shows on its own, without the Tally financial-year tag that used to appear after it.\n\nClearer setup: at first sync, the company you pick is now easy to read (the name was showing in white before).\n\nSteadier WhatsApp: if a second copy of ASVA ever starts, it now steps aside instead of knocking your WhatsApp offline.\n\nOwner control: send a firm, formal reminder to one customer only when YOU decide, with LETTER <name> on the ASVA assistant. ASVA never gets harsher on its own.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.0.5.\n\nA proper wait screen while updating: ASVA now shows a full \"Updating, I will reopen by myself in a minute, your data is safe\" screen for the whole update, not just a flash, so it never feels like the app vanished.\n\nClearer Escalate: sending a firm formal reminder to one customer is now easy to read and to confirm. You see the exact letter and a clear Send button, and ASVA sends it only when you decide.\n\nCall on desktop that works: on the computer you now get the customer's number to dial and a WhatsApp button to message or call them, instead of a Call button that did nothing on a PC.\n\nCredit health, quietly: open any customer and, only when it matters, ASVA shows a calm note about how exposed you are before you extend more credit. No pop-ups, no flags on every bill.\n\nFree for every shop until 30 September 2026."
     },
     "files": [
       "main.js",

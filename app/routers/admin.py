@@ -3296,7 +3296,9 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     # Built only from provable data (terms-adjusted days past due, recorded
     # promise outcomes, real receipts). Explainable: the reasons are shown.
     from app.services import scorecard as _sc
+    from app.services import risk as _risk
     scorecard_html = ""
+    sc = None
     try:
         sc = _sc.build_scorecard(db, biz["id"], c, today=today)
         _sc_reasons = "".join(f"<li>{esc(r)}</li>" for r in sc.get("reasons", []))
@@ -3313,6 +3315,30 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     except Exception:
         log.exception("scorecard render failed for %s (party page continues)", client_id)
 
+    # Credit-risk advisory: a SINGLE calm line, only when caution is warranted, and
+    # only here on the party page (never a list badge or a bill-time alert). Uses
+    # the oldest open bill's overdue days + the reliability grade we already have.
+    risk_html = ""
+    try:
+        _max_od = 0
+        for _b in open_bills:
+            _dd = _b.get("due_date")
+            if _dd:
+                try:
+                    _max_od = max(_max_od, (today - _dt.date.fromisoformat(str(_dd)[:10])).days)
+                except (TypeError, ValueError):
+                    pass
+        _rk = _risk.assess(open_total, _max_od, sc.get("grade") if sc else None)
+        if _rk["advisory"]:
+            _lv = _rk["level"]
+            risk_html = (
+                f'<div style="background:{_risk.BG.get(_lv, "#fbf3db")};'
+                f'border:1px solid {_risk.BORDER.get(_lv, "#efdfa8")};color:{_risk.COLOR.get(_lv, "#7a5200")};'
+                f'border-radius:8px;padding:10px 13px;margin-bottom:18px;font-size:.9rem;line-height:1.5">'
+                f'{esc(_rk["advisory"])}</div>')
+    except Exception:
+        log.exception("risk advisory failed for %s (party page continues)", client_id)
+
     body = f"""
 <a href="/admin?token={token}&lang={lang}" class="back">&#8592; Dashboard</a>
 <h1>{esc(c['name'])}</h1>
@@ -3327,6 +3353,8 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 </div>
 
 {scorecard_html}
+
+{risk_html}
 
 {promise_html}
 
@@ -3357,17 +3385,15 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
 <div class="modal" id="escmodal" onclick="if(event.target===this)closeM('escmodal')">
   <div class="modalbox">
-    <h3 style="margin:0 0 4px">Send a formal reminder</h3>
-    <div class="hint" style="margin-bottom:8px">A firmer, businesslike letter for a customer who is well past due. Here is exactly what happens:</div>
-    <ol style="margin:0 0 12px 18px;padding:0;font-size:.9rem;line-height:1.6;color:#4a5350">
-      <li><b>You read it below.</b> These are the exact words ASVA will send.</li>
-      <li><b>You press Send.</b> Nothing goes out until you do.</li>
-      <li><b>ASVA sends it once</b>, from your own WhatsApp number, to this customer only.</li>
-      <li><b>That is all.</b> ASVA does not repeat it and never gets harsher on its own. The customer's reply comes straight to you.</li>
-    </ol>
-    <div id="escmeta" class="hint" style="margin-bottom:8px;font-weight:600;color:#1d2420"></div>
-    <div id="escpreview" style="white-space:pre-wrap;background:#f7f6f3;border:1px solid #eaeaea;border-radius:8px;padding:12px;font-size:.92rem;line-height:1.55;max-height:40vh;overflow:auto"></div>
-    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+    <h3>Send a formal reminder</h3>
+    <div class="hint" style="margin:0 0 12px">A firmer, one-time letter for a customer who is well past due. You send it; ASVA never does this on its own.</div>
+    <div class="scroll">
+      <div id="escmeta" style="font-weight:700;color:#1d2420;font-size:.95rem;margin-bottom:8px"></div>
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#9a9a94;margin-bottom:5px">This exact message will be sent</div>
+      <div id="escpreview" style="white-space:pre-wrap;background:#f7f6f3;border:1px solid #eaeaea;border-radius:8px;padding:12px;font-size:.9rem;line-height:1.5"></div>
+      <div class="hint" style="margin-top:10px">Sent once, from your own WhatsApp number, to this customer only. ASVA does not repeat it or get harsher on its own. Their reply comes straight to you.</div>
+    </div>
+    <div class="mbtns" style="margin-top:16px;flex-shrink:0">
       <button class="ntbtn" onclick="closeM('escmodal')">Cancel</button>
       <button id="escsend" class="danger" onclick="sendLetter()">Send this letter</button>
     </div>
@@ -3647,8 +3673,9 @@ async function delParty() {{
  .pactions .ntbtn{padding:7px 14px;font-size:.9em}
  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
  .modal.show{display:flex}
- .modalbox{background:#fff;max-width:420px;width:100%;border-radius:14px;padding:20px 22px;box-sizing:border-box}
+ .modalbox{background:#fff;max-width:460px;width:100%;border-radius:14px;padding:20px 22px;box-sizing:border-box;max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
  .modalbox h3{margin:0 0 4px}
+ .modalbox>.scroll{overflow-y:auto;margin:0 -22px;padding:0 22px;min-height:0}
  .modalbox label{display:block;font-size:.78rem;color:#787774;margin:14px 0 5px;text-transform:uppercase;letter-spacing:.04em}
  .modalbox input{font:inherit;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;width:100%;box-sizing:border-box}
  .mbtns{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}

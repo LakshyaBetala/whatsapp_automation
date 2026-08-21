@@ -506,13 +506,15 @@ function applyUpdateAndQuit() {
   try { showUpdatingSplash(pendingUpdateVersion); } catch (e) {}
   try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); } catch (e) {}
   try { stopAll(); } catch (e) {}
-  // A touch longer so the splash is clearly seen before the process is replaced.
+  // A clear pause so the "updating, will reopen, data safe" splash is read before
+  // the process is replaced (the reinstall itself runs windowless; the durable
+  // OS notification + welcome-back on relaunch cover that ~minute).
   setTimeout(() => {
     try {
       if (autoUpdater) autoUpdater.quitAndInstall(true, true);   // isSilent, isForceRunAfter
       else app.quit();
     } catch (e) { try { app.quit(); } catch (_) {} }
-  }, 2200);
+  }, 3200);
 }
 
 // ── Health polling (done in main to avoid renderer CORS) ──────────────────
