@@ -472,7 +472,7 @@ def _nav(active: str) -> str:
         for p, label in NAV)
     return f"""<a class="promo" href="/download">
   <span class="wrap"><span class="tag">Open pilot</span>
-  ASVA is <b>free for every shop till 15 September</b>. Limited spots.
+  ASVA is <b>free for every shop till 30 September</b>. Limited spots.
   <span class="go">Start free &rarr;</span></span></a>
 <header class="nav"><div class="wrap"><div class="row">
   <a class="logo" href="/"><img class="mark" src="/logo.png" alt="ASVA logo" width="30" height="30">ASVA</a>
@@ -612,7 +612,7 @@ def _stats_bar() -> str:
         ("&#8377;43L+", "receivables in the first live pilot"),
         ("1,966", "debtors handled in one Tally test"),
         ("30-160", "days of credit distributors carry"),
-        ("Free", "for every shop till 15 Sep 2026"),
+        ("Free", "for every shop till 30 Sep 2026"),
     ]
     cells = "".join(f'<div class="s"><div class="n">{n}</div><div class="l">{l}</div></div>'
                     for n, l in stats)
@@ -742,8 +742,8 @@ def _home() -> str:
 
  <section>
   <div class="sechead"><span class="eyebrow">Free pilot</span>
-   <h2>Free for every shop, till 15 September</h2>
-   <p>Join the open pilot and use the full ASVA free until 15 September 2026. No card, no setup fee.
+   <h2>Free for every shop, till 30 September</h2>
+   <p>Join the open pilot and use the full ASVA free until 30 September 2026. No card, no setup fee.
      Get your stuck money back first, decide later.</p></div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
     <a class="btn btn-p" href="/download">Download and start free</a>

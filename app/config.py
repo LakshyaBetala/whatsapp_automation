@@ -76,9 +76,9 @@ class Settings(BaseSettings):
     subscription_grace_days: int = 3
     # Free pilot: while today <= this date (YYYY-MM-DD), EVERY business is treated
     # as active on the Pro tier - no suspension, no plan-limit block, no renewal
-    # nagging. Matches the public "free pilot till 15 Sep 2026" promise. Set to ""
+    # nagging. Matches the public "free pilot till 30 Sep 2026" promise. Set to ""
     # to switch billing back on. This is the single global free switch.
-    free_pilot_until: str = "2026-09-15"
+    free_pilot_until: str = "2026-09-30"
     # Direct-UPI billing: where shops pay you. When set, renewal notices carry
     # the amount + this UPI id + a tap-to-pay upi:// link, so "pay directly"
     # feels hands-off. You confirm payment and click Renew in the Command Center.
