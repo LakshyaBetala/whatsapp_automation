@@ -288,7 +288,8 @@ class DeleteBusinessPayload(BaseModel):
 _BUSINESS_DATA_TABLES = (
     "wa_outbox", "pending_receipts", "payment_promises", "inbound_messages",
     "tally_receipts", "manual_payments", "photo_bills", "messages", "bills",
-    "clients", "support_requests",
+    "clients", "support_requests", "pairing_codes", "tally_syncs", "usage",
+    "alert_log",
 )
 
 
@@ -413,6 +414,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .lk{font-family:'SF Mono',Consolas,monospace;font-size:.8rem;color:#9db8a8}
  .btn{font:inherit;font-size:.82rem;border:1px solid #2c5c42;background:#123524;color:#cfe6d8;border-radius:6px;padding:5px 10px;cursor:pointer}
  .btn:hover{background:#173f2a}.btn.sus{border-color:#5c2c2c;background:#341613;color:#f2b8b0}.btn.sus:hover{background:#4a1e19}
+ .btn.del{border-color:#7a2018;background:#4a1210;color:#ff9a90}.btn.del:hover{background:#6b1a15;color:#ffd0ca}
  .warnv{color:#f0b849}
  .rin{color:#e2574c;font-size:11px;font-weight:700;border:1px solid #e2574c;border-radius:5px;padding:0 5px;margin-left:6px}
  .muted{color:#7c9787;font-size:.82rem}
@@ -598,7 +600,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
    <thead><tr>
      <th>Business</th><th>Status</th><th>Plan</th><th>Expiry</th><th class="num">Days</th>
      <th>Last seen</th><th>Version</th><th class="num">Msgs (mo)</th><th class="num">Fail (today)</th>
-     <th>Renew</th><th>Cut off</th><th>Pair</th>
+     <th>Renew</th><th>Cut off</th><th>Pair</th><th>Delete</th>
    </tr></thead>
    <tbody id="rows"></tbody>
   </table></div>
@@ -693,6 +695,7 @@ function rowHtml(b){
       '<button class="btn" onclick="renewUntil(\''+b.id+'\')" title="Free/paid until an exact date">Till date</button></td>'+
     '<td><button class="btn sus" onclick="suspend(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Suspend</button></td>'+
     '<td><button class="btn" onclick="pairCode(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Get code</button></td>'+
+    '<td><button class="btn del" onclick="delBiz(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')" title="Erase this shop and ALL its data - irreversible">Delete</button></td>'+
   '</tr>';
 }
 function flash(t){var m=document.getElementById('msg');m.textContent=t;setTimeout(()=>{if(m.textContent===t)m.textContent='';},4000);}
@@ -705,7 +708,7 @@ async function renew(id,months){
   flash(x.ok?('Renewed until '+x.j.renewed_until):(x.j.detail||'Renew failed')); load();
 }
 async function renewUntil(id){
-  const d=prompt('Give this shop access until which date? (YYYY-MM-DD)','2026-09-15');
+  const d=prompt('Give this shop access until which date? (YYYY-MM-DD)','2026-09-30');
   if(!d)return;
   const pro=confirm('Also set them to the Pro tier? (OK = Pro, Cancel = keep current plan)');
   const body={admin_key:KEY,business_id:id,until:d.trim()}; if(pro)body.plan='pro';
@@ -720,6 +723,18 @@ async function suspend(id,name){
   if(!confirm('Suspend "'+name+'" now? Their sends stop immediately. Reversible with Renew.'))return;
   const x=await post('/license/suspend',{admin_key:KEY,business_id:id});
   flash(x.ok?'Suspended':(x.j.detail||'Suspend failed')); load();
+}
+// ── Delete a business entirely (DPDP delete-on-request) ────────────────────
+// Wipes the shop and ALL its data - customers, bills, messages, receipts,
+// usage, pairing codes. Irreversible. Two barriers: a warning, then the
+// operator must retype the exact shop name (which the backend re-checks).
+async function delBiz(id,name){
+  if(!confirm('DELETE "'+name+'" and ERASE all its data?\n\nThis removes every customer, bill, message, receipt and setting for this shop. It cannot be undone. Suspend instead if you only want to pause them.'))return;
+  const typed=prompt('This is permanent. To confirm, type the shop name exactly:\n\n'+name);
+  if(typed==null)return;
+  if(typed.trim()!==name.trim()){flash('Name did not match - nothing deleted.');return;}
+  const x=await post('/ops/delete-business',{admin_key:KEY,business_id:id,confirm_name:typed.trim()});
+  flash(x.ok?('Deleted "'+(x.j.deleted||name)+'" and all its data'):(x.j.detail||'Delete failed')); load();
 }
 // ── Pairing codes ─────────────────────────────────────────────────────────
 // Re-pair an EXISTING shop onto a fresh install. The code binds to the same
