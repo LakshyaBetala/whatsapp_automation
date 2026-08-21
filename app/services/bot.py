@@ -623,6 +623,12 @@ async def handle(
         # language (English -> pure English; Hinglish -> Hinglish), so the chat
         # matches the app. "Ramesh" is only an example name.
         if upper in ("HELP", "MENU", "?", "HI", "HELLO", "START"):
+            # Phase-aware: a paired owner who has not synced yet cannot use any of
+            # the data commands, so answering with the full menu just confuses. Send
+            # the ONE next step (open ASVA + Refresh) until their data is loaded;
+            # after that, the normal menu.
+            if _sync_state(db, business_id) == "never":
+                return _first_sync_help(lang)
             return i18n.t(lang, "help")
         # A mistyped command ("PAI ramesh", "chek ramesh") -> gently suggest the
         # right one with a ready-to-use example, then show the full menu.

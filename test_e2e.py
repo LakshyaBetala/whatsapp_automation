@@ -119,8 +119,21 @@ def test_bot_channel_invites_strangers_as_leads(monkeypatch):
 def test_owner_gets_menu_on_bot_channel(monkeypatch):
     _patch(monkeypatch, {"businesses": [BIZ], "clients": []})
     from app.services import bot
+    # A SYNCED owner asking HELP gets the full command menu.
+    monkeypatch.setattr(bot, "_sync_state", lambda db, bid: "fresh")
     reply = _run(bot.handle(OWNER, "HELP", channel="bot"))
     assert "LIST" in reply and "BILL" in reply       # owner command menu
+
+
+def test_unsynced_owner_help_gets_first_sync_step(monkeypatch):
+    """Phase-aware: a paired owner who has not synced yet gets the ONE next step
+    (open ASVA + Refresh), not a menu of commands that would return nothing."""
+    _patch(monkeypatch, {"businesses": [BIZ], "clients": []})
+    from app.services import bot
+    monkeypatch.setattr(bot, "_sync_state", lambda db, bid: "never")
+    reply = _run(bot.handle(OWNER, "HI", channel="bot"))
+    assert "refresh" in reply.lower()                 # guided to the first sync
+    assert "BILL" not in reply                        # not the full command menu
 
 
 def test_owner_text_bill_creates_bill_and_client(monkeypatch):
