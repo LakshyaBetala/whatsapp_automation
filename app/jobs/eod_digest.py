@@ -147,12 +147,18 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
         oldest_amount = Decimal(0)
         oldest_days = 0
 
-    # ── 5. Reminders sent today (informational, not in template yet) ──
+    # ── 5. Reminders DELIVERED today ──────────────────────────────────
+    # Count only reminders that actually left on WhatsApp. messages.sent_at is the
+    # row's creation time (a DB default) and is stamped even on a queued or FAILED
+    # send, so counting by sent_at alone wrongly reports reminders to numbers that
+    # are not on WhatsApp, or sent while the shop's WhatsApp was disconnected, as
+    # "reminded". Gating on a delivered status keeps the digest honest.
     reminders_resp = (
         db.table("messages")
         .select("id", count="exact")
         .eq("business_id", business_id)
         .eq("type", "reminder")
+        .in_("delivery_status", ["sent", "delivered", "read"])
         .gte("sent_at", utc_start)
         .lt("sent_at", utc_end)
         .execute()

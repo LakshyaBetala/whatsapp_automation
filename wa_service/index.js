@@ -572,7 +572,13 @@ async function start() {
         scheduleRestart(5000);
     }
 }
-start();
+// NOTE: start() (the Baileys connect) is deliberately NOT called here. It is
+// called only AFTER app.listen(PORT) succeeds - the port is our single-instance
+// guard. If a second wa_service is spawned (e.g. an auto-update race left an old
+// one alive), it must fail to bind the port and exit WITHOUT ever connecting
+// Baileys; connecting a second socket on the same session triggers a 440
+// "connection replaced" that knocks the primary offline - a real cause of the
+// "WhatsApp keeps disconnecting" reports.
 
 // ── HTTP API (unchanged shape) ──────────────────────────────────────────
 const app = express();
@@ -670,9 +676,20 @@ app.post('/api/wa/send', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`WhatsApp Background Service (Baileys) running on port ${PORT} [channel=${WA_CHANNEL}, session=${SESSION_ID}]`);
     console.log(`Forwarding inbound messages to ${BACKEND_URL}/webhooks/aisensy`);
+    // Port bound = we are the only instance. NOW it is safe to connect WhatsApp.
+    start();
+});
+server.on('error', (e) => {
+    if (e && e.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} already in use - another ASVA WhatsApp service is `
+            + `already running. Exiting WITHOUT touching the WhatsApp session (this `
+            + `prevents a 440 conflict that would disconnect the live one).`);
+        process.exit(0);   // clean exit; the supervisor keeps the original running
+    }
+    console.error('HTTP server error:', (e && e.message) || e);
 });
 
 // Load the privacy allow-list shortly after boot, then refresh every 10 min so
