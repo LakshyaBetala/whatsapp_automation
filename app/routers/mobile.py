@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 
 from app.db import require_db
 from app.services import conversations, names, promises, proof
@@ -174,6 +175,37 @@ def api_summary(token: str = Query("")):
 @router.get("/api/party")
 def api_party(token: str = Query(""), id: str = Query("")):
     return JSONResponse(_build_party(require_db(), _biz(token), id))
+
+
+# ── Owner actions from the phone (reuse the desktop endpoints, same token/auth,
+# so behaviour never diverges). The shop's WhatsApp sends still leave the shop
+# laptop via the outbox - the phone only triggers them. ─────────────────────
+class _MRemind(BaseModel):
+    token: str
+    party: str
+
+
+class _MPay(BaseModel):
+    token: str
+    client_id: str
+    amount: float
+    payment_date: str | None = None
+
+
+@router.post("/api/remind")
+async def api_remind(p: _MRemind):
+    _biz(p.token)                                  # 401 on a bad token
+    from app.routers.admin import admin_send_now, SendNowPayload
+    return await admin_send_now(SendNowPayload(token=p.token, party=p.party))
+
+
+@router.post("/api/record-payment")
+async def api_record_payment(p: _MPay):
+    _biz(p.token)                                  # 401 on a bad token
+    from app.routers.admin import admin_record_payment, RecordPaymentPayload
+    return await admin_record_payment(RecordPaymentPayload(
+        token=p.token, client_id=p.client_id, amount=p.amount,
+        payment_date=p.payment_date))
 
 
 @router.get("/qr")
@@ -354,6 +386,8 @@ _APP_HTML = r"""<!doctype html><html lang="en"><head>
  .btn svg{width:20px;height:20px}
  .btn-wa{background:var(--wa);color:var(--wa-ink);box-shadow:0 10px 22px -10px rgba(37,211,102,.55)}
  .btn-call{background:var(--card);color:var(--ink);border:1px solid var(--line);flex:0 0 52px;box-shadow:var(--shadow-sm)}
+ .btn-ghost{background:var(--card);color:var(--ink);border:1px solid var(--line);box-shadow:var(--shadow-sm)}
+ .btn-ghost:disabled{opacity:.6}
  .btn:active{transform:scale(.98)}
  .promise{border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));background:var(--warn-bg)}
  .promise b{color:var(--warn)}
@@ -445,11 +479,41 @@ async function api(path){
   if(!r.ok)throw new Error('http '+r.status);
   return r.json();
 }
+async function post(path,body){
+  const r=await fetch('/m/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({token:TOKEN},body||{}))});
+  if(r.status===401){logout();throw new Error('unauthorised');}
+  const j=await r.json().catch(()=>({}));
+  return {ok:r.ok,j:j};
+}
+function toast(m){let t=document.getElementById('_tst');
+  if(!t){t=document.createElement('div');t.id='_tst';
+    t.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#111;color:#fff;padding:11px 18px;border-radius:10px;font-size:.92rem;z-index:99;max-width:88%;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.3)';
+    document.body.appendChild(t);}
+  t.textContent=m;t.style.opacity='1';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';},2600);}
+async function doRemind(name,btn){
+  if(btn){btn.disabled=true;btn.textContent='Sending...';}
+  try{const x=await post('remind',{party:name});
+    if(x.j&&x.j.wa_down){toast('Shop WhatsApp not connected. Reconnect on the desktop.');}
+    else if(x.ok&&x.j&&x.j.sent!==false){toast('Reminder sent to '+name+'.');}
+    else{toast((x.j&&x.j.detail)||'Could not send. Try again.');}}
+  catch(e){if(e.message!=='unauthorised')toast('Could not send. Try again.');}
+  if(btn){btn.disabled=false;btn.textContent='Remind';}
+}
+async function doRecordPay(id,name){
+  const raw=prompt('Record a payment from '+name+'.\\n\\nAmount received (Rs):','');
+  if(raw==null)return;
+  const amt=Number(String(raw).replace(/[^0-9.]/g,''));
+  if(!amt||amt<=0){toast('Enter a valid amount.');return;}
+  const x=await post('record-payment',{client_id:id,amount:amt});
+  if(x.ok&&x.j&&(x.j.applied>0)){toast('Recorded Rs '+amt+' from '+name+'.');party(id);}
+  else{toast((x.j&&x.j.detail)||'Could not record. This works for non-Tally parties; Tally payments come in on their own.');}
+}
 function logout(){localStorage.removeItem('asva_m_token');TOKEN='';loginView();}
 function loginView(){
   app.innerHTML='<div class="login fade"><div class="lm">'+MARK+'</div>'+
    '<h1>ASVA</h1>'+
-   '<p>Enter your ASVA code to see your shop’s live collections. This is a view-only screen.</p>'+
+   '<p>Enter your ASVA code to see your shop’s live collections, and chase or record a payment from your phone.</p>'+
    '<input id="tk" placeholder="Your ASVA code" autocomplete="off" autocapitalize="characters">'+
    '<button onclick="doLogin()">Open my shop</button></div>';
   var i=document.getElementById('tk'); if(i){i.onkeydown=e=>{if(e.key==='Enter')doLogin();};}
@@ -606,6 +670,14 @@ async function party(id){
       (w&&t?'<a class="btn btn-call" href="tel:'+esc(t)+'" aria-label="Call">'+CALL_ICON+'</a>':'')+
     '</div>';
   }
+  // Owner actions from the phone: send this reminder now (needs a number), and
+  // record a payment. Both run through the same shop outbox as the desktop.
+  const nm=JSON.stringify(d.name).replace(/"/g,'&quot;');
+  const cid=JSON.stringify(id).replace(/"/g,'&quot;');
+  let owneracts='<div class="actions fade" style="margin-top:10px">'+
+    (w?'<button class="btn btn-ghost" onclick="doRemind('+nm+',this)">Remind</button>':'')+
+    '<button class="btn btn-ghost" onclick="doRecordPay('+cid+','+nm+')">Record payment</button>'+
+    '</div>';
   let recent='';
   if(d.recent&&d.recent.length){
     recent='<div class="sect">Recent replies</div><div class="card">'+
@@ -619,6 +691,7 @@ async function party(id){
        (d.reminders_on?'Reminders ON':'Reminders OFF')+'</span></div><div class="l">'+
        (d.reminders_on?'ASVA is chasing this party':'Paused for this party')+'</div></div></div>'+
    actions+
+   owneracts+
    promise+
    '<div class="sect">Open bills</div><div class="card fade d2">'+bills+'</div>'+
    recent+

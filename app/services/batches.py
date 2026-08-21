@@ -17,10 +17,14 @@ from __future__ import annotations
 
 MAX_BATCHES = 5
 
-# A batch's "upi" field normally holds a UPI VPA (or "" = shop default). This
-# sentinel means "this batch collects by BANK TRANSFER" - the reminder then
-# leads with the shop's NEFT/IMPS bank details instead of a UPI id.
+# A batch's "upi" field normally holds a UPI VPA (or "" = shop default). These
+# sentinels select a non-UPI collection method instead:
+#   BANK_SENTINEL - collect by bank transfer (NEFT/RTGS/IMPS + cheque); the
+#     reminder leads with the shop's bank details and still offers UPI.
+#   CASH_SENTINEL - collect in CASH; the reminder carries NO digital rails (no
+#     UPI link, no QR, no bank details), so a cash customer gets no paper trail.
 BANK_SENTINEL = "__bank__"
+CASH_SENTINEL = "__cash__"
 
 
 def default_batch(biz: dict) -> dict:
@@ -64,11 +68,24 @@ def batch_payment(biz: dict, batch: dict) -> dict:
 
     The batch's account selection decides what the reminder carries: a UPI batch
     sends UPI only; a "Bank transfer" batch leads with the bank/NEFT details (and
-    still offers the shop's default UPI). Bank details are NEVER added to a UPI
-    batch - the owner opts in per batch by choosing Bank transfer.
+    still offers the shop's default UPI); a "Cash" batch carries NO payment rails
+    at all. Bank details are NEVER added to a UPI batch - the owner opts in per
+    batch by choosing Bank transfer.
     """
-    primary = "bank" if (batch.get("upi") or "").strip() == BANK_SENTINEL else "upi"
+    sel = (batch.get("upi") or "").strip()
+    if sel == CASH_SENTINEL:
+        return {"primary": "cash", "vpa": None, "bank": None}
+    primary = "bank" if sel == BANK_SENTINEL else "upi"
     return {"primary": primary, "vpa": batch_vpa(biz, batch), "bank": bank_details(biz)}
+
+
+def cash_line(en: bool) -> str:
+    """The one cash-collection instruction, shared by the real reminder and the
+    preview so they never drift. No digital rails - just how to hand over cash."""
+    return ("Please keep the cash ready. Our team will collect it, or you can pay "
+            "at the shop." if en else
+            "Kripya cash taiyaar rakhein. Hamari team le legi, ya aap dukaan par "
+            "de sakte hain.")
 
 
 def batch_hour(biz: dict, batch: dict) -> int:

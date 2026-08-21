@@ -69,11 +69,20 @@ def _no_holds(monkeypatch):
 
 
 # ── the read-only guarantee ─────────────────────────────────────────────────
-def test_every_mobile_route_is_read_only():
+# The phone app is read-only EXCEPT two owner actions the owner explicitly
+# triggers - send this reminder now, and record a payment - both auth-gated and
+# reusing the desktop endpoints. No other mobile route may write.
+_MOBILE_WRITE_ALLOWED = {"/m/api/remind", "/m/api/record-payment"}
+
+
+def test_only_the_two_action_routes_write():
     for route in mobile.router.routes:
         methods = getattr(route, "methods", set()) or set()
         writes = methods & {"POST", "PUT", "PATCH", "DELETE"}
-        assert not writes, f"{route.path} exposes {writes} - mobile must be read-only"
+        if writes:
+            assert route.path in _MOBILE_WRITE_ALLOWED, \
+                f"{route.path} exposes {writes} - not an allowed mobile action"
+            assert methods <= {"POST"}, f"{route.path} must be POST-only"
 
 
 # ── auth ────────────────────────────────────────────────────────────────────
@@ -94,6 +103,18 @@ def test_summary_rejects_wrong_token(monkeypatch):
 def test_good_token_resolves_business(monkeypatch):
     monkeypatch.setattr(mobile, "require_db", lambda: _db([], []))
     assert mobile._biz("tok-good")["id"] == "biz1"
+
+
+def test_action_endpoints_reject_bad_token(monkeypatch):
+    import asyncio
+    monkeypatch.setattr(mobile, "require_db", lambda: _db([], []))
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(mobile.api_remind(mobile._MRemind(token="nope", party="X")))
+    assert e.value.status_code == 401
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(mobile.api_record_payment(
+            mobile._MPay(token="nope", client_id="c1", amount=100)))
+    assert e.value.status_code == 401
 
 
 # ── who to chase ────────────────────────────────────────────────────────────

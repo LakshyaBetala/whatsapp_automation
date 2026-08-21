@@ -1538,32 +1538,43 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
     vpa, bank = pay["vpa"], pay["bank"]
     qr_b64 = None
 
-    upi_block: list[str] = []
-    if vpa:
+    def _upi_lines() -> list[str]:
+        """UPI heading + link (+ a QR line only when a QR image will attach)."""
+        nonlocal qr_b64
         link = upi.upi_link(vpa, biz_name, pay_amount, f"{len(bills)} bills")
         qr_b64 = upi.qr_png_base64(link)
-        upi_block = ["", (f"To pay via UPI: {link}" if en else f"UPI se payment: {link}")]
+        out = [("Pay by UPI:" if en else "UPI se payment:"), link]
+        if qr_b64:
+            out.append("(or scan the QR below)" if en else "(ya neeche QR scan karein)")
+        return out
 
-    # Bank/NEFT details are sent ONLY when this batch's account is set to "Bank
-    # transfer" - not on every reminder. A UPI batch stays UPI-only.
-    bank_block: list[str] = []
-    if bank and pay["primary"] == "bank":
-        bank_block = ["", ("For bank transfer (NEFT/IMPS/RTGS):"
-                           if en else "Bank transfer (NEFT/IMPS) ke liye:")]
-        if bank["name"]:
-            bank_block.append((f"Name: {bank['name']}" if en else f"Naam: {bank['name']}"))
-        bank_block.append(f"A/c No: {bank['no']}")
-        if bank["ifsc"]:
-            bank_block.append(f"IFSC: {bank['ifsc']}")
-        if bank["bank"]:
-            bank_block.append(f"Bank: {bank['bank']}")
-
-    if pay["primary"] == "bank":
-        # Bank chosen for this batch: lead with the bank details, still offer UPI.
-        lines += bank_block + upi_block
-    else:
-        # UPI chosen: UPI only - no bank details unless the batch asks for them.
-        lines += upi_block
+    # Payment instructions, by the batch's collection method. One clean block with
+    # single-blank spacing; the QR image rides along only when UPI is offered.
+    if pay["primary"] == "cash":
+        # Cash batch: NO UPI link, NO QR, NO bank details - a cash customer gets no
+        # digital trail. Just how to hand over the cash (shared line, see batches).
+        from app.services.batches import cash_line as _cash_line
+        lines += ["", _cash_line(en)]
+    elif pay["primary"] == "bank":
+        # Bank batch: lead with bank/NEFT/RTGS + cheque, then still offer UPI.
+        if bank:
+            block = ["", ("Pay by bank transfer (NEFT / RTGS / IMPS):"
+                          if en else "Bank transfer (NEFT / RTGS / IMPS) se payment:")]
+            if bank["name"]:
+                block.append((f"Name: {bank['name']}" if en else f"Naam: {bank['name']}"))
+            block.append(f"A/c: {bank['no']}")
+            if bank["ifsc"]:
+                block.append(f"IFSC: {bank['ifsc']}")
+            if bank["bank"]:
+                block.append(f"Bank: {bank['bank']}")
+            block.append((f"Cheque: in favour of {biz_name}"
+                          if en else f"Cheque: {biz_name} ke naam"))
+            lines += block
+        if vpa:
+            lines += [""] + _upi_lines()
+    else:  # upi
+        if vpa:
+            lines += [""] + _upi_lines()
 
     if discount_line:
         lines += ["", discount_line]

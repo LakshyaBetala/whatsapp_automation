@@ -1296,9 +1296,10 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("english"))
     _bank_nm = (biz.get("bank_name") or "").strip()
     bank_label = ("Bank: " + _bank_nm) if _bank_nm else ("Bank transfer (A/c " + _bank_no[-4:] + ")" if _bank_no else "Bank transfer")
 
-    from app.services.batches import get_batches, BANK_SENTINEL
+    from app.services.batches import get_batches, BANK_SENTINEL, CASH_SENTINEL
     batches_json = json.dumps(get_batches(biz))
     bank_sentinel_js = json.dumps(BANK_SENTINEL)
+    cash_sentinel_js = json.dumps(CASH_SENTINEL)
     # Batch editor JS kept as a plain string (single braces) and interpolated, so
     # it needs no f-string brace-doubling.
     batch_js = r"""
@@ -1312,9 +1313,12 @@ function upiOpts(val) {
   if (typeof UPI_2 !== 'undefined' && UPI_2) opts.push([UPI_2, 'UPI 2: ' + UPI_2]);
   if (typeof UPI_3 !== 'undefined' && UPI_3) opts.push([UPI_3, 'UPI 3: ' + UPI_3]);
   if (typeof BANK_SET !== 'undefined' && BANK_SET) opts.push([BANK_VAL, BANK_LABEL]);
+  // Cash is always selectable - it needs no account. A cash batch's reminder
+  // carries no UPI link, no QR and no bank details (no digital trail).
+  if (typeof CASH_VAL !== 'undefined') opts.push([CASH_VAL, 'Cash (no online payment)']);
   if (val && !opts.some(function(o){ return o[0] === val; })) {
     // A saved bank/custom value whose account is not (yet) configured.
-    opts.push([val, val === BANK_VAL ? 'Bank transfer' : ('Custom: ' + val)]);
+    opts.push([val, val === BANK_VAL ? 'Bank transfer' : (val === CASH_VAL ? 'Cash (no online payment)' : ('Custom: ' + val))]);
   }
   return opts.map(function(o){
     return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+besc(o[1])+'</option>';
@@ -1527,6 +1531,7 @@ Ek party = EK message: saare bills jodkar, total + QR ke saath.</details>
  const BANK_SET = {bank_set_js};
  const BANK_LABEL = {bank_label!r};
  const BANK_VAL = {bank_sentinel_js};
+ const CASH_VAL = {cash_sentinel_js};
  let FEST = {festivals_json};
  let BATCHES = {batches_json};
  let calY, calM;
@@ -2085,10 +2090,32 @@ async def admin_preview(
         style_v = "standard"
 
     # Sample figures for a realistic preview.
-    from app.services.batches import BANK_SENTINEL, bank_details
+    from app.services.batches import BANK_SENTINEL, CASH_SENTINEL, bank_details, cash_line
     sample_amt = Decimal("12500")
     biz_name = biz.get("business_name", "")
     sel = (upi or "").strip()
+
+    # Cash batch: preview the real cash message - no UPI link, no QR, no bank.
+    if sel == CASH_SENTINEL:
+        en = lang == "english"
+        if en:
+            body = (f"Dear Ramesh Traders,\nA payment reminder from {biz_name}.\n\n"
+                    f"Invoice 2526RTC0203: {inr(sample_amt)} outstanding (5 days).\n\n"
+                    f"{cash_line(True)}")
+        else:
+            body = (f"Namaste Ramesh Traders ji,\n{biz_name} ki taraf se payment ka "
+                    f"vinamra reminder.\n\nBill 2526RTC0203 ka {inr(sample_amt)} baaki "
+                    f"hai (5 din).\n\n{cash_line(False)}")
+        _, discount_line = apply_discount(sample_amt, discount_pct, lang)
+        if discount_line:
+            body = f"{body}\n\n{discount_line}"
+        cl = (custom_line or "").strip()[:120]
+        if cl:
+            body = f"{body}\n\n{cl}"
+        body += ("\n\nOnce paid, kindly reply PAID. Thank you." if en
+                 else "\n\nPayment ho jaye to PAID reply karein. Dhanyavaad.")
+        return {"message": body}
+
     bank_primary = sel == BANK_SENTINEL
     vpa = ("" if bank_primary else sel) or biz.get("upi_vpa") or "shopupi@bank"
     pay_amount, discount_line = apply_discount(sample_amt, discount_pct, lang)
@@ -3127,7 +3154,6 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
         if not pay_rows:
             pay_rows = '<tr><td colspan="3" class="muted">Tally me is party ka koi receipt record nahi mila.</td></tr>'
         payments_section = (
-            '<h2>Payments received (Tally)</h2>'
             '<div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Voucher</th></tr>'
             + pay_rows + '</table></div>')
     else:
@@ -3140,7 +3166,6 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
             pay_rows = ('<tr><td colspan="3" class="muted">Abhi tak koi payment record nahi. '
                         'Upar &ldquo;Record payment&rdquo; se daalein.</td></tr>')
         payments_section = (
-            '<h2>Payments received</h2>'
             '<div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Note</th></tr>'
             + pay_rows + '</table></div>')
 
@@ -3236,7 +3261,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
         if not chips:
             chips = '<span class="muted">Sabhi reminder ja chuke.</span>'
         sched_section = (
-            f'<h2>Reminder schedule</h2><div class="card">'
+            f'<div class="card" style="margin-top:0">'
             f'<div class="muted" style="margin-bottom:10px">Ab tak <b>{sent_count}</b> reminder gaye. '
             f'Roz bhejne ka time: <b>{send_hh}</b> ({esc(_sched_batch["name"])}). Aane wale:</div>'
             f'<div class="chips">{chips}</div></div>')
@@ -3404,9 +3429,9 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 <div class="tablewrap"><table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th>
   <th class="n">Baaki</th><th>Due</th><th>Status</th><th class="n">Overdue</th><th></th></tr>{bill_rows}</table></div>
 
-{sched_section}
+{f'<details class="foldsec"><summary>Reminder schedule</summary>{sched_section}</details>' if sched_section else ''}
 
-{payments_section}
+<details class="foldsec"><summary>Payment history</summary>{payments_section}</details>
 
 <div class="modal" id="billmodal" onclick="if(event.target===this)closeM('billmodal')">
   <div class="modalbox">
@@ -3663,6 +3688,14 @@ async function delParty() {{
  .back{display:inline-block;margin-bottom:10px;color:#1f6c9f;text-decoration:none;font-weight:600}
  .remrow{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
  .tablewrap{overflow-x:auto}
+ .foldsec{border:1px solid #EAEAEA;border-radius:12px;background:#fff;margin:14px 0;overflow:hidden}
+ .foldsec>summary{cursor:pointer;list-style:none;padding:16px 20px;font-weight:700;font-size:1.05rem;display:flex;justify-content:space-between;align-items:center}
+ .foldsec>summary::-webkit-details-marker{display:none}
+ .foldsec>summary::after{content:"+";color:#0a7d33;font-weight:800;font-size:1.2rem}
+ .foldsec[open]>summary::after{content:"\2212"}
+ .foldsec[open]>summary{border-bottom:1px solid #EAEAEA}
+ .foldsec>*:not(summary){margin:14px 20px}
+ .foldsec .tablewrap,.foldsec .card{margin:14px 20px}
  .ntbtn{border:1px solid #EAEAEA;background:#fff;color:#2F3437;border-radius:6px;padding:4px 10px;font-size:.85em;cursor:pointer;white-space:nowrap}
  .ntbtn:hover{background:#f6f6f4}
  .ntbtn.ntdel{color:#fff;background:#c0392b;border-color:#c0392b;font-weight:600}
@@ -3738,7 +3771,8 @@ _TODAY_CSS = """
  .synp{display:inline-block;font-size:.74rem;font-weight:600;padding:3px 10px;border-radius:9999px;margin-top:8px}
  .synp.ok{background:#EDF3EC;color:#346538}
  .synp.stale{background:#FBF3DB;color:#956400}
- .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:20px 0}
+ .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:12px 0 0}
+ .glance{margin-top:26px}
  .hcard{background:#fff;border:1px solid #EAEAEA;border-radius:14px;padding:20px}
  .hcard .l{color:#787774;font-size:.74rem;text-transform:uppercase;letter-spacing:.05em}
  .hcard .n{font-size:2rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:6px;line-height:1}
@@ -3952,10 +3986,13 @@ function render(){
       '<button class="nudgebtn" onclick="openAddNum()">Add numbers</button></div>';
   }
 
+  // Lead with the day's ACTION (who to chase), then the money glance, then the
+  // secondary reference (promises + aging) - so the owner never scrolls to find
+  // the one thing they open Today for.
   document.getElementById('twrap').innerHTML =
-    hero +
     '<div class="sec"><h2>Who to chase today</h2><div class="sub">'+esc(chaseHead)+'</div><div class="clist">'+chaseRows+'</div></div>'+
     nudge +
+    '<div class="glance">'+hero+'</div>'+
     '<div class="twocol">'+
       '<div class="sec"><h2>Said they will pay</h2><div class="sub">Following up automatically. Enter the payment when it lands.</div><div class="clist">'+promRows+'</div></div>'+
       '<div class="sec"><h2>Where your money is stuck</h2><div class="sub">Outstanding by how far past due.</div><div class="card">'+ageRows+'</div></div>'+
