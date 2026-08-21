@@ -8,6 +8,18 @@ request to make the cloud backend production-ready.
 Severity key: **P0** exploit/data-loss now · **P1** fix before scaling shops ·
 **P2** hardening / hygiene.
 
+## Rollout status — 2026-08-21 (all shipped in 2.0.2)
+- **DEPLOYED & VERIFIED LIVE:** webhook auth (P0) — anonymous `channel:bot` now
+  returns `{"ok":true}` with no data; legit owner commands verified working with
+  the secret. `AISENSY_WEBHOOK_SECRET` set on the VPS backend + matching
+  `WEBHOOK_SECRET` on the bot service. `/docs`+`/openapi.json` 404 in prod;
+  security headers + per-IP rate limit live. Outbox stale-expiry sweep running on
+  the VPS. Payment-image classification live. Backend on 2.0.2; installer 2.0.2
+  published (no blockmap). RISHAB's 33 stuck rows cleared.
+- **PENDING (shop side):** shop laptops send `x-agent-token` only from 2.0.2
+  onward; once the fleet is on 2.0.2, tighten the shop channel to *require* the
+  token (drop the allow-with-warning fallback).
+
 ---
 
 ## 1. The "33 messages stuck in queue" incident (RESOLVED in code; backlog clear pending)
