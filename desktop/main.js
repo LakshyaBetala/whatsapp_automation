@@ -438,6 +438,75 @@ function stopAll() {
 let pendingUpdateVersion = '';
 let updateSplash = null;
 
+// A flag file whose PRESENCE means "an update is in progress". The detached
+// updating window (a separate process that outlives Electron) watches it and
+// closes itself the moment the freshly-installed app deletes it on launch.
+const UPDATING_FLAG = path.join(os.tmpdir(), 'asva_updating.flag');
+const UPDATING_PS1 = path.join(os.tmpdir(), 'asva_updating.ps1');
+
+// The one gap our in-app splash cannot cover: during the NSIS reinstall the
+// Electron process is DEAD, so no Electron window can exist for ~30-60s - the
+// screen goes blank and the shopkeeper thinks ASVA was deleted. Fix: spawn a
+// SEPARATE, detached Windows window (PowerShell + WinForms, no bundled files)
+// that keeps "Updating ASVA..." on screen right through the reinstall and closes
+// itself when the new app relaunches and removes the flag.
+function spawnDetachedUpdatingWindow(version) {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  try {
+    try { fs.writeFileSync(UPDATING_FLAG, String(Date.now())); } catch (_) {}
+    const title = version ? `Updating ASVA to ${version}...` : 'Updating ASVA...';
+    const ps = [
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "Add-Type -AssemblyName System.Drawing",
+      "$flag = Join-Path $env:TEMP 'asva_updating.flag'",
+      "$f = New-Object System.Windows.Forms.Form",
+      "$f.FormBorderStyle = 'None'",
+      "$f.StartPosition = 'CenterScreen'",
+      "$f.Size = New-Object System.Drawing.Size(480,300)",
+      "$f.BackColor = [System.Drawing.Color]::FromArgb(11,18,32)",
+      "$f.TopMost = $true",
+      "$f.ShowInTaskbar = $true",
+      "$f.Text = 'Updating ASVA'",
+      "$t = New-Object System.Windows.Forms.Label",
+      "$t.Text = " + JSON.stringify(title),
+      "$t.ForeColor = [System.Drawing.Color]::White",
+      "$t.Font = New-Object System.Drawing.Font('Segoe UI',17,[System.Drawing.FontStyle]::Bold)",
+      "$t.TextAlign = 'MiddleCenter'",
+      "$t.SetBounds(20,64,440,40)",
+      "$f.Controls.Add($t)",
+      "$m = New-Object System.Windows.Forms.Label",
+      "$m.Text = ('It will reopen by itself in about a minute.' + [char]10 + 'Your customers, bills and reminders are safe.')",
+      "$m.ForeColor = [System.Drawing.Color]::FromArgb(185,196,220)",
+      "$m.Font = New-Object System.Drawing.Font('Segoe UI',10)",
+      "$m.TextAlign = 'MiddleCenter'",
+      "$m.SetBounds(30,112,420,60)",
+      "$f.Controls.Add($m)",
+      "$pb = New-Object System.Windows.Forms.ProgressBar",
+      "$pb.Style = 'Marquee'",
+      "$pb.MarqueeAnimationSpeed = 30",
+      "$pb.SetBounds(70,192,340,16)",
+      "$f.Controls.Add($pb)",
+      "$w = New-Object System.Windows.Forms.Label",
+      "$w.Text = 'Please do not turn off the computer.'",
+      "$w.ForeColor = [System.Drawing.Color]::FromArgb(124,136,163)",
+      "$w.Font = New-Object System.Drawing.Font('Segoe UI',9)",
+      "$w.TextAlign = 'MiddleCenter'",
+      "$w.SetBounds(30,224,420,28)",
+      "$f.Controls.Add($w)",
+      "$script:n = 0",
+      "$tm = New-Object System.Windows.Forms.Timer",
+      "$tm.Interval = 1000",
+      "$tm.Add_Tick({ $script:n++; if ((-not (Test-Path $flag)) -or ($script:n -gt 180)) { $tm.Stop(); $f.Close() } })",
+      "$tm.Start()",
+      "[void]$f.ShowDialog()",
+    ].join("\n");
+    fs.writeFileSync(UPDATING_PS1, ps, "utf8");
+    spawn("powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", UPDATING_PS1],
+      { detached: true, stdio: "ignore", windowsHide: false }).unref();
+  } catch (_) { /* best-effort; never block the update */ }
+}
+
 // The silent reinstall makes ASVA VANISH for 30-60s (no window, and Windows even
 // removes the Start-menu/search shortcut mid-install) before it reopens itself.
 // With no feedback that reads to a shopkeeper as "my app got deleted" - the exact
@@ -504,6 +573,9 @@ function applyUpdateAndQuit() {
   // Show the reassuring "updating" splash BEFORE anything closes, and hide the main
   // window so the splash is the only thing on screen during the changeover.
   try { showUpdatingSplash(pendingUpdateVersion); } catch (e) {}
+  // AND spawn the detached window that OUTLIVES this process, so the screen never
+  // goes blank during the windowless NSIS reinstall (the real "app deleted" gap).
+  try { spawnDetachedUpdatingWindow(pendingUpdateVersion); } catch (e) {}
   try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); } catch (e) {}
   try { stopAll(); } catch (e) {}
   // A clear pause so the "updating, will reopen, data safe" splash is read before
@@ -995,6 +1067,9 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(() => {
     try { app.setAppUserModelId('com.asva.shop'); } catch (e) {}   // stable Windows identity for search/pin
+    // We're back after a (possible) update: remove the flag so the detached
+    // "Updating ASVA" window closes itself now that the real app is on screen.
+    try { fs.unlinkSync(UPDATING_FLAG); } catch (_) {}
     startAll();
     createWindow();
     createTray();
