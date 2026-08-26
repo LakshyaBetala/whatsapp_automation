@@ -4330,9 +4330,11 @@ async def admin_payments(token: str = Query(...), lang: str = Query("english")):
 <div id="addcf" class="cfback" style="display:none">
   <div class="cfbox">
     <h3>Add a payment</h3>
-    <div class="hint" style="margin:2px 0 8px">Pick the customer who paid. You confirm the amount and deposit account next, then post it into Tally. Nothing posts without your confirm.</div>
+    <div class="hint" style="margin:2px 0 8px">Type the customer's name to find them. You confirm the amount and deposit account next, then post it into Tally. Nothing posts without your confirm.</div>
     <label>Customer</label>
-    <select id="addsel"><option value="">Loading...</option></select>
+    <input id="addsearch" placeholder="Type a name to search..." autocomplete="off" oninput="filterAdd()"
+      style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;font:inherit">
+    <div id="addlist" style="max-height:240px;overflow:auto;border:1px solid #EAEAEA;border-radius:8px;margin-top:8px;display:none"></div>
     <div style="margin-top:18px;display:flex;gap:10px">
       <button onclick="pickAdd()" id="addnext">Next</button>
       <button class="ghost" onclick="closeAdd()">Cancel</button>
@@ -4491,24 +4493,47 @@ async function cancelPending(id){{
   load();
 }}
 let ADDCLIENTS=[];
+let ADD_CID='';
+function renderAddList(q){{
+  const box=document.getElementById('addlist');
+  q=(q||'').trim().toLowerCase();
+  if(!ADDCLIENTS.length){{ box.style.display='block'; box.innerHTML='<div class="addrow" style="padding:12px;color:#787774">No customers found</div>'; return; }}
+  let list = q ? ADDCLIENTS.filter(c=>(c.name||'').toLowerCase().includes(q)) : ADDCLIENTS;
+  list = list.slice(0,60);
+  box.style.display='block';
+  box.innerHTML = list.length
+    ? list.map(c=>'<div class="addrow" data-cid="'+esc(c.client_id)+'" onclick="pickRow(this.dataset.cid)"'
+        +' style="padding:11px 13px;cursor:pointer;border-bottom:1px solid #F2F1EE;display:flex;justify-content:space-between;gap:10px">'
+        +'<span>'+esc(c.name)+'</span>'+(c.outstanding>0?('<span style="color:#787774">\\u20b9'+inr(c.outstanding)+'</span>'):'')+'</div>').join('')
+    : '<div class="addrow" style="padding:12px;color:#787774">No match. Try another spelling.</div>';
+}}
+function filterAdd(){{ ADD_CID=''; renderAddList(document.getElementById('addsearch').value); }}
+function pickRow(cid){{
+  ADD_CID=cid;
+  const c=ADDCLIENTS.find(x=>x.client_id===cid)||{{}};
+  document.getElementById('addsearch').value=c.name||'';
+  const box=document.getElementById('addlist');
+  box.innerHTML='<div class="addrow" style="padding:11px 13px;background:#EDF3EC;color:#346538;font-weight:600;display:flex;justify-content:space-between;gap:10px">'
+    +'<span>\\u2713 '+esc(c.name||'')+'</span>'+(c.outstanding>0?('<span>\\u20b9'+inr(c.outstanding)+'</span>'):'')+'</div>';
+}}
 async function openAdd(){{
   document.getElementById('addmsg').textContent='';
   document.getElementById('addcf').style.display='flex';
-  const s=document.getElementById('addsel');
-  s.innerHTML='<option value="">Loading...</option>';
+  ADD_CID='';
+  const si=document.getElementById('addsearch'); si.value='';
+  const box=document.getElementById('addlist'); box.style.display='none'; box.innerHTML='';
   try{{
     const r=await fetch('/admin/payments/clients?token='+encodeURIComponent(TOKEN));
     const d=await r.json();
     ADDCLIENTS=d.clients||[];
-    s.innerHTML = ADDCLIENTS.length
-      ? ADDCLIENTS.map(c=>'<option value="'+esc(c.client_id)+'">'+esc(c.name)+(c.outstanding>0?(' \\u00b7 \\u20b9'+inr(c.outstanding)):'')+'</option>').join('')
-      : '<option value="">No customers found</option>';
-  }}catch(e){{ s.innerHTML='<option value="">Could not load customers</option>'; }}
+    renderAddList('');
+    si.focus();
+  }}catch(e){{ box.style.display='block'; box.innerHTML='<div class="addrow" style="padding:12px;color:#9f2f2d">Could not load customers</div>'; }}
 }}
 function closeAdd(){{document.getElementById('addcf').style.display='none';}}
 function pickAdd(){{
-  const cid=document.getElementById('addsel').value;
-  if(!cid){{document.getElementById('addmsg').textContent=EN?'Pick a customer.':'Customer chunein.';return;}}
+  const cid=ADD_CID;
+  if(!cid){{document.getElementById('addmsg').textContent=EN?'Type a name and pick the customer.':'Naam type karke customer chunein.';return;}}
   const c=ADDCLIENTS.find(x=>x.client_id===cid)||{{}};
   CF={{mode:'promise', client_id:cid, name:c.name||''}};
   closeAdd();

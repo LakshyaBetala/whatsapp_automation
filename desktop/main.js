@@ -712,6 +712,33 @@ function maybeWelcomeAfterUpdate() {
   } catch (_) {}
 }
 
+// After a SILENT update, Windows can drop our per-user Start-menu shortcut, so
+// the app "disappears" from search - and the owner then reinstalls a STALE
+// installer left in Downloads, downgrading themselves (the exact loop we saw).
+// Self-heal it on every launch: recreate the Start-menu .lnk pointing at the
+// CURRENT exe, so searching "ASVA" always finds the real app, never the setup.
+function ensureStartMenuShortcut() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  try {
+    const exe = app.getPath('exe');
+    const ps = [
+      '$ErrorActionPreference="SilentlyContinue";',
+      '$d=Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs";',
+      '$l=Join-Path $d "ASVA.lnk";',
+      '$w=New-Object -ComObject WScript.Shell;',
+      '$s=$w.CreateShortcut($l);',
+      `$s.TargetPath=${JSON.stringify(exe)};`,
+      `$s.WorkingDirectory=${JSON.stringify(path.dirname(exe))};`,
+      `$s.IconLocation=${JSON.stringify(exe + ',0')};`,
+      '$s.Description="ASVA";',
+      '$s.Save();',
+    ].join(' ');
+    spawn('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps],
+      { windowsHide: true, detached: true, stdio: 'ignore' }).unref();
+  } catch (e) { /* best-effort; never block launch */ }
+}
+
 // ── Window + tray ─────────────────────────────────────────────────────────
 function trayIcon() {
   const p = path.join(__dirname, 'icon.png');
@@ -967,9 +994,12 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(() => {
+    try { app.setAppUserModelId('com.asva.shop'); } catch (e) {}   // stable Windows identity for search/pin
     startAll();
     createWindow();
     createTray();
+    // Make sure the app stays findable in Windows search after an update.
+    setTimeout(ensureStartMenuShortcut, 3000);
     // Greet the owner if we just relaunched from an update (after the UI has loaded).
     setTimeout(maybeWelcomeAfterUpdate, 4000);
     pollStatus();

@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "main": "main.js",
   "scripts": {
@@ -17,7 +17,7 @@
   "build": {
     "appId": "com.asva.shop",
     "productName": "ASVA",
-    "copyright": "ASVA",
+    "copyright": "Copyright (c) 2026 Almmatix",
     "directories": {
       "output": "../dist_installer",
       "buildResources": "."
@@ -29,7 +29,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.0.5.\n\nA proper wait screen while updating: ASVA now shows a full \"Updating, I will reopen by myself in a minute, your data is safe\" screen for the whole update, not just a flash, so it never feels like the app vanished.\n\nClearer Escalate: sending a firm formal reminder to one customer is now easy to read and to confirm. You see the exact letter and a clear Send button, and ASVA sends it only when you decide.\n\nCall on desktop that works: on the computer you now get the customer's number to dial and a WhatsApp button to message or call them, instead of a Call button that did nothing on a PC.\n\nCredit health, quietly: open any customer and, only when it matters, ASVA shows a calm note about how exposed you are before you extend more credit. No pop-ups, no flags on every bill.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.0.6.\n\nStays findable after an update: ASVA now makes sure it keeps its Start-menu shortcut every time it opens, so after an update you can always search \"ASVA\" and open the app, instead of accidentally reopening the old setup file.\n\nSearch a customer when recording a payment: the Add-a-payment screen now lets you type a name to find the customer instantly, instead of scrolling a long list.\n\nProper publisher name: ASVA now shows \"Almmatix\" as the publisher in Windows, like other trusted apps.\n\nFree for every shop until 30 September 2026."
     },
     "files": [
       "main.js",
@@ -53,6 +53,7 @@
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "icon.ico",
+      "publisherName": "Almmatix",
       "artifactName": "ASVA-Setup-${version}.${ext}"
     },
     "nsis": {
