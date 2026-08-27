@@ -208,7 +208,10 @@ def test_pwa_shell_serves_installable_html(monkeypatch):
     assert "ASVA" in r.text
     assert "/m/manifest.webmanifest" in r.text          # installable
     assert "serviceWorker" in r.text                    # registers the SW
-    assert "View only" in r.text                         # the read-only banner
+    # The phone app can now remind + record payments; the footer bar says so and
+    # points setup back to the shop computer (it is no longer "view only").
+    assert "record payments" in r.text
+    assert "shop computer" in r.text
 
 
 def test_pwa_manifest_is_valid(monkeypatch):

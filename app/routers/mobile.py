@@ -440,7 +440,7 @@ _APP_HTML = r"""<!doctype html><html lang="en"><head>
  .ro a{color:var(--accent-ink);text-decoration:none;font-weight:700}
 </style></head><body>
 <div id="app"></div>
-<div class="ro">View only &middot; changes are made on the shop computer &middot; <a href="/download">Get the computer app</a></div>
+<div class="ro">Remind &amp; record payments from here &middot; full setup on the shop computer &middot; <a href="/download">Get the computer app</a></div>
 <script>
 const app=document.getElementById('app');
 const qs=new URLSearchParams(location.search);

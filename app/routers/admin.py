@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import require_db
+from app.services import ui_i18n as i18n
 from app.jobs.reminder_sweep import STYLE_CADENCE
 from app.models import (DEFAULT_CREDIT_DAYS, PLAN_LABELS, PLAN_LIMITS, Plan,
                         recommend_plan)
@@ -186,224 +187,14 @@ def _tally_status(dt: Optional[_dt.datetime]) -> tuple[str, str]:
 # rendered HTML (never the f-string templates - that keeps the fragile markup
 # untouched and makes the worst-case failure "some text stays Hinglish", never
 # a broken page). Applied longest-phrase-first so specifics beat generics.
-_UI_EN: list[tuple[str, str]] = [
-    # ---- Dashboard ----
-    ("Tick = us party ko reminder ON. Batch, timing aur holidays: <b>Reminders</b> tab.",
-     "Tick = reminders ON for that party. Batches, timing and holidays: <b>Reminders</b> tab."),
-    ("messages is month", "messages this month"),
-    ("active customers is month", "active customers this month"),
-    ("Naya data aaya - dekhein", "New data arrived - view"),
-    ("Tally bills", "Tally bills"),
-    ("Non-Tally bills", "Non-Tally bills"),
-    ("Party dhundo...", "Search party..."),
-    ("Baaki: zyada pehle", "Dues: highest first"),
-    ("Overdue: zyada din pehle", "Overdue: most days first"),
-    ("Naam: A to Z", "Name: A to Z"),
-    ("Sabko reminder ON karo", "Turn reminders ON for all"),
-    ("Sabko reminder OFF karo", "Turn reminders OFF for all"),
-    (">Sab ON<", ">All ON<"),
-    (">Sab OFF<", ">All OFF<"),
-    ("Agla reminder", "Next reminder"),
-    ("Aaj kaun?", "Who today?"),
-    ("number nahi", "no number"),
-    # ---- Missed-hour catch-up banner + per-party skip ----
-    ("ASVA band tha (", "ASVA was off ("),
-    (" parties</b> ke reminder ruke hain (total ", " parties</b> have reminders waiting (total "),
-    ("Abhi bhejein", "Send now"),
-    ("Aaj skip karein", "Skip today"),
-    (">Aaj skip<", ">Skip today<"),
-    ("Bheje ja rahe hain... thodi der me status dekhein.", "Sending now... check back in a minute."),
-    ("Aaj ke liye skip ho gaya.", "Skipped for today."),
-    ("Nahi ho paya. Page reload karke phir try karein.", "Could not do it. Reload the page and try again."),
-    ("Kuch due nahi", "Nothing due"),
-    ("Aaj kaun ko reminder jayega dekhein", "See who gets a reminder today"),
-    ("Aaj kaun ko reminder jayega", "Who gets a reminder today"),
-    ("Aaj holiday hai.", "Today is a holiday."),
-    ("Koi reminder nahi jayega; agle working day chala jayega.",
-     "No reminders will go; they move to the next working day."),
-    ("Aaj kisi ko reminder nahi jayega.", "No reminders will go today."),
-    (" parties</b> ko aaj reminder jayega (total ", " parties</b> get a reminder today (total "),
-    (" aaj, baaki agle dino.", " today, the rest over the next days."),
-    ("Load nahi hua.", "Could not load."),
-    ("Send now", "Send now"),
-    ("Sab reminder ho gaye", "All reminders done"),
-    ("Credit days &amp; reminder schedule", "Credit days &amp; reminder schedule"),
-    ("Tally se aaya hua, ya galat/khaali ho to yahan set karein.",
-     "Comes from Tally; set it here if it is wrong or empty."),
-    ("Reminder in dino par jayega (bill ke baad):", "Reminders go on these days (after the bill):"),
-    ("Due date ke baad har ~", "After the due date, every ~"),
-    ("din ek overdue reminder.", "days one overdue reminder."),
-    ("(Timing ASVA khud set karta hai. Aap sirf credit days badal sakte hain.)",
-     "(ASVA sets the timing itself. You only change the credit days.)"),
-    ("Credit days 1 se 730 ke beech likhein.", "Enter credit days between 1 and 730."),
-    ("Abhi ", "Send now to "),
-    (" ko reminder bhejein?", " a reminder?"),
-    ("Kitna payment mila? (Rs me)", "How much was received? (in Rs)"),
-    ("Sahi amount likhein.", "Enter a valid amount."),
-    ("Kuch apply nahi hua.", "Nothing was applied."),
-    (" active customers hain - ", " active customers - "),
-    (" active customers ke liye ", " active customers, "),
-    ("/month) lein.", "/month)."),
-    (" kaafi hai.", " is enough."),
-    ("plan sahi hai.", "plan is correct."),
-    ("Aapka ", "Your "),
-    ("Aapke ", "You have "),
-    ("ASVA suggestion: ", "ASVA suggestion: "),
-    # ---- Reminder batches ----
-    ("Batch = language + UPI + time ka ek group. Dashboard me har party ko batch dein; message apne aap jaate hain.",
-     "A batch = a group with its own language, UPI and time. Assign parties to batches on the Dashboard; messages go out automatically."),
-    ("Batch = language + UPI + time. Dashboard me har party ko batch dein. Jo assign nahi, unko Batch 1. Discount optional hai (0 = koi nahi).",
-     "Batch = language + UPI + time. Assign each party a batch on the Dashboard. Unassigned parties use Batch 1. Discount is optional (0 = none)."),
-    ("Reminder kaise chalta hai (sab automatic):",
-     "How reminders work (all automatic):"),
-    ("1. Naya bill = credit period ke andar vinamra yaad (30 din me 5 baar).",
-     "1. New bill = polite reminders inside the credit period (5 in 30 days)."),
-    ("2. Due date ke baad = har ~7 din me overdue message, jab tak payment na aaye (max 200 din). Lambi credit walon ko utna hi lamba gap.",
-     "2. After the due date = an overdue message every ~7 days until they pay (max 200 days). Longer credit means a longer gap."),
-    ("3. Phir ASVA aapko bolega: ab khud call karein.",
-     "3. Then ASVA tells YOU: call them yourself now."),
-    ("4. Jis din party SELECT karo, ginti usi din se - overdue party ko usi din overdue message jata hai.",
-     "4. Counting starts the day you SELECT a party - an overdue party gets the overdue message that same day."),
-    ("Ek party = EK message: saare bills jodkar, total + QR ke saath.",
-     "One party = ONE message: all bills combined, with total + QR."),
-    ("Aage ki date par tap = holiday (red). Us din reminder skip, agle working day jayega.",
-     "Tap a future date = holiday (red). Reminders skip that day and go the next working day."),
-    ("Save holidays", "Save holidays"),
-    ("Send Time", "Send Time"),
-    ("Batch banayein (tone, language, discount) &rarr; Dashboard me har party ko batch dein &rarr; ASVA khud reminder bhejta hai. Jo assign nahi, unko Batch 1.",
-     "Create a batch (tone, language, discount) &rarr; assign each party a batch on the Dashboard &rarr; ASVA sends the reminders. Unassigned parties use Batch 1."),
-    ("Alag customers ko alag tone, language ya discount dena ho to batches banayein (max 5). Har batch ka apna severity, language, discount aur custom line hota hai. Dashboard se har party ko batch chunein. Jo assign nahi, unko Batch 1 jaata hai. Discount sirf ussi batch me lagta hai jisme aap set karo (0 = koi discount nahi).",
-     "To give different customers a different tone, language or discount, create batches (max 5). Each batch has its own severity, language, discount and custom line. Assign each party to a batch from the Dashboard. Unassigned parties use Batch 1. A discount applies only to the batch you set it on (0 = no discount)."),
-    ("Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Yahan sirf batches, send time aur holidays set karein.",
-     "ASVA manages reminder timing itself (based on each party's credit days). Here you only set batches, send time and holidays."),
-    ("Reminder batches", "Reminder batches"),
-    ("+ Batch add karein", "+ Add batch"),
-    ("Save batches", "Save batches"),
-    ("Save time", "Save time"),
-    ("Custom line (optional)", "Custom line (optional)"),
-    ("Har din is time par (jab tak system on hai).", "Every day at this time (while the system is on)."),
-    ("Batch assign", "Assign batch"),
-    ("Selected parties ko is batch me daalein", "Move selected parties to this batch"),
-    ("Pehle parties tick karein.", "Tick some parties first."),
-    ("Pehle ", "First "),
-    ("Is batch ka UPI. Khaali = shop default.", "This batch's UPI. Blank = shop default."),
-    ("(is party ke reminder ki language, UPI aur time)", "(this party's reminder language, UPI and time)"),
-    ("Batch: 1 (Standard). Alag batches Reminders tab me banayein.",
-     "Batch: 1 (Standard). Create more batches in the Reminders tab."),
-    # ---- Reminders page ----
-    ("Reminder timing ASVA khud manage karta hai (har party ke credit days ke hisaab se). Aap sirf yeh settings badlein.",
-     "ASVA manages reminder timing itself (based on each party's credit days). You only change these settings."),
-    ("Message language", "Message language"),
-    ("Send reminders at", "Send reminders at"),
-    ("Custom line", "Custom line"),
-    ("(optional) e.g. Diwali greetings", "(optional) e.g. Diwali greetings"),
-    ("Early-pay discount", "Early-pay discount"),
-    ("QR + amount is discount se kam ho jayega. 0 = no discount.",
-     "QR + amount drop by this discount. 0 = no discount."),
-    ("Jo settings chuni hain, wahi message dikhega.", "Shows the message with the settings you chose."),
-    ("View message", "View message"),
-    ("Save settings", "Save settings"),
-    ("Aaj se aage ki date pe tap karke holiday mark karein (red). Purani dates select nahi hongi. Marked dates par reminder skip hoga aur agle working day chala jayega. Save dabana zaroori hai; last saved list hi final hoti hai.",
-     "Tap a future date to mark a holiday (red). Past dates cannot be selected. On marked dates reminders skip and move to the next working day. You must press Save; the last saved list is final."),
-    ("Message preview", "Message preview"),
-    ("Koi holiday nahi. Har din reminder ja sakta hai.", "No holidays. Reminders can go any day."),
-    ("Holidays (in dino skip): ", "Holidays (skipped): "),
-    ("Preview not available.", "Preview not available."),
-    ("Preview failed.", "Preview failed."),
-    # ---- Party page ----
-    ("ASVA is party ke credit days ke hisaab se khud reminder bhejta hai.",
-     "ASVA sends reminders itself based on this party's credit days."),
-    ("Reminders abhi OFF hain. ON karne par schedule niche dikhega.",
-     "Reminders are OFF. Turn them ON to see the schedule below."),
-    ("Reminder schedule", "Reminder schedule"),
-    ("Sabhi reminder ja chuke.", "All reminders already sent."),
-    ("Ab tak <b>", "So far <b>"),
-    ("</b> reminder gaye.", "</b> reminders sent."),
-    ("Roz bhejne ka time:", "Daily send time:"),
-    ("Aane wale:", "Upcoming:"),
-    # ---- Non-Tally bill add/edit/delete (party page JS prompts) ----
-    ("+ Add bill (non Tally)", "+ Add bill (non Tally)"),
-    ("Naya bill - amount (Rs):", "New bill - amount (Rs):"),
-    ("Bill number (khaali chhodo to auto):", "Bill number (leave empty = automatic):"),
-    ("Sirf number likhein, jaise 12500", "Enter numbers only, e.g. 12500"),
-    (" DELETE karein? Wapas nahi aayega.", " - delete this bill? This cannot be undone."),
-    ("Nahi ho paya. Phir se try karein.", "Could not save. Please try again."),
-    # ---- Nav / update banner ----
-    ("Page fresh karein", "Refresh this page"),
-    ("Naya ASVA version <b>", "New ASVA version <b>"),
-    ("</b> aa gaya hai", "</b> is available"),
-    (" Naya zip laga lein.", " Install the new zip to update."),
-    ("(zaroori update)", "(required update)"),
-    ("Reminder OFF karein", "Turn reminder OFF"),
-    ("Reminder ON karein", "Turn reminder ON"),
-    (" ke reminder OFF kar dein? Isko automatic reminder nahi jayega.",
-     " - turn reminders OFF? It will get no automatic reminders."),
-    ("Nahi ho paya.", "Could not do it."),
-    ("Koi bill nahi.", "No bills."),
-    ("Payments received (Tally)", "Payments received (Tally)"),
-    ("Tally me is party ka koi receipt record nahi mila.",
-     "No receipt recorded for this party in Tally."),
-    ("Non-Tally party - payments dashboard se record hote hain.",
-     "Non-Tally party - payments are recorded from the dashboard."),
-    ("Total baaki", "Total outstanding"),
-    ("Open bills", "Open bills"),
-    ("Credit days", "Credit days"),
-    ("aapko alert", "owner alert"),
-    ("Aaj", "Today"),
-    ("Sab ho gaye", "All done"),
-    ("number nahi hai", "no number"),
-    # ---- Setup wizard ----
-    ("3 chhote step, phir aap live.", "3 quick steps and you are live."),
-    ("Reminder tone", "Reminder tone"),
-    ("Finish setup", "Finish setup"),
-    ('Ho gaya. Ab <b>WhatsApp Setup</b> tab me QR scan karein, phir Dashboard me "Sab ON" karke live ho jayein.',
-     'Done. Now scan the QR in the <b>WhatsApp Setup</b> tab, then press "All ON" on the Dashboard to go live.'),
-    # ---- Analytics ----
-    ("Collections (last 6 months)", "Collections (last 6 months)"),
-    ("Aging (kitne din se baaki)", "Aging (days outstanding)"),
-    ("Sabse zyada baaki (top 12)", "Highest dues (top 12)"),
-    ("Is month aaya", "Received this month"),
-    ("Collection rate", "Collection rate"),
-    ("Avg DSO", "Avg DSO"),
-    ("Parties owing", "Parties owing"),
-    ("Overdue parties", "Overdue parties"),
-    ("Open accounts", "Open accounts"),
-    ("Not due", "Not due"),
-    # ---- Accounts ----
-    ("UPI ID (reminder me QR + link isi ka jayega)", "UPI ID (used for the QR + link in reminders)"),
-    ("UPI set hai to har reminder me pay-link + QR apne aap lagta hai.",
-     "If UPI is set, every reminder gets a pay-link + QR automatically."),
-    ("Bank account name", "Bank account name"),
-    ("Account number", "Account number"),
-    ("Bank name", "Bank name"),
-    ("UPI na ho to reminder me ye bank details (A/C + IFSC) bheji jayengi.",
-     "If there is no UPI, these bank details (A/C + IFSC) are sent in reminders."),
-    # ---- Shared / small ----
-    ("Tally se sync:", "Tally sync:"),
-    ("(har 5 min auto)", "(every 5 min, auto)"),
-    ("Reload data", "Reload data"),
-    ("Saving...", "Saving..."),
-    ("Sending...", "Sending..."),
-    ("Save failed", "Save failed"),
-    ("Loading...", "Loading..."),
-    ("Nahi mila", "Not found"),
-    ("plan", "plan"),
-    (" din", " days"),
-    ("Baaki", "Balance"),
-]
-
-
-def _ui_translate(html: str, en: bool) -> str:
-    if not en:
-        return html
-    for h, e in sorted(_UI_EN, key=lambda p: len(p[0]), reverse=True):
-        if h != e:
-            html = html.replace(h, e)
-    return html
+def _ui_translate(html: str, lang: str) -> str:
+    """Rewrite a Hinglish-authored admin page into the chosen locale
+    (english / hinglish / hindi). Delegates to app.services.i18n."""
+    return i18n.translate_html(html, lang)
 
 
 def _is_en(lang: str) -> bool:
-    return (lang or "").strip().lower().startswith("en")
+    return i18n.is_en(lang)
 
 
 # ── Shared chrome: favicon, top navigation, focus states ──────────────────
@@ -420,6 +211,7 @@ _NAV_CSS = """
  .topnav a.on{background:#0a7d33;color:#fff}
  .topnav .sp{flex:1}
  .topnav a.lang{border:1px solid #EAEAEA;color:#1f6c9f;font-size:.85rem}
+ .topnav a.lang.on{background:#0a7d33;color:#fff;border-color:#0a7d33}
  .topnav .ver{color:#b5b5b0;font-size:.72rem;padding:0 4px;align-self:center}
  /* Inside the desktop app the sidebar navigates and the app's own top bar
     carries Tally status + reload + language, so the whole in-page nav is
@@ -489,16 +281,19 @@ def _topnav(token: str, lang: str, active: str, self_url: str | None = None) -> 
     """The one navigation bar every admin page shares: page links with the
     active page highlighted, plus a language switch. self_url overrides where
     the language switch lands (e.g. stay on the same party page)."""
-    q = f"token={token}&lang={lang}"
+    cur = i18n.norm(lang)
+    q = f"token={token}&lang={cur}"
     links = "".join(
         f'<a class="pg {"on" if key == active else ""}" href="{path}?{q}">{label}</a>'
         for key, label, path in _NAV_PAGES)
-    other = "hinglish" if _is_en(lang) else "english"
     # self_url: path (+ its own params) WITHOUT token/lang - we append those.
     base = self_url or next((p for k, _, p in _NAV_PAGES if k == active), "/admin")
     sep = "&" if "?" in base else "?"
-    switch = f"{base}{sep}token={token}&lang={other}"
-    label = "हिंदी" if _is_en(lang) else "English"
+    # Three real choices, the active one highlighted - not a blind cycle toggle.
+    langpills = "".join(
+        f'<a class="lang{" on" if code == cur else ""}" '
+        f'href="{base}{sep}token={token}&lang={code}">{i18n.NATIVE[code]}</a>'
+        for code in i18n.LOCALES)
     # Inside the ASVA desktop app the LEFT sidebar already has these pages and
     # a language toggle - showing them twice confuses. The script tags the page
     # so CSS hides the duplicates; plain-browser use keeps the full bar.
@@ -508,7 +303,7 @@ def _topnav(token: str, lang: str, active: str, self_url: str | None = None) -> 
             f'<span class="sp"></span>'
             f'<a class="lang keep" href="#" onclick="location.reload();return false" '
             f'title="Page fresh karein">&#8635; Reload</a>'
-            f'<a class="lang" href="{switch}">{label}</a>'
+            f'{langpills}'
             f'<span class="ver">v{settings.app_version}</span></nav>')
 
 
@@ -1275,7 +1070,7 @@ async function saveTerms() {{
   }} catch (e) {{ btn.disabled = false; btn.textContent = 'Save'; alert('Save failed'); }}
 }}
 </script></body></html>"""
-    return HTMLResponse(_ui_translate(html, _is_en(lang)))
+    return HTMLResponse(_ui_translate(html, lang))
 
 
 @router.get("/admin/reminders", response_class=HTMLResponse)
@@ -1599,7 +1394,7 @@ async function saveHolidays() {{
   document.getElementById('setmsg').textContent = r.ok ? 'Saved' : 'Save failed';
 }}
 </script></body></html>"""
-    return HTMLResponse(_ui_translate(html, _is_en(lang)))
+    return HTMLResponse(_ui_translate(html, lang))
 
 
 class SavePayload(BaseModel):
@@ -3731,7 +3526,7 @@ async function delParty() {{
         f'<title>{esc(biz.get("business_name") or "ASVA")} - {esc(c["name"])}</title>{_FAVICON}'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}{extra}</style><div class="wrap">{nav}{body}</div>',
-        _is_en(lang)))
+        lang))
 
 
 # ── Shared minimalist styling for the Analytics / Accounts pages ──────────
@@ -3848,7 +3643,8 @@ async def admin_today(token: str = Query(...), lang: str = Query("english")):
 </div>
 <script>
 const TOKEN = __TOKEN__;
-const EN = __EN__;
+__I18N__
+const EN = (LANG==='english');
 // This same page opens inside the ASVA desktop app (no phone dialer) AND on a
 // phone browser on the LAN. A tel: link is dead on a PC, so on desktop we offer
 // Copy number + WhatsApp instead of Call.
@@ -3874,8 +3670,8 @@ async function load(){
     // Never blank the page: if we already showed something, keep it and just
     // flash; only show the retry card on the very first failed load.
     if(!LOADED_ONCE)
-      document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">Could not load your day. <a href="#" onclick="load();return false">Retry</a></div>';
-    else flash('Could not refresh just now. Showing your last view.');
+      document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">'+TT('Could not load your day.')+' <a href="#" onclick="load();return false">'+TT('Retry')+'</a></div>';
+    else flash(TT('Could not refresh just now. Showing your last view.'));
     return;
   }
   T = data;
@@ -3888,8 +3684,8 @@ function safeRender(){
   catch(e){
     try{ console.error('today render failed', e); }catch(_ ){}
     if(!LOADED_ONCE)
-      document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">Something went wrong drawing this page. <a href="#" onclick="load();return false">Reload</a></div>';
-    else flash('Display hiccup - press Refresh view if it looks off.');
+      document.getElementById('twrap').innerHTML='<div class="hcard" style="margin-top:18px">'+TT('Something went wrong drawing this page.')+' <a href="#" onclick="load();return false">'+TT('Reload')+'</a></div>';
+    else flash(TT('Display hiccup - press Refresh view if it looks off.'));
   }
 }
 function heroCard(label, big, sub, cls){
@@ -3905,29 +3701,29 @@ function render(){
   // ── Hero: the morning brief ──────────────────────────────────────
   const mi=t.money_in||{}, y=mi.yesterday||{}, td=mi.today||{};
   const ci=t.coming_in||{}, rc=t.recovered||{}, os=t.outstanding||{}, ds=t.dso||{};
-  let miSub = td.count>0 ? ('Today so far: '+fmt(td.amount)+' \\u00b7 '+td.count+' payment'+(td.count>1?'s':'')) :
-              (y.count>0 ? (y.count+' payment'+(y.count>1?'s':'')+' booked') : 'No payments booked yet');
+  let miSub = td.count>0 ? (TT('Today so far')+': '+fmt(td.amount)+' \\u00b7 '+td.count+' '+TT(td.count>1?'payments':'payment')) :
+              (y.count>0 ? (y.count+' '+TT(y.count>1?'payments':'payment')+' '+TT('booked')) : TT('No payments booked yet'));
   let ciSub = [];
-  if(ci.promised>0) ciSub.push(fmt(ci.promised)+' promised');
-  if(ci.due_soon>0) ciSub.push(fmt(ci.due_soon)+' due');
+  if(ci.promised>0) ciSub.push(fmt(ci.promised)+' '+TT('promised'));
+  if(ci.due_soon>0) ciSub.push(fmt(ci.due_soon)+' '+TT('due'));
   let rcSub = '';
   if(rc.last_month>0){
-    rcSub = rc.up ? ('<span class="up">Up '+fmt(Math.abs(rc.delta))+'</span> vs last month')
-                  : ('<span class="dn">Down '+fmt(Math.abs(rc.delta))+'</span> vs last month');
+    rcSub = rc.up ? ('<span class="up">'+TT('Up')+' '+fmt(Math.abs(rc.delta))+'</span> '+TT('vs last month'))
+                  : ('<span class="dn">'+TT('Down')+' '+fmt(Math.abs(rc.delta))+'</span> '+TT('vs last month'));
   } else { rcSub = 'in '+esc(rc.month_label||''); }
-  let dsSub = os.party_count>0 ? (os.party_count+' parties owe you') : 'across your open bills';
+  let dsSub = os.party_count>0 ? (os.party_count+' '+TT('parties owe you')) : TT('across your open bills');
 
   let hero = '<div class="hero">'+
-    heroCard(EN?'Money in yesterday':'Kal aaya', short(y.amount||0), miSub, '') +
-    heroCard('Coming in ('+(ci.days||7)+' days)', short(ci.total||0), (ciSub.length?ciSub.join(' + '):'Nothing promised yet'), '') +
-    heroCard('Recovered '+esc(rc.month_label||'this month'), short(rc.this_month||0), rcSub, 'accent') +
-    heroCard('Money stuck', (ds.days_stuck||0)+' days', dsSub, '') +
+    heroCard(TT('Money in yesterday'), short(y.amount||0), miSub, '') +
+    heroCard(TT('Coming in')+' ('+(ci.days||7)+' '+TT('days')+')', short(ci.total||0), (ciSub.length?ciSub.join(' + '):TT('Nothing promised yet')), '') +
+    heroCard(TT('Recovered')+' '+esc(rc.month_label||TT('this month')), short(rc.this_month||0), rcSub, 'accent') +
+    heroCard(TT('Money stuck'), (ds.days_stuck||0)+' '+TT('days'), dsSub, '') +
   '</div>';
 
   // ── Who to chase today (the daily action) ────────────────────────
   const C=t.chase||[];
   let chaseRows = C.length ? C.map((c,i)=>{
-    const late = c.days_late>0 ? '<span class="late">'+c.days_late+'d late</span>' : '';
+    const late = c.days_late>0 ? '<span class="late">'+c.days_late+TT('d late')+'</span>' : '';
     const grade = (c.grade && c.grade!=='new')
       ? ' <span class="rel" style="background:'+esc(c.grade_color||'#6b7770')+'22;color:'+esc(c.grade_color||'#6b7770')+'">'+esc(c.grade_label||'')+'</span>' : '';
     // The number is ALWAYS shown as plain text below the name, so the owner can
@@ -3940,22 +3736,22 @@ function render(){
     if(c.has_number){
       const contact = IS_DESKTOP
         ? '<a class="op call" target="_blank" rel="noopener" href="https://wa.me/'+esc(waDigits(c.phone))+'">WhatsApp</a>'
-        : '<a class="op call" href="tel:'+esc(c.phone||'')+'">Call</a>';
+        : '<a class="op call" href="tel:'+esc(c.phone||'')+'">'+TT('Call')+'</a>';
       acts = contact +
-             '<button class="rem" onclick=\\'remind('+JSON.stringify(c.name)+',this)\\'>Remind</button>';
+             '<button class="rem" onclick=\\'remind('+JSON.stringify(c.name)+',this)\\'>'+TT('Remind')+'</button>';
     } else {
-      acts = '<button class="op warn" onclick=\\'openAddNum('+JSON.stringify(c.client_id)+')\\'>Add number</button>';
+      acts = '<button class="op warn" onclick=\\'openAddNum('+JSON.stringify(c.client_id)+')\\'>'+TT('Add number')+'</button>';
     }
-    const numline = (c.has_number && c.phone) ? (' \\u00b7 '+esc(c.phone)) : (c.has_number?'':' \\u00b7 no WhatsApp number');
+    const numline = (c.has_number && c.phone) ? (' \\u00b7 '+esc(c.phone)) : (c.has_number?'':' \\u00b7 '+TT('no WhatsApp number'));
     return '<div class="crow"><div class="crank">'+(i+1)+'</div>'+
       '<div class="cmain"><div class="nm">'+esc(c.display)+late+grade+'</div>'+
-      '<div class="mt">'+(c.days_late>0?(c.days_late+' days past due'):'')+numline+'</div></div>'+
+      '<div class="mt">'+(c.days_late>0?(c.days_late+' '+TT('days past due')):'')+numline+'</div></div>'+
       '<div class="camt">'+fmt(c.amount)+'</div>'+
       '<div class="cacts">'+acts+'</div></div>';
-  }).join('') : '<div class="empty">Nothing overdue right now. When bills cross their due date, the ones worth chasing show here, biggest first.</div>';
+  }).join('') : '<div class="empty">'+TT('Nothing overdue right now. When bills cross their due date, the ones worth chasing show here, biggest first.')+'</div>';
 
   let chaseHead = C.length
-    ? ('Top '+C.length+' by money at stake'+(t.chase_overdue_count>C.length?(' of '+t.chase_overdue_count+' overdue'):''))
+    ? (TT('Top')+' '+C.length+' '+TT('by money at stake')+(t.chase_overdue_count>C.length?(' '+TT('of')+' '+t.chase_overdue_count+' '+TT('overdue')):''))
     : '';
 
   // ── Promises: who said they will pay ─────────────────────────────
@@ -3963,9 +3759,9 @@ function render(){
   let promRows = PR.length ? PR.map(p=>(
     '<div class="crow"><div class="cmain"><div class="nm">'+esc(p.display)+'</div>'+
     (p.said?'<div class="mt">\\u201c'+esc(p.said)+'\\u201d</div>':'')+
-    (p.promise_date?'<div class="mt">By '+esc(p.promise_date)+'</div>':'')+'</div>'+
-    '<div class="cacts"><a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+(EN?'english':'hinglish')+'">Enter payment</a></div></div>'
-  )).join('') : '<div class="empty">No open promises. When a customer says they paid or gives a date, it shows here.</div>';
+    (p.promise_date?'<div class="mt">'+TT('By')+' '+esc(p.promise_date)+'</div>':'')+'</div>'+
+    '<div class="cacts"><a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Enter payment')+'</a></div></div>'
+  )).join('') : '<div class="empty">'+TT('No open promises. When a customer says they paid or gives a date, it shows here.')+'</div>';
 
   // ── Aging bars ───────────────────────────────────────────────────
   const B=(ds.buckets)||[]; const maxB=Math.max(1,...B.map(x=>x.amount||0));
@@ -3973,7 +3769,7 @@ function render(){
     '<div class="age"><div class="lbl">'+esc(b.label)+'</div>'+
     '<div class="barwrap"><i style="width:'+Math.max(3,Math.round((b.amount/maxB)*100))+'%"></i></div>'+
     '<div class="amt">'+fmt(b.amount)+'</div></div>'
-  )).join('') || '<div class="empty">No open bills.</div>';
+  )).join('') || '<div class="empty">'+TT('No open bills.')+'</div>';
 
   // ── No-number nudge: ONLY the parties who OWE and have no number (not
   // "every party with no number"). Opens an inline add-number panel - no leaving
@@ -3981,45 +3777,45 @@ function render(){
   let nudge='';
   const nn=(t.no_number&&t.no_number.count)||0;
   if(nn>0){
-    nudge = '<div class="nudge"><b>'+nn+' customer'+(nn>1?'s':'')+' who owe you can\\u2019t be reached on WhatsApp.</b> '+
-      'Add their number to start reminders and recover more. '+
-      '<button class="nudgebtn" onclick="openAddNum()">Add numbers</button></div>';
+    nudge = '<div class="nudge"><b>'+nn+' '+TT(nn>1?'customers':'customer')+' who owe you can\\u2019t be reached on WhatsApp.</b> '+
+      TT('Add their number to start reminders and recover more.')+' '+
+      '<button class="nudgebtn" onclick="openAddNum()">'+TT('Add numbers')+'</button></div>';
   }
 
   // Lead with the day's ACTION (who to chase), then the money glance, then the
   // secondary reference (promises + aging) - so the owner never scrolls to find
   // the one thing they open Today for.
   document.getElementById('twrap').innerHTML =
-    '<div class="sec"><h2>Who to chase today</h2><div class="sub">'+esc(chaseHead)+'</div><div class="clist">'+chaseRows+'</div></div>'+
+    '<div class="sec"><h2>'+TT('Who to chase today')+'</h2><div class="sub">'+esc(chaseHead)+'</div><div class="clist">'+chaseRows+'</div></div>'+
     nudge +
     '<div class="glance">'+hero+'</div>'+
     '<div class="twocol">'+
-      '<div class="sec"><h2>Said they will pay</h2><div class="sub">Following up automatically. Enter the payment when it lands.</div><div class="clist">'+promRows+'</div></div>'+
-      '<div class="sec"><h2>Where your money is stuck</h2><div class="sub">Outstanding by how far past due.</div><div class="card">'+ageRows+'</div></div>'+
+      '<div class="sec"><h2>'+TT('Said they will pay')+'</h2><div class="sub">'+TT('Following up automatically. Enter the payment when it lands.')+'</div><div class="clist">'+promRows+'</div></div>'+
+      '<div class="sec"><h2>'+TT('Where your money is stuck')+'</h2><div class="sub">'+TT('Outstanding by how far past due.')+'</div><div class="card">'+ageRows+'</div></div>'+
     '</div>';
 }
 async function remind(party, btn){
-  if(btn){ btn.disabled=true; btn.textContent='Sending...'; }
+  if(btn){ btn.disabled=true; btn.textContent=TT('Sending...'); }
   try{
     const r=await fetch('/admin/send-now',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,party:party})});
     const d=await r.json().catch(()=>({}));
-    if(d && d.wa_down){ flash('Shop WhatsApp not connected. Open WhatsApp Setup and scan the QR.'); }
-    else if(r.ok){ flash('\\u2713 Reminder sent to '+party+'.'); }
-    else { flash('Could not send. Try again.'); }
-  }catch(e){ flash('Could not send. Try again.'); }
-  if(btn){ btn.disabled=false; btn.textContent='Remind'; }
+    if(d && d.wa_down){ flash(TT('Shop WhatsApp not connected. Open WhatsApp Setup and scan the QR.')); }
+    else if(r.ok){ flash('\\u2713 '+TT('Reminder sent to')+' '+party+'.'); }
+    else { flash(TT('Could not send. Try again.')); }
+  }catch(e){ flash(TT('Could not send. Try again.')); }
+  if(btn){ btn.disabled=false; btn.textContent=TT('Remind'); }
 }
 // ── Inline "add a number" (never leaves this page) ───────────────────
 function openAddNum(focusId){
   const P=((T&&T.no_number&&T.no_number.parties)||[]);
   const box=document.getElementById('addnumlist');
-  if(!P.length){ box.innerHTML='<div class="empty">Everyone who owes you has a number. Nice.</div>'; }
+  if(!P.length){ box.innerHTML='<div class="empty">'+TT('Everyone who owes you has a number. Nice.')+'</div>'; }
   else{
     box.innerHTML = P.map(p=>(
       '<div class="anrow" data-id="'+esc(p.client_id)+'">'+
-        '<div class="anmain"><div class="nm">'+esc(p.display)+'</div><div class="mt">owes '+fmt(p.amount)+'</div></div>'+
-        '<input class="aninp" inputmode="numeric" maxlength="10" placeholder="10-digit mobile" '+(p.client_id===focusId?'autofocus':'')+'>'+
-        '<button class="rem" onclick=\\'saveNum('+JSON.stringify(p.client_id)+',this)\\'>Save</button>'+
+        '<div class="anmain"><div class="nm">'+esc(p.display)+'</div><div class="mt">'+TT('owes')+' '+fmt(p.amount)+'</div></div>'+
+        '<input class="aninp" inputmode="numeric" maxlength="10" placeholder="'+TT('10-digit mobile')+'" '+(p.client_id===focusId?'autofocus':'')+'>'+
+        '<button class="rem" onclick=\\'saveNum('+JSON.stringify(p.client_id)+',this)\\'>'+TT('Save')+'</button>'+
       '</div>'
     )).join('');
   }
@@ -4033,15 +3829,27 @@ async function saveNum(clientId, btn){
   btn.disabled=true; btn.textContent='...';
   try{
     const r=await fetch('/admin/set-number',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,client_id:clientId,number:num})});
-    if(r.ok){ row.innerHTML='<div class="anmain"><div class="nm">'+esc(row.querySelector('.nm')?row.querySelector('.nm').textContent:'')+'</div></div><span class="saved">\\u2713 Saved</span>';
+    if(r.ok){ row.innerHTML='<div class="anmain"><div class="nm">'+esc(row.querySelector('.nm')?row.querySelector('.nm').textContent:'')+'</div></div><span class="saved">\\u2713 '+TT('Saved')+'</span>';
       T.no_number.parties=(T.no_number.parties||[]).filter(x=>x.client_id!==clientId);
       T.no_number.count=Math.max(0,(T.no_number.count||1)-1); }
-    else { btn.disabled=false; btn.textContent='Save'; inp.style.borderColor='#c0392b'; }
-  }catch(e){ btn.disabled=false; btn.textContent='Save'; }
+    else { btn.disabled=false; btn.textContent=TT('Save'); inp.style.borderColor='#c0392b'; }
+  }catch(e){ btn.disabled=false; btn.textContent=TT('Save'); }
 }
 load();
 setInterval(load, 30000);
-</script>""".replace("__TOKEN__", json.dumps(token)).replace("__EN__", "true" if en else "false")
+</script>""".replace("__TOKEN__", json.dumps(token)).replace("__I18N__", i18n.js_runtime(lang))
+    # The handful of English strings the page paints BEFORE its JS runs (loading
+    # text) and the persistent add-number panel are localised on the server.
+    for _full, _key in (
+        ("Loading your day...", "Loading your day..."),
+        (">Loading...</h1>", "Loading..."),
+        ("Add WhatsApp numbers", "Add WhatsApp numbers"),
+        ("These customers owe you but have no number saved. Add a 10-digit mobile to start reminding them. A number in Tally always wins later.",
+         "These customers owe you but have no number saved. Add a 10-digit mobile to start reminding them. A number in Tally always wins later."),
+        (">Done</button>", "Done"),
+    ):
+        _loc = i18n.s(lang, _key)
+        body = body.replace(_full, _full.replace(_key, _loc) if _key in _full else _loc)
     return HTMLResponse(_ui_translate(
         f'<!doctype html><meta charset="utf-8">'
         f'<title>{title} - Today</title>{_FAVICON}'
@@ -4161,7 +3969,7 @@ async function finish() {{
         f'<!doctype html><meta charset="utf-8">'
         f'<title>ASVA - Setup</title>{_FAVICON}'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<style>{_CSS}</style><div class="wrap">{body}</div>', _is_en(lang)))
+        f'<style>{_CSS}</style><div class="wrap">{body}</div>', lang))
 
 
 @router.get("/admin/analytics", response_class=HTMLResponse)
@@ -4278,7 +4086,7 @@ async def admin_analytics(token: str = Query(...), lang: str = Query("english"))
         f'<title>{biz.get("business_name") or "ASVA"} - Analytics</title>{_FAVICON}'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}</style><div class="wrap">{_topnav(token, lang, "analytics")}{body}</div>',
-        _is_en(lang)))
+        lang))
 
 
 def _promise_head(pr: dict, name: str, en: bool) -> str:
@@ -4356,9 +4164,13 @@ function flash(msg){{
   setTimeout(()=>{{f.classList.remove('on');}}, 4000);
 }}
 async function load(){{
-  // Never refresh while the owner is filling the confirm popup - re-rendering
-  // behind it closes the open date/account dropdown and loses their choice.
-  if(document.getElementById('cf').style.display==='flex') return;
+  // Never refresh while the owner is mid-entry - re-rendering behind an open
+  // popup closes a dropdown or loses the party they just picked. This covers BOTH
+  // the confirm popup (#cf) and the add-payment search (#addcf), so a pause of
+  // any length while entering a payment never wipes their selection.
+  const cfOpen = document.getElementById('cf').style.display==='flex';
+  const addOpen = (document.getElementById('addcf')||{{}}).style && document.getElementById('addcf').style.display==='flex';
+  if(cfOpen || addOpen) return;
   let prev = PREV_INFLIGHT;
   try{{
     const r = await fetch('/admin/payments/data?token='+encodeURIComponent(TOKEN));
@@ -4466,21 +4278,21 @@ async function postReceipt(){{
   if(!(amt>0)){{document.getElementById('cfmsg').textContent='Enter a valid amount.';return;}}
   document.getElementById('cfpost').disabled=true;
   document.getElementById('cfmsg').textContent='Sending to Tally...';
-  let ok=false;
+  let ok=false, detail='';
   try{{
-    if(CF.mode==='promise'){{
-      const r=await fetch('/admin/promises/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-        body:JSON.stringify({{token:TOKEN,client_id:CF.client_id,action:'enqueue',amount:amt,deposit_ledger:dep,receipt_date:dt}})}});
-      ok=r.ok;
-    }}else{{
-      const r=await fetch('/admin/pending/confirm',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-        body:JSON.stringify({{token:TOKEN,id:CF.id,amount:amt,deposit_ledger:dep,receipt_date:dt}})}});
-      ok=r.ok;
-    }}
-  }}catch(e){{ok=false;}}
+    const url = (CF.mode==='promise') ? '/admin/promises/action' : '/admin/pending/confirm';
+    const bodyObj = (CF.mode==='promise')
+      ? {{token:TOKEN,client_id:CF.client_id,action:'enqueue',amount:amt,deposit_ledger:dep,receipt_date:dt}}
+      : {{token:TOKEN,id:CF.id,amount:amt,deposit_ledger:dep,receipt_date:dt}};
+    const r=await fetch(url,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(bodyObj)}});
+    ok=r.ok;
+    if(!ok){{ const d=await r.json().catch(()=>({{}})); detail=(d&&d.detail)||''; }}
+  }}catch(e){{ ok=false; detail='No connection to ASVA. Check the shop PC is on, then try again.'; }}
   document.getElementById('cfpost').disabled=false;
-  if(ok){{closeCf();load();}}
-  else document.getElementById('cfmsg').textContent='Could not send. Try again.';
+  // The payment is SAVED the moment this returns ok - it then posts to Tally when
+  // the agent next runs (Tally open). Close and let the list show its status.
+  if(ok){{ closeCf(); flash('\\u2713 Payment saved. It will post to Tally shortly.'); load(); }}
+  else document.getElementById('cfmsg').textContent = detail || 'Could not save. Try again.';
 }}
 async function chase(clientId){{
   await fetch('/admin/promises/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
@@ -4782,13 +4594,24 @@ async def admin_promise_action(payload: PromiseActionPayload):
         except ValueError:
             raise HTTPException(status_code=400, detail="amount must be positive")
         if not row:
-            raise HTTPException(status_code=500, detail="could not queue")
-        # Already reviewed in the popup -> confirm straight away so the agent posts it.
-        rq.confirm(db, bid, row["id"], amount=amt,
-                   deposit_ledger=payload.deposit_ledger or "Cash",
-                   receipt_date=payload.receipt_date or None)
-        promises_svc.close_for_client(db, bid, client["id"], "kept")
-        return {"ok": True, "queued": True}
+            # The one hard failure: the payment could not be saved at all. Give a
+            # real reason so the owner is not left with a blank "Could not send".
+            raise HTTPException(status_code=500,
+                                detail="Could not save this payment. Check that ASVA is synced, then try again.")
+        # From here the payment IS saved. Everything below is a best-effort finish
+        # step and must NEVER turn a saved payment into an error the owner sees -
+        # that is what made them re-enter the same payment again and again.
+        confirmed = rq.confirm(db, bid, row["id"], amount=amt,
+                               deposit_ledger=payload.deposit_ledger or "Cash",
+                               receipt_date=payload.receipt_date or None)
+        try:
+            promises_svc.close_for_client(db, bid, client["id"], "kept")
+        except Exception:
+            log.warning("close_for_client failed after queueing receipt (business %s, client %s)",
+                        bid, client["id"], exc_info=True)
+        # queued=True either way; confirmed tells the UI whether it is already
+        # heading to Tally or is sitting in "Ready to post" for one more tap.
+        return {"ok": True, "queued": True, "confirmed": bool(confirmed)}
 
     raise HTTPException(status_code=400, detail="unknown action")
 
@@ -4911,7 +4734,7 @@ async function save() {{
         f'<title>{b.get("business_name") or "ASVA"} - Accounts</title>{_FAVICON}'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}</style><div class="wrap">{_topnav(token, lang, "accounts")}{body}</div>',
-        _is_en(lang)))
+        lang))
 
 
 class AccountsPayload(BaseModel):

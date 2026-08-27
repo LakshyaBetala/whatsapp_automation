@@ -793,17 +793,27 @@ function ensureStartMenuShortcut() {
   if (process.platform !== 'win32' || !app.isPackaged) return;
   try {
     const exe = app.getPath('exe');
+    const et = JSON.stringify(exe);
+    const wd = JSON.stringify(path.dirname(exe));
+    const ic = JSON.stringify(exe + ',0');
+    // Recreate the shortcut in BOTH the Start-menu Programs folder AND on the
+    // Desktop, pointing at the CURRENT exe. A silent auto-update can leave the
+    // old shortcuts orphaned (pointing at a path that no longer exists), so the
+    // owner searches "ASVA", finds only the stale Setup in Downloads, and
+    // reinstalls an OLD version - the exact downgrade loop. We overwrite the
+    // .lnk every time (cheap) so search + desktop always reach the real app.
+    const mk = (dirExpr) => (
+      `$d=${dirExpr}; if($d -and (Test-Path $d)){` +
+      `$l=Join-Path $d "ASVA.lnk";` +
+      `$s=$w.CreateShortcut($l);` +
+      `$s.TargetPath=${et};$s.WorkingDirectory=${wd};$s.IconLocation=${ic};` +
+      `$s.Description="ASVA";$s.Save();}`
+    );
     const ps = [
       '$ErrorActionPreference="SilentlyContinue";',
-      '$d=Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs";',
-      '$l=Join-Path $d "ASVA.lnk";',
       '$w=New-Object -ComObject WScript.Shell;',
-      '$s=$w.CreateShortcut($l);',
-      `$s.TargetPath=${JSON.stringify(exe)};`,
-      `$s.WorkingDirectory=${JSON.stringify(path.dirname(exe))};`,
-      `$s.IconLocation=${JSON.stringify(exe + ',0')};`,
-      '$s.Description="ASVA";',
-      '$s.Save();',
+      mk('Join-Path $env:APPDATA "Microsoft\\Windows\\Start Menu\\Programs"'),
+      mk('[Environment]::GetFolderPath("Desktop")'),
     ].join(' ');
     spawn('powershell.exe',
       ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps],
@@ -1073,8 +1083,14 @@ if (!app.requestSingleInstanceLock()) {
     startAll();
     createWindow();
     createTray();
-    // Make sure the app stays findable in Windows search after an update.
+    // Keep the app findable in Windows search after an update. Run it NOW (so
+    // even an open-then-close within seconds heals the shortcut), again shortly
+    // after (in case the exe path settles late post-update), and once more on
+    // quit - belt and suspenders, because losing this is what sends the owner
+    // back to the stale Setup in Downloads.
+    ensureStartMenuShortcut();
     setTimeout(ensureStartMenuShortcut, 3000);
+    app.on('before-quit', ensureStartMenuShortcut);
     // Greet the owner if we just relaunched from an update (after the UI has loaded).
     setTimeout(maybeWelcomeAfterUpdate, 4000);
     pollStatus();

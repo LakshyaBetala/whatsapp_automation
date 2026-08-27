@@ -290,7 +290,8 @@
         <button id="phonebtn" onclick="openPhoneApp()" title="Open ASVA on your phone">&#128241; Phone app</button>
         <div class="langtoggle">
           <button id="lang-en" onclick="setLang('english')">EN</button>
-          <button id="lang-hi" onclick="setLang('hinglish')">HI</button>
+          <button id="lang-hi" onclick="setLang('hinglish')" title="Hinglish (Roman)">Hin</button>
+          <button id="lang-hin" onclick="setLang('hindi')" title="हिंदी (Devanagari)">&#2361;&#2367;&#2306;</button>
         </div>
         <button id="themebtn" onclick="toggleTheme()" title="Switch dark / light">Dark</button>
       </div>
@@ -596,13 +597,18 @@ function restart(name) { window.asva.restartService(name); }
 
 // ── UI language (persisted on this laptop) ────────────────────────────
 const WV = { 'wv-today': 'todayUrl', 'wv-dash': 'dashboardUrl', 'wv-reminders': 'remindersUrl', 'wv-payments': 'paymentsUrl', 'wv-analytics': 'analyticsUrl', 'wv-accounts': 'accountsUrl' };
-function currentLang() { return localStorage.getItem('asva_lang') || 'english'; }
+function currentLang() {
+  const v = localStorage.getItem('asva_lang') || 'english';
+  return (v === 'english' || v === 'hinglish' || v === 'hindi') ? v : 'english';
+}
 function urlWithLang(url) { if (!url) return url; return url + (url.includes('?') ? '&' : '?') + 'lang=' + encodeURIComponent(currentLang()); }
 function applyLangButtons() {
-  const en = currentLang() === 'english';
-  const hi = document.getElementById('lang-hi'), e = document.getElementById('lang-en');
-  if (hi) hi.classList.toggle('on', !en);
-  if (e) e.classList.toggle('on', en);
+  const cur = currentLang();
+  const map = { 'lang-en': 'english', 'lang-hi': 'hinglish', 'lang-hin': 'hindi' };
+  for (const id in map) {
+    const b = document.getElementById(id);
+    if (b) b.classList.toggle('on', map[id] === cur);
+  }
 }
 
 // Translate the app's OWN chrome (nav, top bar, status panel) to match the EN/HI
@@ -613,40 +619,39 @@ function _navText(v, main, sub) {
   if (b) b.innerHTML = esc(main) + '<small>' + esc(sub) + '</small>';
 }
 function _setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
+// The app chrome speaks three languages, matching the tab CONTENTS which reload
+// with ?lang. english / hinglish (Roman) / hindi (Devanagari). Index [0]/[1]/[2].
+const _L = { english: 0, hinglish: 1, hindi: 2 };
+function _li() { return _L[currentLang()] || 0; }
+const _CHROME = {
+  dash:    ['Parties, dues and bills', 'Party, baaki aur bill', 'पार्टी, बकाया और बिल'],
+  reminders: ['Time, language and holidays', 'Time, bhasha aur chhutti', 'समय, भाषा और छुट्टी'],
+  payments: ['Who paid, confirm to Tally', 'Kaun paid, Tally mein daalein', 'कौन पेमेंट, टैली में डालें'],
+  analytics: ['Your business numbers', 'Aapke business ke numbers', 'आपके बिज़नेस के नंबर'],
+  accounts: ['UPI and bank details', 'UPI aur bank details', 'UPI और बैंक डिटेल'],
+  setup:   ['Connect your number', 'Apna number jodein', 'अपना नंबर जोड़ें'],
+};
+const _DASHNAME = ['Dashboard', 'Dashboard', 'Dashboard'];
+const _BTN = {
+  helpbtn:   ['ⓘ Help', 'ⓘ Madad', 'ⓘ मदद'],
+  pagereload:['↻ Refresh view', '↻ View refresh', '↻ रिफ्रेश'],
+  updchk:    ['⬇ Check update', '⬇ Update check', '⬇ अपडेट चेक'],
+  phonebtn:  ['📱 Phone app', '📱 Phone app', '📱 फोन ऐप'],
+  autostartlbl:['Open ASVA automatically when Windows starts', 'Windows chalu hote hi ASVA apne aap khul jaye', 'Windows शुरू होते ही ASVA अपने आप खुल जाए'],
+  diagbtn:   ['Check connection and find the problem', 'Connection check karein aur problem dhoondein', 'कनेक्शन चेक करें और प्रॉब्लम ढूंढें'],
+  cocbtn:    ['Change Tally company', 'Tally company badlein', 'टैली कंपनी बदलें'],
+};
 function defaultReloadLabel() {
-  const en = currentLang() === 'english';
-  return en ? 'Get latest from Tally<small>Fresh parties &amp; bills</small>'
-            : 'Tally se laayein<small>Fresh party aur bill</small>';
+  const sub = ['Fresh parties &amp; bills', 'Fresh party aur bill', 'नई पार्टी और बिल'][_li()];
+  const main = ['Get latest from Tally', 'Tally se laayein', 'टैली से लाएं'][_li()];
+  return main + '<small>' + sub + '</small>';
 }
 function applyChromeLang() {
-  const en = currentLang() === 'english';
-  if (en) {
-    _navText('dash', 'Dashboard', 'Parties, dues and bills');
-    _navText('reminders', 'Reminders', 'Time, language and holidays');
-    _navText('payments', 'Payments', 'Who paid, confirm to Tally');
-    _navText('analytics', 'Analytics', 'Your business numbers');
-    _navText('accounts', 'Accounts', 'UPI and bank details');
-    _navText('setup', 'WhatsApp Setup', 'Connect your number');
-    _setText('helpbtn', 'ⓘ Help'); _setText('tourbtn', '? Tour');
-    _setText('pagereload', '↻ Refresh view'); _setText('updchk', '⬇ Check update');
-    _setText('phonebtn', '📱 Phone app');
-    _setText('autostartlbl', 'Open ASVA automatically when Windows starts');
-    _setText('diagbtn', 'Check connection and find the problem');
-    _setText('cocbtn', 'Change Tally company');
-  } else {
-    _navText('dash', 'Dashboard', 'Party, baaki aur bill');
-    _navText('reminders', 'Reminders', 'Time, bhasha aur chhutti');
-    _navText('payments', 'Payments', 'Kaun paid, Tally mein daalein');
-    _navText('analytics', 'Analytics', 'Aapke business ke numbers');
-    _navText('accounts', 'Accounts', 'UPI aur bank details');
-    _navText('setup', 'WhatsApp Setup', 'Apna number jodein');
-    _setText('helpbtn', 'ⓘ Madad'); _setText('tourbtn', '? Tour');
-    _setText('pagereload', '↻ View refresh'); _setText('updchk', '⬇ Update check');
-    _setText('phonebtn', '📱 Phone app');
-    _setText('autostartlbl', 'Windows chalu hote hi ASVA apne aap khul jaye');
-    _setText('diagbtn', 'Connection check karein aur problem dhoondein');
-    _setText('cocbtn', 'Tally company badlein');
-  }
+  const i = _li();
+  for (const v in _CHROME) _navText(v, (v === 'setup' ? 'WhatsApp Setup' : (v === 'dash' ? 'Dashboard' : v.charAt(0).toUpperCase() + v.slice(1))), _CHROME[v][i]);
+  _navText('dash', 'Dashboard', _CHROME.dash[i]);
+  for (const id in _BTN) _setText(id, _BTN[id][i]);
+  _setText('tourbtn', '? Tour');
   // Reload button keeps its live label while a refresh is running; otherwise
   // reset it to the localized default.
   const rb = document.getElementById('reloadbtn');
@@ -735,8 +740,11 @@ function openHelp() {
   document.getElementById('helpmodal').style.display = 'flex';
 }
 
-function setLang(l) {
+function setLang(l, fromServer) {
   localStorage.setItem('asva_lang', l);
+  // Remember that the OWNER chose a language, so a later heartbeat (whose server
+  // side only knows english/hinglish) never silently reverts a Hindi choice.
+  if (!fromServer) localStorage.setItem('asva_lang_set', '1');
   applyLangButtons();
   applyChromeLang();
   // Save it on the SERVER too, so the WhatsApp assistant answers the owner in the
@@ -758,7 +766,9 @@ if (window.asva.onFocusTab) window.asva.onFocusTab((d) => {
 });
 if (window.asva.onLang) window.asva.onLang((d) => {
   const l = d && d.language;
-  if ((l === 'english' || l === 'hinglish') && l !== currentLang()) setLang(l);
+  // Only adopt the server language on a fresh laptop (owner never chose here).
+  if (localStorage.getItem('asva_lang_set')) return;
+  if ((l === 'english' || l === 'hinglish') && l !== currentLang()) setLang(l, true);
 });
 
 // ── Webview auto-recovery ─────────────────────────────────────────────────
@@ -1000,6 +1010,11 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.0.7': [
+    'Three languages: pick English, Hinglish, or हिंदी (Devanagari) from the top bar. The whole app now follows your choice, including the Today screen and the phone app, so it never mixes languages with itself.',
+    'Payments you can trust: recording a payment saves it right away and posts to Tally when your PC and Tally are open. A payment that failed to post can now be retried, and your selection no longer disappears while you fill it in.',
+    'Always findable: ASVA repairs its Start-menu and Desktop shortcuts every time it opens and on close, so after an update searching "ASVA" always opens the real app, never the old setup file.',
+  ],
   '2.0.6': [
     'Stays findable after an update: ASVA now keeps its Start-menu shortcut every time it opens, so you can always search "ASVA" and open the app, instead of accidentally reopening the old setup file and going back to an older version.',
     'Search a customer when recording a payment: the Add-a-payment screen now lets you type a name to find the right customer instantly, instead of scrolling a long list.',

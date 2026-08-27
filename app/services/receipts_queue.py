@@ -195,11 +195,22 @@ def confirm(db, business_id: str, pending_id: str, *, amount=None,
         patch["deposit_ledger"] = deposit_ledger
     if receipt_date:
         patch["receipt_date"] = str(receipt_date)[:10]
+    # A receipt may be confirmed from 'pending' (first time) OR re-confirmed from
+    # 'failed' (the owner is retrying a post that Tally rejected). Both must work,
+    # or a failed payment can never be re-posted - which reads to the owner as
+    # "Post to Tally keeps saying Could not send". A row already 'confirmed' or
+    # 'posting' is left alone (the agent is on it) and reported as success.
     try:
         r = (db.table("pending_receipts").update(patch)
              .eq("id", pending_id).eq("business_id", business_id)
-             .eq("status", "pending").execute())
-        return (r.data or [None])[0]
+             .in_("status", ["pending", "failed"]).execute())
+        if r.data:
+            return r.data[0]
+        # No pending/failed row updated: is it already in-flight? Then it is fine.
+        cur = get_by_id(db, business_id, pending_id)
+        if cur and cur.get("status") in ("confirmed", "posting", "posted"):
+            return cur
+        return None
     except Exception:
         log.exception("could not confirm pending receipt %s", pending_id)
         return None
