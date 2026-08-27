@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.0.8.\n\nAlways findable, for good: the installer itself now creates the Start-menu and Desktop shortcuts on every install AND every update, so after updating you can always search \"ASVA\" and open the real app, never the old setup file in Downloads.\n\nThree languages: choose English, Hinglish, or हिंदी (Devanagari). The whole app follows your choice, including the Today screen.\n\nPayments are reliable: recording a payment saves it right away and posts to Tally when the shop PC and Tally are open. A payment that failed can be retried, and your selection no longer disappears while you fill it in. The Today and Payments screens open correctly in every language.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.0.9.\n\nAlways findable, for good: the installer itself now creates the Start-menu and Desktop shortcuts on every install AND every update, so after updating you can always search \"ASVA\" and open the real app, never the old setup file in Downloads.\n\nThe WhatsApp button on Today now opens the chat with that customer, instead of doing nothing. You can always see your version at the bottom of the left menu, and if an update ever gets stuck a \"Download manually\" link appears so you are never left waiting.\n\nThree languages: choose English, Hinglish, or हिंदी (Devanagari). The whole app follows your choice, including the Today screen.\n\nPayments are reliable: recording a payment saves it right away and posts to Tally when the shop PC and Tally are open. A payment that failed can be retried, and your selection no longer disappears while you fill it in. The Today and Payments screens open correctly in every language.\n\nFree for every shop until 30 September 2026."
     },
     "files": [
       "main.js",

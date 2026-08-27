@@ -47,6 +47,18 @@ app.on('web-contents-created', (e, contents) => {
   const kick = () => { try { if (!contents.isDestroyed()) contents.reload(); } catch (_) {} };
   contents.on('render-process-gone', kick);
   contents.on('unresponsive', kick);
+  // A <webview> has no popup handler by default, so a target="_blank" link inside
+  // a page (the Today "WhatsApp" button = https://wa.me/<number>) opened a blocked
+  // popup and did NOTHING. Route every external link to the real browser / WhatsApp
+  // instead, and never let a page spawn a stray in-app window.
+  try {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) {
+        try { require('electron').shell.openExternal(url); } catch (_) {}
+      }
+      return { action: 'deny' };
+    });
+  } catch (_) {}
 });
 
 // ── Config: token + backend URL come from Asva/config.json ────────────────

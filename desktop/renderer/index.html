@@ -18,6 +18,7 @@
   .nav small { display: block; font-size: .7rem; color: #9fb7a6; font-weight: 400; margin-top: 2px; letter-spacing: 0; }
   .nav.on small { color: #cfe6d8; }
   .side-foot { margin-top: auto; border-top: 1px solid #263a2c; }
+  #verlabel { color: #7f9587; font-size: .72rem; padding: 4px 18px 8px; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
   #statusbtn { display: flex; align-items: center; gap: 7px; padding: 12px 18px; cursor: pointer; font-size: .82rem; color: #9fb7a6; }
   #statusbtn:hover { background: #1e2c23; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c9a227; }
@@ -150,6 +151,8 @@
   #updatebtn { border: 0; background: #46d67e; color: #10321f; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: .84rem; flex-shrink: 0; }
   #updatebtn:hover { background: #5fe38f; }
   #updatebtn:active { transform: scale(.97); }
+  #updatemanual { color: #cfe6d8; font-size: .82rem; text-decoration: underline; cursor: pointer; flex-shrink: 0; white-space: nowrap; }
+  #updatemanual:hover { color: #fff; }
   .banner { padding: 10px 16px; font-size: .92rem; display: none; }
   .banner.warn { display: block; background: #FBF3DB; color: #956400; border-bottom: 1px solid #efdfa8; }
   /* App-wide notice bar: WhatsApp-down (critical) or finish-setup (warn). */
@@ -276,6 +279,7 @@
         <span class="dot" id="d-whatsapp"></span>
         <span style="margin-left:4px">Status</span>
       </div>
+      <div id="verlabel" title="The ASVA version you are on">ASVA v-</div>
     </div>
   </div>
 
@@ -344,6 +348,7 @@
     <div id="updatebar">
       <span id="updatemsg">A new version of ASVA is ready.</span>
       <button id="updatebtn" onclick="applyUpdate()">Restart to update</button>
+      <a id="updatemanual" href="#" onclick="downloadManually();return false" style="display:none">Download manually</a>
     </div>
     <div id="updoverlay">
       <div class="uo-card">
@@ -359,7 +364,7 @@
     <div id="maincontent">
     <div class="view on" id="v-today">
       <div class="grow" style="position:absolute;inset:0">
-        <webview id="wv-today" src="about:blank"></webview>
+        <webview allowpopups id="wv-today" src="about:blank"></webview>
         <div class="overlay" id="todayov">Starting ASVA... about 15 seconds. Keep this window open.</div>
       </div>
     </div>
@@ -368,7 +373,7 @@
       <div class="col">
         <div id="dashbanner" class="banner"></div>
         <div class="grow">
-          <webview id="wv-dash" src="about:blank"></webview>
+          <webview allowpopups id="wv-dash" src="about:blank"></webview>
           <div class="overlay" id="dashov">Starting ASVA... about 15 seconds. Keep this window open.</div>
         </div>
       </div>
@@ -376,25 +381,25 @@
 
     <div class="view" id="v-reminders">
       <div class="grow" style="position:absolute;inset:0">
-        <webview id="wv-reminders" src="about:blank"></webview>
+        <webview allowpopups id="wv-reminders" src="about:blank"></webview>
       </div>
     </div>
 
     <div class="view" id="v-payments">
       <div class="grow" style="position:absolute;inset:0">
-        <webview id="wv-payments" src="about:blank"></webview>
+        <webview allowpopups id="wv-payments" src="about:blank"></webview>
       </div>
     </div>
 
     <div class="view" id="v-analytics">
       <div class="grow" style="position:absolute;inset:0">
-        <webview id="wv-analytics" src="about:blank"></webview>
+        <webview allowpopups id="wv-analytics" src="about:blank"></webview>
       </div>
     </div>
 
     <div class="view" id="v-accounts">
       <div class="grow" style="position:absolute;inset:0">
-        <webview id="wv-accounts" src="about:blank"></webview>
+        <webview allowpopups id="wv-accounts" src="about:blank"></webview>
       </div>
     </div>
 
@@ -989,6 +994,12 @@ function applyCompany(i) {
 hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 (async () => {
   CONFIG = await window.asva.getConfig();
+  // Show the version the owner is on, always visible in the sidebar, so "what
+  // version am I on / did the update apply" is answerable at a glance.
+  try {
+    const vl = document.getElementById('verlabel');
+    if (vl && CONFIG.appVersion) vl.textContent = 'ASVA v' + CONFIG.appVersion;
+  } catch (e) {}
   if (!CONFIG.dashboardUrl) document.getElementById('dashov').textContent = 'agent_token missing in config.json.';
   const sel = document.getElementById('cosel');
   if (sel && CONFIG.companies && CONFIG.companies.length > 1) {
@@ -1010,8 +1021,10 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
-  '2.0.8': [
+  '2.0.9': [
     'Always findable, for good: the installer now creates your Start-menu and Desktop shortcuts on every install and every update, so after updating you can always search "ASVA" and open the real app, never the old setup file in your Downloads.',
+    'The WhatsApp button on Today now opens the chat with that customer (it opens in your browser or WhatsApp app), instead of doing nothing.',
+    'You can always see which version you are on, at the bottom of the left menu. And if an update ever gets stuck downloading, a "Download manually" link now appears so you are never left waiting.',
     'Today and Payments open correctly in every language again (a display error is fixed), and recording a payment is more reliable: it saves right away, a failed one can be retried, and your selection stays put while you fill it in.',
     'Three languages: pick English, Hinglish, or हिंदी (Devanagari) from the top bar, and the whole app follows your choice.',
   ],
@@ -1585,6 +1598,15 @@ function applyUpdate() {
   if (btn) { btn.textContent = en ? 'Updating...' : 'Update ho raha hai...'; btn.disabled = true; }
   try { window.asva.installUpdate(); } catch (e) {}
 }
+// Guaranteed fallback: if the in-app auto-update ever stalls (a slow line, a
+// stuck verify), one click opens the full installer in the browser. Running it
+// updates ASVA on top and (via the installer) recreates the shortcuts.
+const MANUAL_DL = 'https://app.tryasva.com/download/latest';
+function downloadManually() { try { window.asva.openExternal(MANUAL_DL); } catch (e) {} }
+function showManual(on) { const a = document.getElementById('updatemanual'); if (a) a.style.display = on ? 'inline' : 'none'; }
+// If a download sits without finishing, offer the manual path after a while so
+// "stuck at 100%" is never a dead end.
+let _dlStuckTimer = null;
 if (window.asva.onUpdate) window.asva.onUpdate((u) => {
   const bar = document.getElementById('updatebar');
   const msg = document.getElementById('updatemsg');
@@ -1623,6 +1645,8 @@ if (window.asva.onUpdate) window.asva.onUpdate((u) => {
         + 'wapas khul jayega - thoda intezaar karein. Aapka poora data aur WhatsApp safe rehta hai.') + nhtml;
     btn.style.display = 'inline-block';
     btn.textContent = en ? 'Update now' : 'Abhi update karein';
+    showManual(true);                 // also offer the manual path, just in case
+    if (_dlStuckTimer) { clearTimeout(_dlStuckTimer); _dlStuckTimer = null; }
     bar.style.display = 'flex';
   } else if (u.state === 'downloading') {
     const pct = u.percent ? ' (' + u.percent + '%)' : '';
@@ -1631,25 +1655,37 @@ if (window.asva.onUpdate) window.asva.onUpdate((u) => {
     bar.style.display = 'flex';
     setOverlayProgress(u.percent);   // if the wait screen is already up, fill its bar
     _manualCheck = false;
+    // If the download does not turn into a ready-to-install within a reasonable
+    // time (a stalled or failing verify), reveal the manual installer so the
+    // owner is never stuck watching a frozen "100%".
+    if (_dlStuckTimer) clearTimeout(_dlStuckTimer);
+    _dlStuckTimer = setTimeout(() => {
+      const en2 = currentLang() === 'english';
+      msg.textContent = en2 ? 'Update is taking a while.' : 'Update thoda time le raha hai.';
+      showManual(true);
+    }, 90 * 1000);
   } else if (u.state === 'checking') {
     msg.textContent = en ? 'Checking for a new version...' : 'Naya version check kar rahe hain...';
     btn.style.display = 'none';
+    showManual(false);
     bar.style.display = 'flex';
   } else if (u.state === 'current') {
     // "You are up to date" - only worth showing when the owner clicked Check.
+    if (_dlStuckTimer) { clearTimeout(_dlStuckTimer); _dlStuckTimer = null; }
     if (_manualCheck) {
       msg.textContent = en ? 'You are on the latest version of ASVA.' : 'Aap ASVA ke latest version par hain.';
-      btn.style.display = 'none'; bar.style.display = 'flex';
+      btn.style.display = 'none'; showManual(false); bar.style.display = 'flex';
       setTimeout(() => { bar.style.display = 'none'; }, 4000);
       _manualCheck = false;
     } else { bar.style.display = 'none'; }
   } else if (u.state === 'error') {
-    if (_manualCheck) {
-      msg.textContent = en ? 'Could not check right now. Try again in a bit.' : 'Abhi check nahi ho paya. Thodi der baad try karein.';
-      btn.style.display = 'none'; bar.style.display = 'flex';
-      setTimeout(() => { bar.style.display = 'none'; }, 4000);
-      _manualCheck = false;
-    } else { bar.style.display = 'none'; }
+    // ALWAYS surface an update error (not only on a manual check) with the manual
+    // installer, so a failed auto-download never silently leaves them behind.
+    if (_dlStuckTimer) { clearTimeout(_dlStuckTimer); _dlStuckTimer = null; }
+    msg.textContent = en ? 'Update could not finish automatically. Download it manually below.'
+                         : 'Update apne aap poora nahi hua. Neeche se manually download karein.';
+    btn.style.display = 'none'; showManual(true); bar.style.display = 'flex';
+    _manualCheck = false;
   } else {
     bar.style.display = 'none';
   }
