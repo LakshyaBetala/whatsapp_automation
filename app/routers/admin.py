@@ -453,15 +453,15 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
                        f'style="background:#fbf3db;color:#8a6100;border:1px solid #e2c46a;{_xs}">Exclude</button>')
         rows.append(
             f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}">'
-            f'<td><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
-            f'<td><a class="plink" href="/admin/party?token={token}&client_id={c["id"]}&lang={lang}">{cname}</a></td>'
-            f'<td class="amt">{out_str}</td>'
-            f'<td class="od">{od_str}</td>'
-            f'<td>{rem_badge}</td>'
-            f'<td>{batch_cell}</td>'
-            f'<td><button class="termbtn" data-cid="{c["id"]}" data-party="{nm_attr}" data-cd="{cd_val}">{cd_label}</button></td>'
-            f'<td class="ph">{phone}</td>'
-            f'<td>{actions}</td></tr>'
+            f'<td class="c-rem" data-label="Reminder?"><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
+            f'<td class="c-party"><a class="plink" href="/admin/party?token={token}&client_id={c["id"]}&lang={lang}">{cname}</a></td>'
+            f'<td class="amt" data-label="Baaki">{out_str}</td>'
+            f'<td class="od" data-label="Overdue">{od_str}</td>'
+            f'<td data-label="Agla reminder">{rem_badge}</td>'
+            f'<td data-label="Batch">{batch_cell}</td>'
+            f'<td data-label="Credit days"><button class="termbtn" data-cid="{c["id"]}" data-party="{nm_attr}" data-cd="{cd_val}">{cd_label}</button></td>'
+            f'<td class="ph" data-label="WhatsApp">{phone}</td>'
+            f'<td class="c-act" data-label="Actions">{actions}</td></tr>'
         )
 
     # Reminder style only drives the per-party schedule preview here; the
@@ -590,6 +590,25 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
  .cbsend:hover{{background:#086b2b}}
  .cbskip{{margin-left:8px;padding:7px 14px}}
  .skipbtn{{padding:2px 9px;font-size:.8em;margin-left:6px}}
+ /* P2: on a narrow window (small shop laptop / phone browser) the 9-column table
+    would push WhatsApp + Actions off-screen behind a scrollbar the owner never
+    finds. Below 760px each row becomes a self-contained CARD - name on top, every
+    field labelled, the WhatsApp + Actions always visible. No horizontal scroll. */
+ @media (max-width:760px){{
+   #ptable{{min-width:0;display:block}}
+   #ptable tr:not([data-name]){{display:none}}      /* the header row */
+   #ptable tr[data-name]{{display:block;border:1px solid #EAEAEA;border-radius:12px;background:#fff;margin:10px 0;padding:6px 14px}}
+   #ptable td{{display:flex;align-items:center;justify-content:space-between;gap:14px;border:0;border-bottom:1px solid #F2F1EE;padding:9px 0;text-align:right;font-size:.95em}}
+   #ptable tr[data-name] td:last-child{{border-bottom:0}}
+   #ptable td::before{{content:attr(data-label);color:#787774;font-size:.8em;font-weight:600;text-transform:uppercase;letter-spacing:.03em;text-align:left;flex:0 0 auto}}
+   #ptable td.c-party{{justify-content:flex-start;font-size:1.08em;font-weight:700;padding:4px 0 10px}}
+   #ptable td.c-party::before{{display:none}}
+   #ptable td.c-party .plink{{color:#2F3437}}
+   #ptable td.c-rem{{flex-direction:row-reverse;justify-content:flex-end;gap:10px}}
+   #ptable td.c-act{{flex-wrap:wrap;justify-content:flex-start;gap:8px}}
+   #ptable td.c-act::before{{flex-basis:100%}}
+   .bar{{position:static}}
+ }}
 {_NAV_CSS}
 </style></head><body>
 {_topnav(token, lang, "dashboard")}
@@ -3856,7 +3875,7 @@ setInterval(load, 30000);
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}{_TODAY_CSS}</style>'
         f'<div class="wrap">{_topnav(token, lang, "today")}{body}</div>',
-        en))
+        lang))
 
 
 @router.get("/admin/today/data")
@@ -4361,7 +4380,7 @@ setInterval(load, 15000);   // reflect posted/failed status as the agent works
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}{_PAYMENTS_CSS}</style>'
         f'<div class="wrap">{_topnav(token, lang, "payments")}{body}</div>',
-        en))
+        lang))
 
 
 _PAYMENTS_CSS = """
