@@ -104,6 +104,32 @@ async def fetch_and_parse(config: dict, query: str, timeout: float = 180.0) -> s
     return tally_xml.sanitize_xml(raw)
 
 
+def readiness_decision(open_companies, company, ready_since, now, warmup_s):
+    """Pure, testable gate for "is Tally safe to read heavily right now?".
+
+    Tally opened AFTER ASVA (or still loading a company) will crash with a Memory
+    Access Violation if hit with a big debtor/bill export before its data is fully
+    in memory. So we only green-light a heavy read when Tally answers a tiny
+    company-list query, THIS company is in the open list, AND a warm-up grace
+    period has passed since it first looked ready.
+
+      open_companies : list of open company names, or None if Tally did not answer
+      ready_since    : monotonic time it first looked ready this streak, or None
+      now            : current monotonic time
+      warmup_s       : seconds to wait after it first looks ready
+
+    Returns (ready: bool, new_ready_since). A dropout (Tally not answering, or the
+    company gone) resets ready_since to None so the warm-up restarts next time.
+    """
+    if open_companies is None:
+        return False, None
+    want = (company or "").strip().lower()
+    if want and not any((c or "").strip().lower() == want for c in open_companies):
+        return False, None                      # HTTP up but our company not loaded yet
+    rs = now if ready_since is None else ready_since
+    return (now - rs >= max(0, warmup_s)), rs
+
+
 async def fetch_masters(config: dict, company: str, debtor_groups) -> str:
     """Memory-safe debtor-masters fetch.
 
@@ -523,6 +549,26 @@ async def run_watch(config: dict):
     receipts_every = max(15, int(config.get('receipts_every_seconds', 25) or 25))
     ledgers_every = max(1800, int(config.get('deposit_ledgers_every_seconds', 21600) or 21600))
     failures = 0
+
+    # ── Tally readiness gate (see readiness_decision) ────────────────────────
+    warmup_s = max(0, int(config.get('tally_warmup_seconds', 20) or 20))
+    _ready_since = None      # monotonic time Tally+company first looked ready
+    _wait_noted = False      # so "waiting for Tally" is logged once, not every tick
+
+    async def _tally_ready() -> bool:
+        """Tiny company-list probe + warm-up. NEVER runs a heavy export, so it
+        cannot itself crash a loading Tally; it only decides when the big reads
+        are safe."""
+        nonlocal _ready_since
+        try:
+            xml = await fetch_and_parse(config, tally_xml.build_company_list_query(), timeout=6.0)
+            open_co = tally_xml.parse_companies(xml)
+        except Exception:
+            open_co = None                       # Tally not answering yet
+        ok, _ready_since = readiness_decision(
+            open_co, company, _ready_since, asyncio.get_event_loop().time(), warmup_s)
+        return ok
+
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
         now_mono = asyncio.get_event_loop().time()
@@ -530,10 +576,25 @@ async def run_watch(config: dict):
         current = _pending_pdfs()
         new_pdf = bool(current - seen)   # a bill was just sent to ASVA
         due_sync = (last_sync == 0.0) or (now_mono - last_sync >= sync_every)
+        due_out0 = (last_outstanding == 0.0) or (now_mono - last_outstanding >= outstanding_every)
+        due_ledg0 = (last_ledgers == 0.0) or (now_mono - last_ledgers >= ledgers_every)
+
+        # ONE tiny readiness probe per tick, only when a heavy Tally read is due.
+        # Every heavy block below is gated on tally_ok, so a still-loading Tally
+        # (opened after ASVA) is never hit with a big export = no memory crash.
+        due_rcpt0 = (now_mono - last_receipts >= receipts_every)
+        heavy_due = new_pdf or due_sync or due_out0 or due_ledg0 or due_rcpt0
+        tally_ok = (await _tally_ready()) if heavy_due else False
+        if heavy_due and not tally_ok:
+            if not _wait_noted:
+                log_and_print(f"[{stamp}] Waiting for Tally to open and finish loading before reading...")
+                _wait_noted = True
+        elif tally_ok:
+            _wait_noted = False
 
         # Read Tally + deliver ONLY on a new PDF (button press) or the slow beat.
         # Never on the fast folder tick, so Tally is never hammered.
-        if new_pdf or due_sync:
+        if (new_pdf or due_sync) and tally_ok:
             try:
                 if new_pdf:
                     log_and_print(f"[{stamp}] New bill PDF detected - sending to the party now.")
@@ -557,23 +618,34 @@ async def run_watch(config: dict):
             seen = _pending_pdfs()   # delivered PDFs have moved to /sent
 
         # Heavy bill-wise outstanding refresh on its own slow cadence or on Reload.
+        # Only touch Tally (including the Reload-flag check, which consumes it) when
+        # Tally is confirmed ready, so a Reload press is not lost while Tally loads.
         try:
-            due_out = (last_outstanding == 0.0) or (now_mono - last_outstanding >= outstanding_every)
-            forced = False if due_out else await check_pending_refresh(config)
-            if due_out or forced:
+            forced = False
+            if tally_ok and not due_out0:
+                forced = await check_pending_refresh(config)
+            if tally_ok and (due_out0 or forced):
                 if forced:
                     log_and_print(f"[{stamp}] Reload pressed - refreshing outstanding now.")
                 await run_apply_outstanding(config)
-                last_outstanding = asyncio.get_event_loop().time()
+                now2 = asyncio.get_event_loop().time()
+                last_outstanding = now2
+                if forced:
+                    # A manual Reload just read Tally. Push the automatic beats out a
+                    # full interval so the 5-minute sync and the Reload never hit
+                    # Tally back-to-back (frequent reads are what crash it). The next
+                    # auto-sync happens ~sync_every AFTER the Reload's data landed.
+                    last_sync = now2
+                    last_receipts = now2
         except KeyboardInterrupt:
             raise
         except Exception as e:
             log_and_print(f"[{stamp}] Outstanding refresh failed ({e}) - bills/heartbeat unaffected.", is_error=True)
 
         # Deposit-ledger cache (Cash/bank names for the confirm popup): heavy read,
-        # so once at start and then on a long beat.
+        # so once at start and then on a long beat. Gated on Tally readiness.
         try:
-            if (last_ledgers == 0.0) or (now_mono - last_ledgers >= ledgers_every):
+            if due_ledg0 and tally_ok:
                 n = await _push_deposit_ledgers(config)
                 if n:
                     log_and_print(f"[{stamp}] Deposit accounts synced ({n}).")
@@ -584,7 +656,7 @@ async def run_watch(config: dict):
         # Confirmed-receipt drain: cheap backend check every ~25s; touches Tally
         # only when the owner has confirmed a payment to post.
         try:
-            if (now_mono - last_receipts >= receipts_every):
+            if due_rcpt0 and tally_ok:
                 n = await run_receipts_drain(config)
                 if n:
                     log_and_print(f"[{stamp}] Posted {n} confirmed receipt(s) to Tally.")

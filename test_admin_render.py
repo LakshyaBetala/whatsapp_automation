@@ -44,15 +44,24 @@ class _Resp:
 
 class _Tbl:
     """Chainable query stub: any filter/order returns self; execute() returns a
-    sensible default per table (one biz, one client, else empty)."""
+    sensible default per table (one biz, one client, else empty). insert() echoes
+    the row back WITH an id, like Supabase does, so create/confirm flows work."""
     def __init__(self, name):
         self.name = name
+        self._ins = None
+
+    def insert(self, row):
+        self._ins = dict(row)
+        self._ins.setdefault("id", "row1")
+        return self
 
     def __getattr__(self, _):
-        # select/eq/in_/order/limit/range/gte/lte/or_/insert/update/delete/... -> self
+        # select/eq/in_/order/limit/range/gte/lte/or_/update/delete/... -> self
         return lambda *a, **k: self
 
     def execute(self):
+        if self._ins is not None:
+            return _Resp([self._ins])
         if self.name == "businesses":
             return _Resp([dict(BIZ)])
         if self.name == "clients":
@@ -96,6 +105,19 @@ def test_admin_pages_render(page, lang):
 def test_party_page_renders(lang):
     resp = asyncio.run(admin.admin_party(token="tok", client_id="c1", lang=lang))
     _ok(resp)
+
+
+def test_manual_payment_enqueue_does_not_crash():
+    # Regression: admin_promise_action used names.clean_display but `names` was not
+    # imported at that scope -> NameError -> the manual "Enter payment / Post to
+    # Tally" 500'd ("Could not save") while the WhatsApp PAID path worked. Exercise
+    # the POST endpoint end to end (page-render tests never hit it).
+    from app.routers.admin import PromiseActionPayload
+    out = asyncio.run(admin.admin_promise_action(
+        PromiseActionPayload(token="tok", client_id="c1", action="enqueue",
+                             amount=5000, deposit_ledger="INDIAN BANK",
+                             receipt_date="2026-08-28")))
+    assert out.get("ok") is True
 
 
 def test_dashboard_collapses_to_cards_on_narrow():

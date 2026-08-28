@@ -502,6 +502,18 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                             .eq("business_id", biz))
         if c.get("tally_ledger_name")
     }
+    # A voucher's party name must match a client's ledger name to record its bill
+    # or receipt. Exact match can fail on a stray space or a case change, which
+    # SILENTLY DROPPED a real Tally payment (it never reached the party page and
+    # the bill never updated). So also keep a whitespace/case-normalised lookup as
+    # a fallback. Collisions (two ledgers that normalise the same) are marked
+    # ambiguous and NOT guessed - correctness over convenience.
+    def _norm_ledger(s: str) -> str:
+        return " ".join((s or "").split()).casefold()
+    clients_by_ledger_norm: dict = {}
+    for _k, _c in clients_by_ledger.items():
+        _nk = _norm_ledger(_k)
+        clients_by_ledger_norm[_nk] = None if _nk in clients_by_ledger_norm else _c
     bills_by_voucher = {
         b["tally_voucher_number"]: b
         for b in _fetch_all(lambda: db.table("bills")
@@ -518,8 +530,12 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
 
     for v in payload.vouchers:
         try:
-            # Match party (prefetched)
+            # Match party (prefetched): exact ledger name first, then a
+            # whitespace/case-normalised fallback so a real payment is never
+            # silently dropped over a trivial name difference.
             client = clients_by_ledger.get(v.party_name)
+            if not client:
+                client = clients_by_ledger_norm.get(_norm_ledger(v.party_name))
             if not client:
                 unmatched_parties.append(v.party_name)
                 if v.pdf_base64:

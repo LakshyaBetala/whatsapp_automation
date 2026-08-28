@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.0.9",
+  "version": "2.1.0",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.0.9.\n\nAlways findable, for good: the installer itself now creates the Start-menu and Desktop shortcuts on every install AND every update, so after updating you can always search \"ASVA\" and open the real app, never the old setup file in Downloads.\n\nThe WhatsApp button on Today now opens the chat with that customer, instead of doing nothing. You can always see your version at the bottom of the left menu, and if an update ever gets stuck a \"Download manually\" link appears so you are never left waiting.\n\nThree languages: choose English, Hinglish, or हिंदी (Devanagari). The whole app follows your choice, including the Today screen.\n\nPayments are reliable: recording a payment saves it right away and posts to Tally when the shop PC and Tally are open. A payment that failed can be retried, and your selection no longer disappears while you fill it in. The Today and Payments screens open correctly in every language.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.1.0.\n\nRecording a payment now works every time - entering a payment by hand on the Payments tab no longer says \"Could not save\".\n\nTally is safe if you open it AFTER ASVA: ASVA waits for Tally to finish loading before reading it, so it no longer makes Tally close with a memory error.\n\nYour work is never wiped by a background sync - ticking parties for reminders or typing in the search box is no longer lost when the 5-minute Tally sync runs.\n\nPayments received in Tally now show correctly on the customer page (latest first), and a new \"Name A to Z (owing only)\" filter shows just who owes you.\n\nFree for every shop until 30 September 2026."
     },
     "files": [
       "main.js",
@@ -43,16 +43,29 @@
       {
         "from": "../wa_service",
         "to": "wa_service",
-        "filter": ["**/*", "!node_modules/.cache/**", "!.baileys_auth/**"]
+        "filter": [
+          "**/*",
+          "!node_modules/.cache/**",
+          "!.baileys_auth/**"
+        ]
       },
       {
         "from": "../dist_agent",
         "to": "agent",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "icon.ico",
       "publisherName": "Almmatix",
       "artifactName": "ASVA-Setup-${version}.${ext}"

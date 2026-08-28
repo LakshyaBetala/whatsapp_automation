@@ -845,11 +845,20 @@ function hardenAllWebviews() {
 function loadPage(id, url) {
   if (url && !loaded[id]) { loaded[id] = true; const w = document.getElementById(id); hardenWebview(w); w.src = urlWithLang(url); }
 }
-function reloadAll() {
-  ['wv-today', 'wv-dash', 'wv-reminders', 'wv-payments', 'wv-analytics', 'wv-accounts'].forEach(id => {
+async function reloadAll() {
+  const ids = ['wv-today', 'wv-dash', 'wv-reminders', 'wv-payments', 'wv-analytics', 'wv-accounts'];
+  for (const id of ids) {
     const w = document.getElementById(id);
-    try { if (w && w.reload && loaded[id]) w.reload(); } catch (e) {}
-  });
+    if (!(w && w.reload && loaded[id])) continue;
+    try {
+      // Never blow away unsaved work in a webview. A page (the Dashboard's ticked
+      // reminder boxes, a half-filled payment) sets window.__ASVA_DIRTY__ = true;
+      // we skip reloading it so a background Tally sync can't wipe the selection.
+      const dirty = await w.executeJavaScript('!!(window.__ASVA_DIRTY__)').catch(() => false);
+      if (dirty) continue;
+      w.reload();
+    } catch (e) {}
+  }
 }
 // Top-bar Reload: re-render only the page the user is looking at (the app's
 // single reload button - the in-page one is hidden inside the app).
@@ -1021,6 +1030,13 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.1.0': [
+    'Recording a payment now works every time. Entering a payment by hand on the Payments tab used to sometimes say "Could not save"; that is fixed.',
+    'Tally is safe now if you open it AFTER ASVA. ASVA waits for Tally to finish loading before reading it, so it no longer makes Tally close with a memory error.',
+    'Your work is never wiped by a background sync. While you are ticking parties for reminders, or typing a name in the search box, a 5-minute Tally sync will no longer reload the page and lose what you were doing.',
+    'Payments you received in Tally now show correctly on the customer page (the latest ones, newest first), even if the name had a small difference.',
+    'New filter: "Name A to Z (owing only)" to see just the customers who owe you, in order.',
+  ],
   '2.0.9': [
     'Always findable, for good: the installer now creates your Start-menu and Desktop shortcuts on every install and every update, so after updating you can always search "ASVA" and open the real app, never the old setup file in your Downloads.',
     'The WhatsApp button on Today now opens the chat with that customer (it opens in your browser or WhatsApp app), instead of doing nothing.',

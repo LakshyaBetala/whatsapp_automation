@@ -75,6 +75,7 @@ UI: list[tuple[str, str, str]] = [
     ("Party dhundo...", "Search party...", "पार्टी ढूंढें..."),
     ("Baaki: zyada pehle", "Dues: highest first", "बकाया: ज़्यादा पहले"),
     ("Overdue: zyada din pehle", "Overdue: most days first", "ओवरड्यू: ज़्यादा दिन पहले"),
+    ("Naam: A to Z (baaki wale)", "Name: A to Z (owing only)", "नाम: A से Z (बकाया वाले)"),
     ("Naam: A to Z", "Name: A to Z", "नाम: A से Z"),
     ("Sabko reminder ON karo", "Turn reminders ON for all", "सबका रिमाइंडर चालू करें"),
     ("Sabko reminder OFF karo", "Turn reminders OFF for all", "सबका रिमाइंडर बंद करें"),

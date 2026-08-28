@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import require_db
+from app.services import names
 from app.services import ui_i18n as i18n
 from app.jobs.reminder_sweep import STYLE_CADENCE
 from app.models import (DEFAULT_CREDIT_DAYS, PLAN_LABELS, PLAN_LIMITS, Plan,
@@ -636,6 +637,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
   <option value="amt">Baaki: zyada pehle</option>
   <option value="od">Overdue: zyada din pehle</option>
   <option value="name">Naam: A to Z</option>
+  <option value="name_owe">Naam: A to Z (baaki wale)</option>
  </select>
  <button onclick="setAll(true)" title="Sabko reminder ON karo">Sab ON</button>
  <button onclick="setAll(false)" title="Sabko reminder OFF karo">Sab OFF</button>
@@ -741,25 +743,42 @@ const LANG = {lang!r};
 // never while the owner is mid-edit (their next Save/Reload picks it up).
 const SYNCED_AT = {synced_iso!r};   // ISO of last sync at page load (or "")
 let DIRTY = false;
-function markDirty() {{ DIRTY = true; }}
+// window.__ASVA_DIRTY__ is read by the desktop shell before it reloads this
+// webview on a background Tally sync. "Busy" = the owner is mid-task and a reload
+// would yank the ground from under them: either ticked-but-unsaved reminder boxes
+// (DIRTY), OR an active search (typed text or the search box focused). While busy,
+// the shell skips reloading this page, so a 5-minute sync never wipes a selection
+// or throws them back to the top of an un-searched list.
+function _searchActive() {{
+  var q = document.getElementById('q');
+  return !!(q && (q.value || document.activeElement === q));
+}}
+function updateBusy() {{
+  try {{ window.__ASVA_DIRTY__ = DIRTY || _searchActive(); }} catch (e) {{}}
+}}
+function markDirty() {{ DIRTY = true; updateBusy(); }}
 setInterval(async () => {{
   try {{
     const r = await fetch('/admin/sync-status?token=' + encodeURIComponent(TOKEN));
     const s = await r.json();
-    if (s.last_synced_at && s.last_synced_at !== SYNCED_AT && !DIRTY) location.reload();
+    if (s.last_synced_at && s.last_synced_at !== SYNCED_AT && !DIRTY && !_searchActive()) location.reload();
   }} catch (e) {{}}
 }}, 90000);
 
 let SRC = 'tally';   // Dashboard opens on Tally bills
+let OWING_ONLY = false;   // "A to Z (owing only)" hides parties with nothing due
 function applyFilter() {{
   const q = document.getElementById('q').value.toLowerCase();
   document.querySelectorAll('tr[data-name]').forEach(r => {{
     const okq = r.dataset.name.includes(q);
     const oks = SRC === 'all' || r.dataset.src === SRC;
-    r.style.display = (okq && oks) ? '' : 'none';
+    const okOwe = !OWING_ONLY || parseFloat(r.dataset.amt || '0') > 0;
+    r.style.display = (okq && oks && okOwe) ? '' : 'none';
   }});
 }}
-document.getElementById('q').addEventListener('input', applyFilter);
+document.getElementById('q').addEventListener('input', () => {{ applyFilter(); updateBusy(); }});
+document.getElementById('q').addEventListener('focus', updateBusy);
+document.getElementById('q').addEventListener('blur', updateBusy);
 function setAll(v) {{
   markDirty();
   document.querySelectorAll('tr[data-name]').forEach(r => {{
@@ -769,14 +788,16 @@ function setAll(v) {{
 document.querySelectorAll('.cb').forEach(c => c.addEventListener('change', markDirty));
 function sortRows() {{
   const key = document.getElementById('sort').value;
+  OWING_ONLY = (key === 'name_owe');   // this option also filters to debtors
   const rows = [...document.querySelectorAll('#ptable tr[data-name]')];
   rows.sort((a, b) => {{
-    if (key === 'name') return a.dataset.name.localeCompare(b.dataset.name);
+    if (key === 'name' || key === 'name_owe') return a.dataset.name.localeCompare(b.dataset.name);
     if (key === 'od') return parseFloat(b.dataset.od) - parseFloat(a.dataset.od);
     return parseFloat(b.dataset.amt) - parseFloat(a.dataset.amt);
   }});
   const tb = rows.length ? rows[0].parentNode : null;
   if (tb) rows.forEach(r => tb.appendChild(r));
+  applyFilter();   // re-apply so the owing-only filter takes/releases effect
 }}
 async function save() {{
   const enabled = [...document.querySelectorAll('.cb:checked')].map(c => c.value);
@@ -786,7 +807,7 @@ async function save() {{
   const d = await r.json();
   document.getElementById('msg').textContent =
     r.ok ? `✓ Saved - ${{d.enabled}} ON, ${{d.disabled}} OFF` : 'Save failed';
-  if (r.ok) DIRTY = false;
+  if (r.ok) {{ DIRTY = false; updateBusy(); }}
 }}
 
 // sub-tabs filter the party table: Tally vs Non-Tally
@@ -2871,15 +2892,38 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     open_bills = [b for b in all_bills if b["status"] in ("pending", "partial", "overdue")]
     open_total = sum(Decimal(str(b.get("outstanding") or 0)) for b in open_bills)
 
-    # Payments recorded in Tally for this party (bill-wise history).
+    # Payments recorded in Tally for this party (bill-wise history). A receipt row
+    # may be linked to this party by client_id (rename-proof, migration 038) OR only
+    # by the Tally ledger name (older rows, or a sync where the party did not match
+    # by id). Matching by name ALONE missed a fresh receipt whenever the name
+    # differed by a rename or a stray space - the exact bug where a new Tally payment
+    # (e.g. 24 Aug) never showed while an older one (e.g. 20 May) still did. So we
+    # query BOTH linkages and MERGE, dedup by voucher, newest first.
     receipts = []
     ledger_name = c.get("tally_ledger_name") or c.get("name")
     try:
-        rr = (db.table("tally_receipts")
-              .select("amount, receipt_date, tally_voucher_number")
-              .eq("business_id", biz["id"]).eq("party_name", ledger_name)
-              .order("receipt_date", desc=True).limit(20).execute())
-        receipts = rr.data or []
+        _seen = set()
+
+        def _merge(rows):
+            for r in rows or []:
+                key = (r.get("tally_voucher_number"), str(r.get("receipt_date") or ""))
+                if key in _seen:
+                    continue
+                _seen.add(key)
+                receipts.append(r)
+
+        _merge((db.table("tally_receipts")
+                .select("amount, receipt_date, tally_voucher_number")
+                .eq("business_id", biz["id"]).eq("client_id", client_id)
+                .order("receipt_date", desc=True).limit(6).execute()).data)
+        if ledger_name:
+            _merge((db.table("tally_receipts")
+                    .select("amount, receipt_date, tally_voucher_number")
+                    .eq("business_id", biz["id"]).eq("party_name", ledger_name)
+                    .order("receipt_date", desc=True).limit(6).execute()).data)
+        # Only the latest few matter on the party page - newest first.
+        receipts.sort(key=lambda r: str(r.get("receipt_date") or ""), reverse=True)
+        receipts = receipts[:3]
     except Exception:
         receipts = []
 
@@ -2889,7 +2933,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
         mp = (db.table("manual_payments")
               .select("amount, payment_date, note")
               .eq("business_id", biz["id"]).eq("client_id", client_id)
-              .order("payment_date", desc=True).limit(50).execute())
+              .order("payment_date", desc=True).limit(3).execute())
         manual_pays = mp.data or []
     except Exception:
         manual_pays = []
