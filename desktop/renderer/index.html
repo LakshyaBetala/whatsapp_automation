@@ -1052,6 +1052,10 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.1.1': [
+    'Clean up parties removed from Tally: if you made a party in Tally and later deleted it, open Status and press "Clean up parties removed from Tally". After you confirm, any customer no longer in your Tally is hidden and stops getting reminders. Nothing is deleted - their history is kept, and they come back on their own if they return to Tally.',
+    'Also includes all the 2.1.0 fixes: recording a payment by hand always works, Tally does not crash if opened after ASVA, your reminder ticks and search survive a background sync, Tally payments show correctly on the customer page, and the new "Name A to Z (owing only)" filter.',
+  ],
   '2.1.0': [
     'Recording a payment now works every time. Entering a payment by hand on the Payments tab used to sometimes say "Could not save"; that is fixed.',
     'Tally is safe now if you open it AFTER ASVA. ASVA waits for Tally to finish loading before reading it, so it no longer makes Tally close with a memory error.',

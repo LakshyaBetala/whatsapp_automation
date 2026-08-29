@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.1.0.\n\nRecording a payment now works every time - entering a payment by hand on the Payments tab no longer says \"Could not save\".\n\nTally is safe if you open it AFTER ASVA: ASVA waits for Tally to finish loading before reading it, so it no longer makes Tally close with a memory error.\n\nYour work is never wiped by a background sync - ticking parties for reminders or typing in the search box is no longer lost when the 5-minute Tally sync runs.\n\nPayments received in Tally now show correctly on the customer page (latest first), and a new \"Name A to Z (owing only)\" filter shows just who owes you.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.1.1.\n\nClean up parties removed from Tally: if you created a party in Tally and later deleted it, open Status and press \"Clean up parties removed from Tally\". After a confirmation, any customer no longer in your Tally is hidden and stops getting reminders. Nothing is deleted - their history is kept, and they come back automatically if they return to Tally.\n\nAlso includes the 2.1.0 fixes: recording a payment by hand always works, Tally no longer crashes if you open it after ASVA, your reminder selections and search are never wiped by a background sync, Tally payments show correctly on the customer page, and a new \"Name A to Z (owing only)\" filter.\n\nFree for every shop until 30 September 2026."
     },
     "files": [
       "main.js",
