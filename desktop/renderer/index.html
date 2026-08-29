@@ -424,6 +424,8 @@
         <div id="diagresults"></div>
         <div style="margin-top:14px"><button class="diagbtn" id="cocbtn" onclick="openCompanyPicker()">Change Tally company</button></div>
         <div id="cocpicker"></div>
+        <div style="margin-top:14px"><button class="diagbtn" id="cleanupbtn" style="background:#7a4510" onclick="cleanupParties()">Clean up parties removed from Tally</button></div>
+        <div id="cleanupmsg" style="margin-top:6px;font-size:.85rem;color:#9fb7a6"></div>
         <button class="logtoggle" id="logtoggle" onclick="toggleLog()">Show technical logs</button>
         <div id="log" style="display:none"></div>
       </div>
@@ -567,6 +569,26 @@ async function pickCompany(name) {
 }
 
 // ── Connection doctor: turns "it doesn't work" into a plain reason ─────────
+async function cleanupParties() {
+  const en = currentLang() === 'english';
+  const ok = confirm(en
+    ? 'Clean up parties removed from Tally?\n\nAny customer no longer in your Tally will be hidden from ASVA and will stop getting reminders. Their history is kept, and they come back automatically if they return to Tally.\n\nTally must be open. Continue?'
+    : 'Tally se hataye gaye parties clean up karein?\n\nJo customer ab Tally me nahi hai, woh ASVA se chhup jayega aur reminder band ho jayega. History safe rehti hai; Tally me wapas aane par apne aap wapas aa jayega.\n\nTally khula hona chahiye. Aage badhein?');
+  if (!ok) return;
+  const btn = document.getElementById('cleanupbtn');
+  const msg = document.getElementById('cleanupmsg');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await window.asva.tallyReconcile();
+    if (msg) msg.textContent = (r && r.ok)
+      ? (en ? 'Clean-up requested. It runs on the next Tally read - keep Tally open; removed parties disappear within a minute or two.'
+            : 'Clean-up ka request bhej diya. Agli Tally read par chalega - Tally khula rakhein; hataye gaye parties 1-2 minute me chale jayenge.')
+      : (en ? 'Could not request clean-up. Try again in a bit.' : 'Clean-up request nahi hua. Thodi der baad try karein.');
+  } catch (e) {
+    if (msg) msg.textContent = en ? 'Could not request clean-up.' : 'Clean-up request nahi hua.';
+  }
+  if (btn) btn.disabled = false;
+}
 async function runDiag() {
   const box = document.getElementById('diagresults');
   const btn = document.getElementById('diagbtn');

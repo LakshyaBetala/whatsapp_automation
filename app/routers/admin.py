@@ -326,6 +326,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
                 .select("id, name, whatsapp_number, reminders_enabled, excluded, tally_ledger_name, "
                         "credit_days, reminder_batch, reminder_anchor, created_at")
                 .eq("business_id", biz["id"])
+                .is_("archived_at", "null")   # hide parties removed from Tally (reconcile)
                 .order("name")
                 .range(start, start + 999).execute())
         batch = resp.data or []
@@ -1510,6 +1511,25 @@ async def admin_reload(payload: ReloadPayload):
 
     db.table("businesses").update({"refresh_requested_at": now.isoformat()}).eq("id", biz["id"]).execute()
     return {"ok": True, "requested_at": now.isoformat()}
+
+
+@router.post("/admin/reconcile")
+async def admin_reconcile(payload: ReloadPayload):
+    """Owner pressed "Clean up removed parties" (with a confirmation). Flags a
+    reconcile: the agent's next outstanding push archives any Tally-sourced party
+    no longer in Tally (soft, reversible - see tally._run_reconcile). Also sets the
+    normal refresh flag so it runs on the very next tick, not the 5-min cycle."""
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    try:
+        db.table("businesses").update({
+            "refresh_requested_at": now, "reconcile_requested_at": now,
+        }).eq("id", biz["id"]).execute()
+    except Exception:
+        raise HTTPException(status_code=503,
+                            detail="Clean-up needs migration 049. Apply it, then retry.")
+    return {"ok": True, "requested_at": now}
 
 
 @router.get("/admin/sync-status")

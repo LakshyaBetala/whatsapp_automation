@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('asva', {
   setAutostart: (v) => ipcRenderer.invoke('set-autostart', v),
   restartService: (name) => ipcRenderer.invoke('restart-service', name),
   tallyReload: () => ipcRenderer.invoke('tally-reload'),
+  tallyReconcile: () => ipcRenderer.invoke('tally-reconcile'),
   onStatus: (cb) => ipcRenderer.on('status', (e, d) => cb(d)),
   onLog: (cb) => ipcRenderer.on('log', (e, d) => cb(d)),
 

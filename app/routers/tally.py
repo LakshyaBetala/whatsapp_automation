@@ -1,7 +1,7 @@
 import logging
 import secrets
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
@@ -169,13 +169,26 @@ async def pending_refresh(business_id: uuid.UUID, agent_token: str):
     'Reload data' (an override that forces an immediate outstanding refresh
     instead of waiting for the 5-min auto cycle). Cleared by /outstandings."""
     db = _verify_token(business_id, agent_token)
+    req = False
+    reconcile = False
     try:
-        r = (db.table("businesses").select("refresh_requested_at")
+        r = (db.table("businesses").select("refresh_requested_at, reconcile_requested_at")
              .eq("id", str(business_id)).limit(1).execute())
-        req = bool(r.data and r.data[0].get("refresh_requested_at"))
+        if r.data:
+            req = bool(r.data[0].get("refresh_requested_at"))
+            reconcile = bool(r.data[0].get("reconcile_requested_at"))
     except Exception:
-        req = False  # column missing (migration 015 not applied) - non-fatal
-    return {"requested": req}
+        # reconcile_requested_at missing (migration 049 not applied) - retry the
+        # basic column so a normal Reload still works on an un-migrated DB.
+        try:
+            r = (db.table("businesses").select("refresh_requested_at")
+                 .eq("id", str(business_id)).limit(1).execute())
+            req = bool(r.data and r.data[0].get("refresh_requested_at"))
+        except Exception:
+            req = False
+    # A reconcile is ALSO a refresh (it runs the same outstanding push, just with
+    # the archive step turned on), so surface both.
+    return {"requested": req or reconcile, "reconcile": reconcile}
 
 
 # ── Payment-entry pipeline (PAID -> queue -> confirm -> Tally) ────────────────
@@ -759,6 +772,7 @@ class TallyOutstandingsPayload(BaseModel):
     company_name: str
     bills: list[TallyOpenBill]
     all_parties: list[str] = []       # every debtor ledger (to clear fully-paid ones)
+    reconcile: bool = False           # true = also archive clients no longer in Tally
     contacts: list[TallyContact] = [] # {name, whatsapp_number} - keeps numbers current
     parties: list[TallyParty] = []    # full debtor details -> auto-create new ones
     # Ledger ClosingBalance per party (Tally's authoritative "what they owe
@@ -767,6 +781,60 @@ class TallyOutstandingsPayload(BaseModel):
     # this fixes parties whose ledgers don't 'maintain balances bill-by-bill'
     # (they return zero bills, so without this they'd wrongly show as cleared).
     ledger_balances: dict[str, float] = {}
+
+
+def _run_reconcile(db, biz: str, all_clients: list, all_parties: list, parties: list) -> int:
+    """Archive Tally-sourced clients that are NO LONGER in Tally's debtor list
+    (deleted in Tally). SOFT and reversible: sets archived_at + excluded (so it is
+    guaranteed no reminders even if a display filter is missed) and turns reminders
+    off - but never deletes a row, so all bills/history survive and INCLUDE / a
+    reappearance restores it. NON-Tally (manually added) parties are never touched.
+    Aborts if Tally sent a suspiciously short list, so a partial export can't wipe
+    the fleet. Returns how many were archived."""
+    def _n(s):
+        return " ".join((s or "").split()).casefold()
+
+    live_names = {_n(x) for x in (all_parties or []) if x}
+    live_guids = {(getattr(p, "tally_guid", "") or "").strip() for p in (parties or [])}
+    live_guids.discard("")
+
+    tally_clients = [c for c in all_clients if (c.get("tally_ledger_name") or "").strip()]
+    if not tally_clients:
+        return 0
+    present = [c for c in tally_clients
+               if _n(c.get("tally_ledger_name")) in live_names
+               or (c.get("tally_guid") or "").strip() in live_guids]
+    # SAFETY: if we can account for fewer than half the Tally parties we know, the
+    # export is suspect (Tally still loading, wrong company, partial read) - do
+    # NOTHING rather than risk archiving live parties.
+    if len(present) < 0.5 * len(tally_clients):
+        log.warning("reconcile ABORTED for %s: only %d/%d parties present (looks partial)",
+                    biz, len(present), len(tally_clients))
+        return 0
+
+    present_ids = {c["id"] for c in present}
+    missing_ids = [c["id"] for c in tally_clients if c["id"] not in present_ids]
+    now = datetime.now(timezone.utc).isoformat()
+    archived = 0
+    for chunk in _chunked(missing_ids):
+        try:
+            db.table("clients").update(
+                {"archived_at": now, "excluded": True, "reminders_enabled": False}
+            ).in_("id", chunk).execute()
+            archived += len(chunk)
+        except Exception:
+            log.exception("reconcile archive chunk failed for %s", biz)
+    # A party that had been archived but is BACK in Tally is restored.
+    back_ids = [c["id"] for c in present if c.get("archived_at")]
+    for chunk in _chunked(back_ids):
+        try:
+            db.table("clients").update(
+                {"archived_at": None, "excluded": False}
+            ).in_("id", chunk).execute()
+        except Exception:
+            log.exception("reconcile restore chunk failed for %s", biz)
+    log.info("reconcile %s: archived %d, restored %d", biz, archived, len(back_ids))
+    return archived
 
 
 @router.post("/outstandings")
@@ -789,7 +857,7 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     plan_name = biz_row.data[0]["plan"] if biz_row.data else "starter"
 
     _all_clients = _fetch_all(lambda: db.table("clients")
-                              .select("id, tally_ledger_name, name, whatsapp_number, language, tally_guid")
+                              .select("id, tally_ledger_name, name, whatsapp_number, language, tally_guid, archived_at")
                               .eq("business_id", biz))
     clients_by_ledger = {
         c["tally_ledger_name"]: c for c in _all_clients if c.get("tally_ledger_name")
@@ -982,14 +1050,29 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     except Exception as e:
         log.error("Failed to log outstandings sync: %s", e)
 
-    # Clear a pending manual "Reload data" request now that fresh data is in.
+    # Reconcile (explicit, confirmed action): archive parties deleted in Tally.
+    # Runs on the SAME full-party push, only when the owner asked for a clean-up.
+    archived_parties = 0
+    if payload.reconcile:
+        try:
+            archived_parties = _run_reconcile(db, biz, _all_clients,
+                                              payload.all_parties, payload.parties)
+        except Exception:
+            log.exception("reconcile failed for %s (data untouched)", biz)
+
+    # Clear the pending manual "Reload data" / "Clean up" requests now that fresh
+    # data is in.
     try:
-        db.table("businesses").update({"refresh_requested_at": None}).eq("id", biz).execute()
+        clear = {"refresh_requested_at": None}
+        if payload.reconcile:
+            clear["reconcile_requested_at"] = None
+        db.table("businesses").update(clear).eq("id", biz).execute()
     except Exception:
-        pass  # column may not exist yet (migration 015 not applied) - non-fatal
+        pass  # column may not exist yet (migration not applied) - non-fatal
 
     return {
         "parties": len(target_ids),
+        "archived_parties": archived_parties,
         "new_parties": created_parties,
         "bills_upserted": upserted,
         "bills_marked_paid": marked_paid,

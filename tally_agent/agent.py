@@ -156,18 +156,21 @@ async def fetch_masters(config: dict, company: str, debtor_groups) -> str:
         log_and_print(f"Chunked masters fetch failed ({e}); using the full query.", is_error=True)
     return await fetch_and_parse(config, tally_xml.build_masters_query(company))
 
-async def check_pending_refresh(config: dict) -> bool:
-    """Did the owner press 'Reload data' on the dashboard? If so we refresh
-    outstanding immediately instead of waiting for the auto cycle."""
+async def check_pending_refresh(config: dict) -> dict:
+    """Did the owner press 'Reload data' (requested) or 'Clean up removed parties'
+    (reconcile) on the dashboard? Returns {"requested": bool, "reconcile": bool} so
+    we refresh outstanding immediately, optionally archiving parties gone from
+    Tally, instead of waiting for the auto cycle."""
     try:
         base = config['backend_url'].rstrip('/')
         params = {"business_id": config['business_id'], "agent_token": config['agent_token']}
         async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
             resp = await client.get(f"{base}/tally/pending-refresh", params=params)
             resp.raise_for_status()
-            return bool(resp.json().get("requested"))
+            j = resp.json()
+            return {"requested": bool(j.get("requested")), "reconcile": bool(j.get("reconcile"))}
     except Exception:
-        return False
+        return {"requested": False, "reconcile": False}
 
 
 async def send_to_backend(url: str, endpoint: str, token: str, payload: dict):
@@ -622,12 +625,17 @@ async def run_watch(config: dict):
         # Tally is confirmed ready, so a Reload press is not lost while Tally loads.
         try:
             forced = False
+            reconcile = False
             if tally_ok and not due_out0:
-                forced = await check_pending_refresh(config)
+                pr = await check_pending_refresh(config)
+                forced = pr["requested"]
+                reconcile = pr["reconcile"]
             if tally_ok and (due_out0 or forced):
-                if forced:
+                if reconcile:
+                    log_and_print(f"[{stamp}] Clean-up pressed - refreshing and archiving parties removed from Tally.")
+                elif forced:
                     log_and_print(f"[{stamp}] Reload pressed - refreshing outstanding now.")
-                await run_apply_outstanding(config)
+                await run_apply_outstanding(config, reconcile=reconcile)
                 now2 = asyncio.get_event_loop().time()
                 last_outstanding = now2
                 if forced:
@@ -788,10 +796,11 @@ async def run_check_outstanding(config: dict):
     log_and_print("PREVIEW done - nothing changed. Verify PINEMA/MAHALAKSHMI totals match Tally, then we wire it in.")
 
 
-async def run_apply_outstanding(config: dict):
+async def run_apply_outstanding(config: dict, reconcile: bool = False):
     """Push Tally's bill-by-bill outstanding to the backend as the source of
     truth for amounts + dates (fixes receipt-capture drift). Runs at the end
-    of --sync and via --refresh-outstanding."""
+    of --sync and via --refresh-outstanding. reconcile=True also asks the backend
+    to archive parties no longer in Tally (owner pressed 'Clean up')."""
     company = config['company_name']
     emit_progress(1, 4, "Reading customer list from Tally")
     groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
@@ -827,6 +836,7 @@ async def run_apply_outstanding(config: dict):
             "bill_date": b['bill_date'], "due_date": b['due_date'], "amount": b['amount'],
         } for b in bills],
         "all_parties": debtor_names,
+        "reconcile": bool(reconcile),
         "ledger_balances": ledger_balances,
         # Keep customer numbers current in the backend (source of truth = Tally).
         # Reuses the masters we already fetched above - no extra Tally read.
@@ -926,11 +936,18 @@ async def run_watch_all(companies: list):
                 now_mono = asyncio.get_event_loop().time()
                 due = (last_out[company] == 0.0
                        or now_mono - last_out[company] >= outstanding_every)
-                forced = False if due else await check_pending_refresh(cfg)
+                forced = False
+                reconcile = False
+                if not due:
+                    pr = await check_pending_refresh(cfg)
+                    forced = pr["requested"]
+                    reconcile = pr["reconcile"]
                 if due or forced:
-                    if forced:
+                    if reconcile:
+                        log_and_print(f"[{stamp}] {company}: Clean-up pressed - refreshing and archiving removed parties.")
+                    elif forced:
                         log_and_print(f"[{stamp}] {company}: Reload pressed - refreshing now.")
-                    await run_apply_outstanding(cfg)
+                    await run_apply_outstanding(cfg, reconcile=reconcile)
                     last_out[company] = asyncio.get_event_loop().time()
             except KeyboardInterrupt:
                 raise

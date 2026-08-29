@@ -970,6 +970,14 @@ ipcMain.handle('tally-reload', () => new Promise((resolve) => {
     (ok, j) => resolve(ok ? j : { ok: false, detail: 'backend down' }));
 }));
 
+// "Clean up removed parties" -> flag a reconcile; the agent's next outstanding
+// push archives any party no longer in Tally (soft + reversible on the server).
+ipcMain.handle('tally-reconcile', () => new Promise((resolve) => {
+  if (!CONFIG.token) return resolve({ ok: false, detail: 'no token' });
+  httpPostJson(`${CONFIG.backendUrl}/admin/reconcile`, { token: CONFIG.token },
+    (ok, j) => resolve(ok ? j : { ok: false, detail: 'backend down' }));
+}));
+
 // ── Setup wizard IPC ──────────────────────────────────────────────────────
 ipcMain.handle('pair-redeem', (e, code) => runAgent(['--pair', String(code || '').trim()]));
 ipcMain.handle('pair-companies', () => runAgent(['--list-companies-json']));
