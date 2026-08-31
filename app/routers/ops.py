@@ -487,9 +487,19 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .steps ol{margin:0;padding-left:20px} .steps li{margin:5px 0;color:#cfe3d6}
  details.adv{margin-top:6px;border-top:1px solid #223029;padding-top:10px}
  details.adv summary{cursor:pointer;color:#8fae9c;font-size:.82rem}
+ .statuspill{margin-left:12px;font-size:.7rem;font-weight:800;padding:3px 11px;border-radius:9999px;text-transform:uppercase;letter-spacing:.05em;vertical-align:middle;cursor:pointer}
+ .statuspill.ok{background:#123524;color:#46d67e}
+ .statuspill.warn{background:#3a2f10;color:#f0b849}
+ .statuspill.bad{background:#3a1613;color:#ff6a5c}
+ .tbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 10px}
+ .tf{font:inherit;font-size:.86rem;background:#0f1713;color:#e8efe9;border:1px solid #2c5c42;border-radius:8px;padding:7px 11px;min-width:220px;flex:1;max-width:340px}
+ .tf::placeholder{color:#6f8a7b}
+ .tfck{display:inline-flex;align-items:center;gap:6px;color:#8fae9c;font-size:.84rem;cursor:pointer;user-select:none}
+ .tfck input{accent-color:#2f8f52}
+ .tfcount{color:#6f8a7b;font-size:.8rem;margin-left:auto}
 </style></head><body>
 <div class="top">
-  <h1>ASVA Command Center</h1>
+  <h1>ASVA Command Center<span id="statuspill" class="statuspill ok" onclick="showTab('health')" title="Jump to Health">checking...</span></h1>
   <div class="meta"><button class="add" onclick="openAdd()">+ Add business</button>
     &nbsp;&nbsp;<span id="clock"></span> &middot; server v<span id="sv"></span></div>
 </div>
@@ -585,6 +595,11 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
     <div class="sect">Traffic - 14 days (green sent / red failed)</div>
     <div class="traf" id="traf"></div>
     <div class="sect" style="margin-top:16px">Per shop, today</div>
+    <div class="tbar">
+      <input id="hfilter" class="tf" placeholder="Search shop by name..." oninput="applyHFilter()">
+      <label class="tfck"><input type="checkbox" id="hprob" onchange="applyHFilter()"> Problems only</label>
+      <span class="tfcount" id="hcount"></span>
+    </div>
     <div class="tablewrap"><table>
       <thead><tr><th>Shop</th><th>Status</th><th>Agent</th><th>Version</th><th>WhatsApp</th>
         <th class="num">Sent</th><th class="num">Failed</th><th class="num">Blocked</th>
@@ -596,6 +611,11 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 
   <div id="tab_subs" style="display:none">
   <div class="kpis" id="kpis"></div>
+  <div class="tbar">
+    <input id="sfilter" class="tf" placeholder="Search business by name..." oninput="applySFilter()">
+    <label class="tfck"><input type="checkbox" id="sprob" onchange="applySFilter()"> Problems only</label>
+    <span class="tfcount" id="scount"></span>
+  </div>
   <div class="tablewrap"><table>
    <thead><tr>
      <th>Business</th><th>Status</th><th>Plan</th><th>Expiry</th><th class="num">Days</th>
@@ -641,15 +661,20 @@ async function load(){
       pilot.textContent='Free pilot is ON - every business is Pro and active until '+d.free_pilot_until+' (no suspension, no limits, no renewal nagging). Change it with FREE_PILOT_UNTIL in the server config.'; }
     else { pilot.style.display='none'; }
     const t = d.totals;
-    const K=[['businesses','Businesses',''],['online','Online','good'],
-      ['active','Active','good'],['grace','Grace','warn'],['suspended','Suspended','bad'],
+    // State-aware colours: a number only turns green/amber/red when that is the
+    // TRUTH (0 online is red, not a reassuring green).
+    const shops=t.businesses||0, on=t.online||0;
+    const onlineCls = shops===0?'':(on===0?'bad':(on<shops?'warn':'good'));
+    const K=[['businesses','Businesses',''],['online','Online',onlineCls],
+      ['active','Active','good'],['grace','Grace',t.grace?'warn':''],['suspended','Suspended',t.suspended?'bad':''],
       ['messages_month','Messages (mo)',''],['failed_today','Failed (today)', t.failed_today?'bad':''],
-      ['outdated','Outdated','warn'],
+      ['outdated','Outdated',t.outdated?'warn':''],
       ['needs_reinstall','Reinstall', t.needs_reinstall?'bad':'']];
     document.getElementById('kpis').innerHTML = K.map(k=>
       '<div class="kpi '+(k[2])+'"><div class="n">'+inr(t[k[0]])+'</div><div class="l">'+k[1]+'</div></div>').join('');
     document.getElementById('rows').innerHTML = d.businesses.map(rowHtml).join('') ||
-      '<tr><td colspan="12" class="muted" style="padding:22px">No businesses yet.</td></tr>';
+      '<tr><td colspan="13" class="muted" style="padding:22px">No businesses yet.</td></tr>';
+    applySFilter();
     renderIssues(d.open_alerts||[]);
   }catch(e){
     // A thrown fetch = the ASVA server is unreachable (backend down / restarting).
@@ -663,9 +688,37 @@ function showBanner(kind, html){
   b.className='opsbanner '+kind; b.innerHTML=html; b.style.display='block';
 }
 function hideBanner(){const b=document.getElementById('opsbanner'); if(b)b.style.display='none';}
+function setStatusPill(nc,nw){
+  const p=document.getElementById('statuspill'); if(!p)return;
+  if(nc){ p.className='statuspill bad'; p.textContent=nc+' problem'+(nc>1?'s':''); }
+  else if(nw){ p.className='statuspill warn'; p.textContent=nw+' to check'; }
+  else { p.className='statuspill ok'; p.textContent='All normal'; }
+}
+// Filter a per-shop table by name + a "problems only" toggle. Re-applied after
+// every 30s re-render so the operator's focus is never lost. Rows carry
+// data-name / data-prob; the empty-state row (no data-name) is left untouched.
+function _filterTable(rowsSel, inputId, ckId, countId){
+  const qi=document.getElementById(inputId), ci=document.getElementById(ckId);
+  if(!qi)return;
+  const q=(qi.value||'').toLowerCase().trim(), prob=ci&&ci.checked;
+  let shown=0,total=0;
+  document.querySelectorAll(rowsSel+' tr').forEach(function(tr){
+    if(!tr.hasAttribute('data-name'))return;
+    total++;
+    const name=tr.getAttribute('data-name')||'';
+    const isprob=tr.getAttribute('data-prob')==='1';
+    const show=(!q||name.indexOf(q)>-1)&&(!prob||isprob);
+    tr.style.display=show?'':'none'; if(show)shown++;
+  });
+  const c=document.getElementById(countId);
+  if(c)c.textContent=(q||prob)?(shown+' of '+total+' shown'):'';
+}
+function applyHFilter(){ _filterTable('#hrows','hfilter','hprob','hcount'); }
+function applySFilter(){ _filterTable('#rows','sfilter','sprob','scount'); }
 function renderIssues(alerts){
   const crit=alerts.filter(a=>a.severity==='critical');
   const warn=alerts.filter(a=>a.severity!=='critical');
+  setStatusPill(crit.length, warn.length);
   if(!alerts.length){ hideBanner(); return; }
   const titles=alerts.slice(0,4).map(a=>esc(a.title)).join(' &middot; ');
   const more=alerts.length>4?(' +'+(alerts.length-4)+' more'):'';
@@ -679,7 +732,8 @@ function rowHtml(b){
   const verCls = b.needs_reinstall?'':(b.version_ok?'':'warnv');
   const verExtra = b.needs_reinstall?'<span class="rin" title="Too old to update itself - reinstall the latest from tryasva.com/download">reinstall</span>':'';
   const plopts = PLANS.map(p=>'<option value="'+p+'"'+(p===b.plan?' selected':'')+'>'+PLABEL[p]+'</option>').join('');
-  return '<tr>'+
+  const prob = (b.status!=='active') || (b.failed_today>0) || b.needs_reinstall || !b.online;
+  return '<tr data-name="'+esc(b.name).toLowerCase()+'" data-prob="'+(prob?'1':'0')+'">'+
     '<td><div><span class="dot '+(b.online?'on':'off')+'"></span>'+esc(b.name)+'</div>'+
       '<div class="lk">'+esc(b.license_key)+'</div></td>'+
     '<td><span class="pill '+b.status+'">'+b.status+'</span></td>'+
@@ -869,9 +923,11 @@ async function loadHealth(){
     }).join('')
       || '<span class="muted">No job runs recorded yet.</span>';
     const t=d.totals||{};
-    const K=[['businesses','Shops',''],['online','Online','good'],
-      ['sent_today','Sent today','good'],['failed_today','Failed today',t.failed_today?'bad':''],
-      ['blocked_today','Blocked','warn'],['queued_now','Queued now',t.queued_now?'warn':'']];
+    const shops=t.businesses||0, on=t.online||0;
+    const onlineCls = shops===0?'':(on===0?'bad':(on<shops?'warn':'good'));
+    const K=[['businesses','Shops',''],['online','Online',onlineCls],
+      ['sent_today','Sent today',''],['failed_today','Failed today',t.failed_today?'bad':'good'],
+      ['blocked_today','Blocked',t.blocked_today?'warn':''],['queued_now','Queued now',t.queued_now?'warn':'']];
     const open=(d.alerts&&d.alerts.open)||[];
     renderIssues(open);   // keep the top banner fresh on the Health tab too
     // Bot WhatsApp down is a critical, host-level outage - surface it explicitly
@@ -898,7 +954,8 @@ async function loadHealth(){
       const vcur=(b.version&&b.version!=='-'&&b.version===d.server_version);
       const vcell=(!b.version||b.version==='-')?'<span class="muted">not reported</span>'
         :('<span'+(vcur?'':' class="warnv" title="Older than the server build - the shop will update when it next opens ASVA"')+'>'+esc(b.version)+'</span>');
-      return '<tr><td>'+esc(b.name)+'</td>'+
+      const prob = !b.online || b.wa_ready===false || (b.failed_today>0) || (b.queued>0) || (b.status && b.status!=='active');
+      return '<tr data-name="'+esc(b.name).toLowerCase()+'" data-prob="'+(prob?'1':'0')+'"><td>'+esc(b.name)+'</td>'+
         '<td><span class="pill '+b.status+'">'+b.status+'</span></td>'+
         '<td><span class="dot '+(b.online?'on':'off')+'"></span>'+(b.online?'online':'offline')+'</td>'+
         '<td>'+vcell+'</td>'+
@@ -909,6 +966,7 @@ async function loadHealth(){
         '<td class="num '+(b.queued?'warnv':'')+'">'+inr(b.queued)+'</td>'+
         '<td>'+ago(b.last_seen_min)+'</td></tr>';
     }).join('') || '<tr><td colspan="10" class="muted" style="padding:22px">No shops yet.</td></tr>';
+    applyHFilter();
   }catch(e){
     showBanner('down','Cannot reach the ASVA server. The backend may be down or restarting. It retries automatically.');
     document.getElementById('msg').textContent='Could not load health. Retrying...';

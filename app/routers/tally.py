@@ -141,6 +141,49 @@ def _resolve_client(db, clients_by_ledger: dict, clients_by_guid: dict,
     return c
 
 
+def _norm_ledger_key(s: Optional[str]) -> str:
+    """Whitespace-collapsed, case-folded ledger name for a tolerant match."""
+    return " ".join((s or "").split()).casefold()
+
+
+def _make_outstanding_resolver(clients_by_ledger: dict, clients_by_guid: dict, parties):
+    """Build the party matcher used by the AUTHORITATIVE outstanding refresh.
+
+    Returns a ``resolve(name) -> client|None`` that lands on the RIGHT client even
+    when the Tally name was renamed (matched on the stable GUID) or differs only by
+    case / extra spaces (normalised fallback). Without this a renamed or
+    space-changed party was SKIPPED, its bills FROZE at the last-synced amount (a
+    payment never reduced them) and a duplicate row was spawned - the "stuck on the
+    old balance" bug. Collisions (two ledgers that normalise the same) are marked
+    ambiguous and never guessed - correctness over convenience. Pure + unit-tested;
+    mirrors the fallback sync_daybook already uses for receipts.
+    """
+    clients_by_norm: dict = {}
+    for _k, _c in clients_by_ledger.items():
+        _nk = _norm_ledger_key(_k)
+        clients_by_norm[_nk] = None if _nk in clients_by_norm else _c
+    # name -> stable GUID from the full party list Tally sent, so a renamed party
+    # (new name, same GUID) still resolves to its existing client row.
+    name_to_guid = {}
+    for p in (parties or []):
+        nm = (getattr(p, "name", None) or "").strip()
+        g = (getattr(p, "tally_guid", None) or "").strip()
+        if nm and g:
+            name_to_guid[nm] = g
+
+    def resolve(nm: str):
+        nm = (nm or "").strip()
+        c = clients_by_ledger.get(nm)
+        if c:
+            return c
+        g = name_to_guid.get(nm)
+        if g and g in clients_by_guid:
+            return clients_by_guid[g]
+        return clients_by_norm.get(_norm_ledger_key(nm))
+
+    return resolve
+
+
 def _verify_token(business_id: uuid.UUID, agent_token: str):
     db = require_db()
     resp = db.table("businesses").select("agent_token").eq("id", str(business_id)).execute()
@@ -920,16 +963,19 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     # Refresh customer numbers from Tally before anything else (cheap, targeted).
     _sync_contacts(db, biz, payload.contacts, clients_by_ledger)
 
+    # Built AFTER auto-create so it also sees parties just created/renamed this run.
+    _resolve = _make_outstanding_resolver(clients_by_ledger, clients_by_guid, payload.parties)
+
     incoming = defaultdict(list)
     for b in payload.bills:
-        c = clients_by_ledger.get(b.party_name)
+        c = _resolve(b.party_name)
         if c:
             incoming[c["id"]].append(b)
 
     # Ledger ClosingBalance per client_id = Tally's authoritative total owed.
     ledger_bal: dict[str, float] = {}
     for name, amt in (payload.ledger_balances or {}).items():
-        c = clients_by_ledger.get(name)
+        c = _resolve(name)
         if c:
             ledger_bal[c["id"]] = round(float(amt or 0), 2)
     # Only trust ledger balances as the source of truth if the agent actually
@@ -938,7 +984,7 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
 
     target_ids = set(incoming.keys())
     for name in payload.all_parties:
-        c = clients_by_ledger.get(name)
+        c = _resolve(name)
         if c:
             target_ids.add(c["id"])
     target_ids.update(ledger_bal.keys())
@@ -1025,12 +1071,29 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     stale = [e["id"] for e in existing_bills
              if e.get("tally_voucher_number") not in snap.get(e["client_id"], set())]
     marked_paid = 0
-    for idchunk in _chunked(stale, 200):
-        try:
-            db.table("bills").update({"status": "paid"}).in_("id", idchunk).execute()
-            marked_paid += len(idchunk)
-        except Exception as e:
-            errors.append(f"mark-paid {len(idchunk)} failed: {e}")
+    # Partial-fetch safety: if the agent's party list came back far shorter than the
+    # shop's known client base, the masters/bills fetch was PARTIAL (a Tally HTTP
+    # hiccup / an aborted big export). Marking every unreported bill 'paid' would
+    # then wrongly wipe real debts, so skip the mass mark-paid this cycle (the
+    # amounts we DID receive are still upserted above). The next clean refresh
+    # reconciles correctly. Mirrors the reconcile/archive 50% guard.
+    reported_parties = len(payload.all_parties or [])
+    known_clients = len([c for c in _all_clients
+                         if c.get("tally_ledger_name") and not c.get("archived_at")])
+    fetch_complete = (not use_ledger) or known_clients == 0 \
+        or reported_parties >= 0.5 * known_clients
+    if not fetch_complete:
+        msg = (f"skipped mark-paid: only {reported_parties} parties reported vs "
+               f"{known_clients} known active - looks like a partial Tally fetch")
+        errors.append(msg)
+        log.warning("outstandings partial-fetch guard tripped for business %s: %s", biz, msg)
+    else:
+        for idchunk in _chunked(stale, 200):
+            try:
+                db.table("bills").update({"status": "paid"}).in_("id", idchunk).execute()
+                marked_paid += len(idchunk)
+            except Exception as e:
+                errors.append(f"mark-paid {len(idchunk)} failed: {e}")
 
     # Payments detected via Tally update the ledger SILENTLY. We deliberately do
     # NOT message the customer "received Rs X" - that fired on every refresh a

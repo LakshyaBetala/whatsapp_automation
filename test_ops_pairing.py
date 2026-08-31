@@ -40,15 +40,16 @@ def test_repair_button_and_modal_exist(monkeypatch):
 
 
 def test_subscriptions_table_colspan_matches_column_count(monkeypatch):
-    """The empty-state colspan must match the header, or the table renders
-    ragged the first time an operator opens a fresh install."""
+    """The empty-state colspan must match the subscriptions header exactly, or the
+    table renders ragged the first time an operator opens a fresh install. Tied to
+    the ACTUAL subs column count so it can never go stale when a column is added."""
     html = _render(monkeypatch)
-    header = html.split("<tbody id=\"rows\">")[0]
-    # count <th> in the subscriptions table header (last thead before rows)
-    n_cols = header.count("<th>") + header.count('<th class="num">')
-    assert 'colspan="12"' in html
-    # 12 columns: Business..Cut off + Pair (health table has its own header)
-    assert n_cols >= 12
+    # Isolate the subscriptions table header (between its tab and its tbody).
+    subs = html.split('<tbody id="rows">')[0].split('<div id="tab_subs"')[-1]
+    n_cols = subs.count("<th>") + subs.count('<th class="num">')
+    assert n_cols >= 12          # Business..Delete
+    # The empty-state row must span every subscriptions column.
+    assert 'colspan="%d"' % n_cols in html
 
 
 def test_pair_flow_is_admin_gated_end_to_end(monkeypatch):
