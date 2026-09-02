@@ -117,3 +117,51 @@ def test_zero_cooldown_never_blocks():
 
 def test_negative_cooldown_treated_as_zero():
     assert ca(1000.0, 1000.0, -5) is False
+
+
+# ── FY rollover detection ────────────────────────────────────────────────────
+# Every April a shop opens next year's Tally company. The configured name then
+# matches nothing, the gate says "not ready", and ASVA silently stops syncing.
+# Detection must be CONSERVATIVE: suggest only when exactly one open company
+# shares the FY-stripped base name.
+frc = agent.fy_rollover_candidate
+sfs = agent.strip_fy_suffix
+
+
+def test_strip_fy_suffix_variants():
+    assert sfs("SRI SHANKAR AGENCIES - (from 1-Apr-24)") == "SRI SHANKAR AGENCIES"
+    assert sfs("SUPREME PETRO CHEMICALS - (25-26)") == "SUPREME PETRO CHEMICALS"
+    # a company can accumulate several suffixes over the years
+    assert sfs("SURBHI ENTERPRISES - (from 1-Apr-2019) - (from 1-Apr-2020)") == "SURBHI ENTERPRISES"
+    assert sfs("RISHAB TRADING COMPANY") == "RISHAB TRADING COMPANY"
+
+
+def test_rollover_detected_when_year_changes():
+    assert frc("ACME - (from 1-Apr-24)", ["ACME - (from 1-Apr-25)"]) == "ACME - (from 1-Apr-25)"
+
+
+def test_no_rollover_when_company_is_open():
+    assert frc("ACME - (from 1-Apr-24)", ["ACME - (from 1-Apr-24)", "OTHER"]) is None
+
+
+def test_no_suggestion_when_two_candidates_match():
+    # Never guess between two plausible rollovers.
+    assert frc("ACME - (25-26)", ["ACME - (26-27)", "ACME - (24-25)"]) is None
+
+
+def test_no_suggestion_for_a_different_company():
+    assert frc("ACME - (25-26)", ["ZENITH TRADERS - (26-27)"]) is None
+
+
+def test_rollover_ignores_case_and_spacing():
+    assert frc("Acme  Traders - (25-26)", ["ACME TRADERS - (26-27)"]) == "ACME TRADERS - (26-27)"
+
+
+def test_no_open_companies_means_no_suggestion():
+    assert frc("ACME - (25-26)", []) is None
+    assert frc("ACME - (25-26)", None) is None
+
+
+def test_plain_name_rollover_to_suffixed():
+    # Shop had a plain name, then created an FY-suffixed company.
+    assert frc("ACME TRADERS", ["ACME TRADERS - (from 1-Apr-26)"]) == "ACME TRADERS - (from 1-Apr-26)"

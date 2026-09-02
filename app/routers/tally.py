@@ -354,7 +354,7 @@ async def register_company(payload: RegisterCompanyPayload):
     acct = (db.table("businesses").select(
         "id, owner_name, business_name, whatsapp_number, plan, msg_language, "
         "upi_vpa, upi_vpa_2, upi_vpa_3, discount_pct, reminder_hour, "
-        "plan_expires_on, timezone")
+        "plan_expires_on, timezone, account_id")
         .eq("agent_token", payload.account_token).order("created_at")
         .limit(1).execute())
     if not acct.data:
@@ -389,7 +389,15 @@ async def register_company(payload: RegisterCompanyPayload):
         "upi_vpa_3": src.get("upi_vpa_3"),
         "discount_pct": src.get("discount_pct"),
         "reminder_hour": src.get("reminder_hour"),
-        "plan_expires_on": src.get("plan_expires_on"),
+        # Its OWN subscription. One company = one business = one subscription, so
+        # a second company must NOT inherit the primary's paid-until date (that
+        # was a straight revenue leak: unlimited free companies under one payment).
+        # The operator activates it in the Command Center, which IS "buy another
+        # subscription". During the free pilot every business is active anyway.
+        "plan_expires_on": None,
+        # Explicit account link, so "this owner's companies" no longer depends on
+        # matching a phone number that can change.
+        "account_id": src.get("account_id") or src["id"],
         "timezone": src.get("timezone") or "Asia/Kolkata",
         "agent_token": new_token,
         "onboarding_status": "active",

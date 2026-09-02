@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.1.1.\n\nClean up parties removed from Tally: if you created a party in Tally and later deleted it, open Status and press \"Clean up parties removed from Tally\". After a confirmation, any customer no longer in your Tally is hidden and stops getting reminders. Nothing is deleted - their history is kept, and they come back automatically if they return to Tally.\n\nAlso includes the 2.1.0 fixes: recording a payment by hand always works, Tally no longer crashes if you open it after ASVA, your reminder selections and search are never wiped by a background sync, Tally payments show correctly on the customer page, and a new \"Name A to Z (owing only)\" filter.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.1.2.\n\nTally stability: ASVA now waits properly for Tally to finish loading before it reads. If you open Tally after ASVA, it no longer gets hit too early, which is what could close Tally with a memory error. If a read ever does fail, ASVA stands back for a few minutes instead of retrying straight away.\n\nNew financial year: if your Tally company rolls over to a new year, ASVA now tells you clearly and offers to switch, instead of quietly stopping.\n\nCorrect ages: an old bill no longer shows as if it started on 1 April, so overdue days, the chase list and your reports read true.\n\nAmounts now read the Indian way (28,29,452 instead of 2,829,280).\n\nMultiple companies: reminders for a second company are now delivered properly, and all companies share one safe sending pace on your number.\n\nFree for every shop until 30 September 2026."
     },
     "files": [
       "main.js",

@@ -3,6 +3,7 @@ import asyncio
 import base64
 import calendar
 import os
+import re
 import shutil
 import sys
 import httpx
@@ -128,6 +129,57 @@ def readiness_decision(open_companies, company, ready_since, now, warmup_s):
         return False, None                      # HTTP up but our company not loaded yet
     rs = now if ready_since is None else ready_since
     return (now - rs >= max(0, warmup_s)), rs
+
+
+_FY_SUFFIX_RE = re.compile(r"\s*-\s*\((?:from\s+)?[^)]*\)\s*$", re.I)
+
+
+def strip_fy_suffix(name: str) -> str:
+    """Drop trailing financial-year suffixes Tally companies carry.
+
+    Real examples from the fleet:
+      'SRI SHANKAR AGENCIES - (from 1-Apr-24)'
+      'SUPREME PETRO CHEMICALS - (25-26)'
+      'SURBHI ENTERPRISES - (from 1-Apr-2019) - (from 1-Apr-2020) - (from 1-Apr-2021)'
+    The last one is why this loops: a company can accumulate several suffixes.
+    """
+    prev, s = None, (name or "").strip()
+    while s != prev:
+        prev = s
+        s = _FY_SUFFIX_RE.sub("", s).strip()
+    return s
+
+
+def fy_rollover_candidate(configured: str, open_companies):
+    """The open company that looks like `configured` rolled into a new FY, else None.
+
+    Every April a shop opens next year's company and the old name disappears. The
+    configured name then matches nothing, the readiness gate says "not ready", and
+    ASVA silently stops syncing - a predictable, fleet-wide annual outage with no
+    error shown to anyone.
+
+    Deliberately CONSERVATIVE so it scales without ever guessing wrong:
+      * if the configured company IS open, there is nothing to roll over;
+      * otherwise compare FY-stripped, whitespace/case-normalised base names;
+      * suggest ONLY when EXACTLY ONE open company matches that base. Two
+        candidates (or none) -> None, and a human decides.
+    Pure - unit tested.
+    """
+    if not configured or not open_companies:
+        return None
+    norm = _norm_company
+    want = norm(configured)
+    if any(norm(c) == want for c in open_companies):
+        return None                      # already open: no rollover
+    base = norm(strip_fy_suffix(configured))
+    if not base:
+        return None
+    hits = [c for c in open_companies if norm(strip_fy_suffix(c)) == base]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _norm_company(s: str) -> str:
+    return " ".join((s or "").split()).casefold()
 
 
 def cooldown_active(last_failure, now, cooldown_s) -> bool:
@@ -263,14 +315,36 @@ async def _drain_once(config: dict) -> int:
 
 
 async def run_drain_outbox(config: dict, interval: int = 20) -> None:
-    log_and_print("Outbox drainer started (delivers queued sends from this shop's WhatsApp).")
+    """Deliver EVERY connected company's queued sends from this shop's ONE number.
+
+    GAP-2 (silent data loss): this used to drain the PRIMARY token only, so a
+    second company's reminders queued up forever and were never sent - the shop
+    looked perfectly healthy (it synced, it listed debtors) while nothing went out.
+
+    GAP-5 (ban safety): every company shares ONE physical WhatsApp number, so they
+    must share ONE pacing budget. Draining them SEQUENTIALLY inside this single
+    loop is what enforces that - two companies can no longer double the number's
+    send rate, and bursts are the #1 ban trigger.
+
+    The company list is re-read each cycle so `--add-company` takes effect without
+    restarting the app.
+    """
+    entries = company_entries(config)
+    log_and_print("Outbox drainer started for %d company(ies): %s"
+                  % (len(entries), ", ".join(e["company_name"] for e in entries)))
     while True:
-        try:
-            n = await _drain_once(config)
-            if n:
-                log_and_print(f"Outbox: delivered {n} message(s).")
-        except Exception as e:                                # never let the loop die
-            log_and_print(f"Outbox drainer error (continuing): {e}", is_error=True)
+        try:                                  # pick up a newly added company
+            entries = company_entries(load_config()) or entries
+        except Exception:
+            pass                              # keep the last good list
+        for e in entries:
+            try:
+                n = await _drain_once(e)
+                if n:
+                    log_and_print(f"Outbox [{e['company_name']}]: delivered {n} message(s).")
+            except Exception as ex:           # never let the loop die
+                log_and_print(f"Outbox drainer error [{e.get('company_name')}] "
+                              f"(continuing): {ex}", is_error=True)
         await asyncio.sleep(interval)
 
 
@@ -584,6 +658,7 @@ async def run_watch(config: dict):
     _wait_noted = False      # so "waiting for Tally" is logged once, not every tick
     _canary_ok = False       # stage 3 passed; re-proved after every dropout
     _last_fail = None        # monotonic time a heavy read failed (Tally may be dead)
+    _rollover_hint = None    # an open company that looks like our FY rollover
 
     def _note_tally_failure() -> None:
         """A heavy read blew up - treat Tally as dead/restarting and stand down."""
@@ -606,6 +681,10 @@ async def run_watch(config: dict):
         except Exception:
             open_co = None                       # Tally not answering yet
             _canary_ok = False
+        # FY rollover: Tally is up but OUR company is gone, and exactly one open
+        # company shares its base name. Never stall silently on that - it is the
+        # predictable April outage.
+        _rollover_hint = fy_rollover_candidate(company, open_co) if open_co else None
         ok, _ready_since = readiness_decision(open_co, company, _ready_since, now, warmup_s)
         if not ok:
             _canary_ok = False
@@ -642,7 +721,14 @@ async def run_watch(config: dict):
         tally_ok = (await _tally_ready()) if heavy_due else False
         if heavy_due and not tally_ok:
             if not _wait_noted:
-                log_and_print(f"[{stamp}] Waiting for Tally to open and finish loading before reading...")
+                if _rollover_hint:
+                    log_and_print(
+                        f"[{stamp}] Tally is open but '{company}' is not - it looks like your "
+                        f"books rolled over to '{_rollover_hint}'. ASVA is NOT syncing until "
+                        f"this is confirmed. Switch ASVA to it in the app, or run: "
+                        f'agent --set-company "{_rollover_hint}"', is_error=True)
+                else:
+                    log_and_print(f"[{stamp}] Waiting for Tally to open and finish loading before reading...")
                 _wait_noted = True
         elif tally_ok:
             _wait_noted = False
