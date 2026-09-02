@@ -43,8 +43,11 @@ def _biz(token: str) -> dict:
 
 
 def _inr(v) -> str:
+    """Indian-grouped rupees (8,43,000) - NOT Python's western ',' (843,000).
+    A shopkeeper reads lakhs/crores; western grouping misreads at a glance."""
+    from app.services.templates import inr_digits
     try:
-        return f"{Decimal(str(v)):,.0f}"
+        return inr_digits(Decimal(str(v)))
     except Exception:
         return "0"
 

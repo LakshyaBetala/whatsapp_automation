@@ -396,7 +396,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     rows = []
     for c in clients:
         out = totals.get(c["id"], Decimal(0))
-        out_str = f"₹{out:,.0f}" if out else "-"
+        out_str = f"₹{_inr_digits(out)}" if out else "-"
         od = overdue_days.get(c["id"], 0)
         od_str = f"{od} din" if od else "-"
         # Phone is a click-to-edit button: parties whose number was never stored
@@ -620,7 +620,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
 <div class="sub">Tick = us party ko reminder ON. Batch, timing aur holidays: <b>Reminders</b> tab.</div>
 {_subscription_line(biz)}
 
-<div class="count"><b>{parties_n:,}</b> parties &middot; <b>{owing_n:,}</b> owe money now &middot; <b>&#8377;{total_out:,.0f}</b> outstanding</div>
+<div class="count"><b>{parties_n:,}</b> parties &middot; <b>{owing_n:,}</b> owe money now &middot; <b>&#8377;{_inr_digits(total_out)}</b> outstanding</div>
 
 <div id="todaycard" style="display:none;margin:10px 0 6px;border:1px solid #EAEAEA;border-radius:10px;padding:12px 14px;background:#fbfbfa"></div>
 
@@ -3980,7 +3980,10 @@ def _fetch_paged(db, table, cols, biz_id, status_in=None):
         start += 1000
 
 
-def _inr(n) -> str:
+def _inr_digits(n) -> str:
+    """Indian-grouped digits ONLY (28,29,452) - no currency prefix, for the many
+    places that already print a Rs/&#8377; glyph. Python's own ',' format is
+    WESTERN (2,829,280) and misreads at a glance to anyone counting in lakhs."""
     n = int(round(float(n or 0)))
     s = str(abs(n))
     if len(s) > 3:
@@ -3990,7 +3993,11 @@ def _inr(n) -> str:
         if rest:
             parts.insert(0, rest)
         s = ",".join(parts) + "," + last3
-    return ("Rs " + s)
+    return ("-" if n < 0 else "") + s
+
+
+def _inr(n) -> str:
+    return "Rs " + _inr_digits(n)
 
 
 @router.get("/admin/setup", response_class=HTMLResponse)

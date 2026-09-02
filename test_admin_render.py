@@ -136,3 +136,31 @@ def test_today_has_language_runtime(lang):
     text = _ok(asyncio.run(admin.admin_today(token="tok", lang=lang)))
     assert "function TT(" in text
     assert ('const LANG="%s"' % lang) in text
+
+
+# ── Indian number grouping ───────────────────────────────────────────────────
+# Python's ',' format is WESTERN (2,829,280). A shopkeeper counting in lakhs
+# misreads that at a glance; it must be 28,29,452.
+import re as _re
+from app.routers.admin import _inr, _inr_digits
+
+
+def test_inr_digits_is_indian_grouped():
+    assert _inr_digits(2829452) == "28,29,452"
+    assert _inr_digits(188182) == "1,88,182"
+    assert _inr_digits(256104108) == "25,61,04,108"
+    assert _inr_digits(999) == "999"
+    assert _inr_digits(0) == "0"
+
+
+def test_inr_keeps_its_prefix_once():
+    assert _inr(2829452) == "Rs 28,29,452"
+
+
+def test_dashboard_has_no_western_grouped_rupees():
+    """A western-grouped amount (3 digits, comma, exactly 3 digits, comma, 3
+    digits) must never reach the page - that is the 2,829,280 bug."""
+    resp = asyncio.run(admin.admin_page(token="tok", lang="english"))
+    html = _ok(resp)
+    bad = _re.findall(r"(?:&#8377;|₹|Rs\s?)\d{1,3},\d{3},\d{3}\b", html)
+    assert not bad, "western-grouped rupee amounts leaked: %s" % bad[:5]

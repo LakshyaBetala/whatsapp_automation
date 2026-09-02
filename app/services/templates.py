@@ -16,8 +16,11 @@ from __future__ import annotations
 from app.models import Lang
 
 
-def inr(amount) -> str:
-    """Format a number as Indian-grouped rupees: 843000 -> '8,43,000'."""
+def inr_digits(amount) -> str:
+    """Indian-grouped DIGITS only: 843000 -> '8,43,000'. No currency glyph, for
+    the many places that already print their own Rs/₹. Python's own ',' format
+    is WESTERN (843,000) and misreads at a glance to anyone counting in lakhs.
+    This is the single source of truth for Indian grouping."""
     try:
         n = int(round(float(amount)))
     except (TypeError, ValueError):
@@ -33,7 +36,17 @@ def inr(amount) -> str:
         if rest:
             parts.insert(0, rest)
         s = ",".join(parts) + "," + last3
-    return ("-" if n < 0 else "") + "₹" + s
+    return ("-" if n < 0 else "") + s
+
+
+def inr(amount) -> str:
+    """Indian-grouped rupees WITH the glyph: 843000 -> '₹8,43,000'."""
+    try:
+        float(amount)
+    except (TypeError, ValueError):
+        return str(amount)
+    d = inr_digits(amount)
+    return ("-" + "₹" + d[1:]) if d.startswith("-") else ("₹" + d)
 
 
 def balance_confirm_text(shop: str, amount, *, en: bool = False) -> str:
