@@ -76,3 +76,44 @@ def test_guid_only_when_present_in_payload():
 def test_norm_key_helper():
     assert _norm_ledger_key("  A   B ") == "a b"
     assert _norm_ledger_key(None) == ""
+
+
+# ── Lump dating (the "172 days" aging bug) ───────────────────────────────────
+# Dating every lump at FY start made a Dec-2025 debt read as ~172 days old (days
+# since 1-Apr) instead of its true age, which then drove the cadence, the chase
+# ranking and the DSO buckets from the wrong date.
+from app.routers.tally import _lump_dates
+
+FY = "2026-04-01"
+
+
+def _row(vnum, inv, due):
+    return (vnum, "ref", 100.0, inv, due)
+
+
+def test_lump_uses_oldest_billwise_date():
+    rows = [_row("b1", "2026-06-10", "2026-07-10"),
+            _row("b2", "2025-12-04", "2026-01-03"),   # the real oldest
+            _row("b3", "2026-02-01", "2026-03-01")]
+    assert _lump_dates(rows, None, FY) == ("2025-12-04", "2026-01-03")
+
+
+def test_lump_falls_back_to_prior_known_age():
+    # No bill-wise rows this refresh, but we already knew this party's oldest
+    # bill - that is what carries true age through an FY rollover.
+    assert _lump_dates([], ("2025-12-04", "2026-01-03"), FY) == ("2025-12-04", "2026-01-03")
+
+
+def test_lump_uses_fy_start_only_when_nothing_known():
+    assert _lump_dates([], None, FY) == (FY, FY)
+
+
+def test_billwise_beats_prior():
+    rows = [_row("b1", "2025-09-01", "2025-10-01")]
+    assert _lump_dates(rows, ("2026-01-01", "2026-02-01"), FY) == ("2025-09-01", "2025-10-01")
+
+
+def test_lump_never_invents_a_newer_date_than_known():
+    # The whole point: the chosen date must not be FY start when older data exists.
+    inv, _ = _lump_dates([], ("2025-12-04", "2026-01-03"), FY)
+    assert inv < FY

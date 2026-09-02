@@ -130,6 +130,20 @@ def readiness_decision(open_companies, company, ready_since, now, warmup_s):
     return (now - rs >= max(0, warmup_s)), rs
 
 
+def cooldown_active(last_failure, now, cooldown_s) -> bool:
+    """True while Tally must be left completely alone after a read that failed.
+
+    A heavy read that throws usually means Tally just DIED mid-export (the Memory
+    Access Violation that closes it). Retrying straight away hits a Tally that is
+    restarting and loading - which crashes it again, in a loop. So after any heavy
+    failure we stop touching Tally at all for `cooldown_s`, then restart the whole
+    warm-up. Pure function - unit tested.
+    """
+    if last_failure is None:
+        return False
+    return (now - last_failure) < max(0, cooldown_s)
+
+
 async def fetch_masters(config: dict, company: str, debtor_groups) -> str:
     """Memory-safe debtor-masters fetch.
 
@@ -553,24 +567,62 @@ async def run_watch(config: dict):
     ledgers_every = max(1800, int(config.get('deposit_ledgers_every_seconds', 21600) or 21600))
     failures = 0
 
-    # ── Tally readiness gate (see readiness_decision) ────────────────────────
-    warmup_s = max(0, int(config.get('tally_warmup_seconds', 20) or 20))
+    # ── Tally readiness gate (three stages + cooldown) ───────────────────────
+    # Why three stages: Tally answers the tiny COMPANY-LIST report while its
+    # company data is still loading into memory. Trusting that alone (and a short
+    # 20s warm-up) is what still let a big export hit a half-loaded Tally and
+    # close it with a Memory Access Violation. So a heavy read now needs:
+    #   1. Tally answering at all,
+    #   2. OUR company in its open list, and a longer warm-up to settle,
+    #   3. a SMALL REAL-DATA read (the group tree) that returns promptly - the
+    #      thing the company-list report cannot prove.
+    # Any heavy failure = assume we just killed Tally: back off completely for a
+    # cooldown, then restart the whole warm-up from scratch.
+    warmup_s = max(0, int(config.get('tally_warmup_seconds', 90) or 90))
+    cooldown_s = max(0, int(config.get('tally_cooldown_seconds', 180) or 180))
     _ready_since = None      # monotonic time Tally+company first looked ready
     _wait_noted = False      # so "waiting for Tally" is logged once, not every tick
+    _canary_ok = False       # stage 3 passed; re-proved after every dropout
+    _last_fail = None        # monotonic time a heavy read failed (Tally may be dead)
+
+    def _note_tally_failure() -> None:
+        """A heavy read blew up - treat Tally as dead/restarting and stand down."""
+        nonlocal _last_fail, _ready_since, _canary_ok
+        _last_fail = asyncio.get_event_loop().time()
+        _ready_since = None
+        _canary_ok = False
 
     async def _tally_ready() -> bool:
-        """Tiny company-list probe + warm-up. NEVER runs a heavy export, so it
-        cannot itself crash a loading Tally; it only decides when the big reads
-        are safe."""
-        nonlocal _ready_since
+        """Company-list probe + warm-up + a small real-data canary. NEVER runs a
+        heavy export, so it cannot itself crash a loading Tally; it only decides
+        when the big reads are safe."""
+        nonlocal _ready_since, _canary_ok
+        now = asyncio.get_event_loop().time()
+        if cooldown_active(_last_fail, now, cooldown_s):
+            return False                          # standing down after a crash
         try:
             xml = await fetch_and_parse(config, tally_xml.build_company_list_query(), timeout=6.0)
             open_co = tally_xml.parse_companies(xml)
         except Exception:
             open_co = None                       # Tally not answering yet
-        ok, _ready_since = readiness_decision(
-            open_co, company, _ready_since, asyncio.get_event_loop().time(), warmup_s)
-        return ok
+            _canary_ok = False
+        ok, _ready_since = readiness_decision(open_co, company, _ready_since, now, warmup_s)
+        if not ok:
+            _canary_ok = False
+            return False
+        if _canary_ok:
+            return True                           # already proved this streak
+        # Stage 3: the canary. A small, real read of the company's master data.
+        # If Tally is still loading this is slow or empty - so we keep waiting
+        # instead of firing a multi-MB export at it.
+        try:
+            gx = await fetch_and_parse(config, tally_xml.build_groups_query(company), timeout=12.0)
+            _canary_ok = bool(tally_xml.parse_groups(gx))
+        except Exception:
+            _canary_ok = False
+        if not _canary_ok:
+            log_and_print("Tally is up but still loading its data - holding off the big read.")
+        return _canary_ok
 
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
@@ -615,6 +667,7 @@ async def run_watch(config: dict):
                 raise
             except Exception as e:
                 failures += 1
+                _note_tally_failure()
                 log_and_print(f"[{stamp}] Send/sync failed ({e}).", is_error=True)
                 if failures in (5, 50):
                     log_and_print("Tally or backend unreachable for a while - check they are running.", is_error=True)
@@ -648,6 +701,7 @@ async def run_watch(config: dict):
         except KeyboardInterrupt:
             raise
         except Exception as e:
+            _note_tally_failure()
             log_and_print(f"[{stamp}] Outstanding refresh failed ({e}) - bills/heartbeat unaffected.", is_error=True)
 
         # Deposit-ledger cache (Cash/bank names for the confirm popup): heavy read,
@@ -659,6 +713,7 @@ async def run_watch(config: dict):
                     log_and_print(f"[{stamp}] Deposit accounts synced ({n}).")
                 last_ledgers = asyncio.get_event_loop().time()
         except Exception as e:
+            _note_tally_failure()
             log_and_print(f"[{stamp}] Deposit-ledger sync failed ({e}) - non-fatal.", is_error=True)
 
         # Confirmed-receipt drain: cheap backend check every ~25s; touches Tally
@@ -672,6 +727,7 @@ async def run_watch(config: dict):
         except KeyboardInterrupt:
             raise
         except Exception as e:
+            _note_tally_failure()
             log_and_print(f"[{stamp}] Receipt drain failed ({e}) - will retry.", is_error=True)
 
         await asyncio.sleep(folder_poll)

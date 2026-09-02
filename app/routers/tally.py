@@ -146,6 +146,29 @@ def _norm_ledger_key(s: Optional[str]) -> str:
     return " ".join((s or "").split()).casefold()
 
 
+def _lump_dates(bill_rows, prior, fy):
+    """The honest (invoice_date, due_date) for a party's lump balance bill.
+
+    A lump dated at FY start makes old debt look new: a Dec-2025 due showed as
+    "172 days" (days since 1-Apr) instead of its real age, and that wrong date
+    then drives the reminder cadence, the Today chase ranking and the DSO buckets.
+    So prefer, in order:
+      1. the party's own bill-wise rows - we have their real dates even when the
+         amounts do not reconcile to the ledger total (which is why we lump);
+      2. the oldest open bill we already hold for them - this is what carries a
+         party's true age through an FY rollover (same business, new books);
+      3. FY start, only when nothing at all is known.
+    bill_rows entries are (vnum, ref, amount, invoice_date, due_date).
+    Pure - unit tested.
+    """
+    if bill_rows:
+        oldest = min(bill_rows, key=lambda r: str(r[3]))
+        return oldest[3], oldest[4]
+    if prior:
+        return prior[0], prior[1]
+    return fy, fy
+
+
 def _make_outstanding_resolver(clients_by_ledger: dict, clients_by_guid: dict, parties):
     """Build the party matcher used by the AUTHORITATIVE outstanding refresh.
 
@@ -993,12 +1016,26 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     existing_bills: list = []
     for chunk in _chunked(list(target_ids), 100):
         existing_bills.extend(_fetch_all(lambda c=chunk: db.table("bills")
-                              .select("id, client_id, tally_voucher_number, amount")
+                              .select("id, client_id, tally_voucher_number, amount, "
+                                      "invoice_date, due_date")
                               .eq("business_id", biz)
                               .in_("client_id", c)
                               .in_("status", ["pending", "partial", "overdue"])))
     old_amount = {e["tally_voucher_number"]: float(e.get("amount") or 0)
                   for e in existing_bills if e.get("tally_voucher_number")}
+    # Oldest open bill we ALREADY hold per party. A lump dated at FY start makes an
+    # old debt look new (a Dec-2025 due showed as "172 days" = days since 1-Apr),
+    # which then drives the cadence, the chase ranking and the DSO buckets from the
+    # wrong date. Keeping the oldest date we know preserves a party's TRUE age
+    # across every refresh AND across an FY rollover (same business, new books).
+    oldest_prior: dict = {}
+    for e in existing_bills:
+        _cid, _inv = e.get("client_id"), e.get("invoice_date")
+        if not _cid or not _inv:
+            continue
+        _cur = oldest_prior.get(_cid)
+        if _cur is None or str(_inv)[:10] < _cur[0]:
+            oldest_prior[_cid] = (str(_inv)[:10], str(e.get("due_date") or _inv)[:10])
 
     # Build rows + snapshot + detect drops (payments).
     #
@@ -1016,14 +1053,18 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
     seen: dict = {}
     payments: list = []              # (client_id, paid_delta, remaining)
 
-    def _emit(cid, vnum, invoice_number, amount, inv, due):
+    def _emit(cid, vnum, invoice_number, amount, inv, due, opening=None):
         rows.append({
             "business_id": biz, "client_id": cid,
             "invoice_number": (invoice_number or vnum)[:60],
             "tally_voucher_number": vnum,
             "amount": round(float(amount), 2), "paid_amount": 0.0,
             "invoice_date": inv, "due_date": due or inv,
-            "status": "pending", "is_opening_balance": inv < fy,
+            "status": "pending",
+            # A lump IS a carried-forward balance, not a dated invoice, so it is
+            # always flagged opening - which also stops a credit-terms change from
+            # shifting a due date we never really knew.
+            "is_opening_balance": (inv < fy) if opening is None else bool(opening),
         })
         snap[cid].add(vnum)
         prev = old_amount.get(vnum)
@@ -1055,7 +1096,15 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
                 _emit(cid, vnum, ref, amt, inv, due)
         elif use_ledger:
             # Lump the exact ledger total so the party's dashboard matches Tally.
-            _emit(cid, f"LB-{cid}", "Balance", lb, fy, fy)
+            # DATE IT HONESTLY. Dating every lump at FY start understated the age of
+            # real debt (a Dec-2025 bill read as "172 days" = days since 1-Apr) and
+            # fed the cadence, chase ranking and DSO the wrong date. Use the oldest
+            # date we genuinely know: this party's own bill-wise rows first (we have
+            # their dates even when the amounts do not reconcile), then the oldest
+            # open bill we already hold (this is what carries true age through an FY
+            # rollover), and only then fall back to FY start.
+            l_inv, l_due = _lump_dates(bill_rows, oldest_prior.get(cid), fy)
+            _emit(cid, f"LB-{cid}", "Balance", lb, l_inv, l_due, opening=True)
         # else: old agent + no bill-wise data -> nothing to write for this party
 
     errors: list = []

@@ -81,3 +81,39 @@ def test_full_asva_first_then_tally_sequence():
     # Warm-up elapsed: NOW it is safe to read heavily.
     ready, since = rd([CO], CO, since, start + WARM + 1, WARM)
     assert ready
+
+
+# ── Post-crash cooldown ──────────────────────────────────────────────────────
+# A heavy read that throws usually means Tally just DIED mid-export. Retrying
+# immediately hits a restarting (loading) Tally and crashes it again, in a loop.
+# So after any heavy failure the agent must leave Tally completely alone for the
+# cooldown, then restart the whole warm-up.
+ca = agent.cooldown_active
+
+
+def test_cooldown_inactive_when_never_failed():
+    assert ca(None, 1000.0, 180) is False
+
+
+def test_cooldown_active_right_after_failure():
+    assert ca(1000.0, 1000.5, 180) is True
+
+
+def test_cooldown_active_just_before_expiry():
+    assert ca(1000.0, 1179.0, 180) is True
+
+
+def test_cooldown_expires_exactly_at_boundary():
+    assert ca(1000.0, 1180.0, 180) is False
+
+
+def test_cooldown_expired_long_after():
+    assert ca(1000.0, 5000.0, 180) is False
+
+
+def test_zero_cooldown_never_blocks():
+    assert ca(1000.0, 1000.0, 0) is False
+
+
+def test_negative_cooldown_treated_as_zero():
+    assert ca(1000.0, 1000.0, -5) is False
