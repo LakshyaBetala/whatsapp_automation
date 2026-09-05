@@ -39,7 +39,7 @@ start "ASVA HOST - WhatsApp (Bot)" "%~f0" bot
 echo.
 echo  Landing:         https://tryasva.com   (after TUNNEL.bat)
 echo  Command Center:  https://tryasva.com/ops
-echo  Scan the bot:    https://link.tryasva.com/qr  (with YOUR phone)
+echo  Scan the bot:    open the Command Center (/ops) and press Re-link now
 echo.
 echo Leave the two windows open. Close this launcher only.
 timeout /t 6 /nobreak >nul

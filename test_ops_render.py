@@ -91,3 +91,31 @@ def test_build_ops_data_never_raises():
     # JSON-serialisable (the /ops/data endpoint returns it as JSON).
     import json
     json.dumps(data, default=str)
+
+
+def test_ops_page_javascript_parses(tmp_path):
+    """The Command Center is one big inline <script>: a single syntax slip
+    blanks the whole operator console. Parse it with node when available."""
+    import re, shutil, subprocess
+    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    js = "\n;\n".join(re.findall(r"<script[^>]*>(.*?)</script>", html, re.S))
+    assert js.strip(), "no inline script found"
+    # Python's repr() is not a JS literal - `True` is an undefined identifier
+    # and throws before any of the console's code runs.
+    assert not re.findall(r"=\s*(True|False|None)\s*[;,)]", js)
+    node = shutil.which("node")
+    if not node:                      # CI without node: the checks above still ran
+        return
+    f = tmp_path / "ops.js"
+    f.write_text(js, encoding="utf-8")
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[:800]
+
+
+def test_relink_controls_are_present():
+    # The bot QR page is no longer reachable in a browser (localhost bind +
+    # WA_API_KEY), so re-linking MUST be possible from here.
+    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    for needle in ('id="walink"', 'id="wabody"', 'id="warelink"',
+                   "openWaLink", "doWaRelink", "/ops/wa-qr", "/ops/wa-relink"):
+        assert needle in html, "missing %s" % needle

@@ -223,7 +223,7 @@ def evaluate(health: dict) -> list[dict]:
                          "title": "Bot WhatsApp is disconnected",
                          "body": "The ASVA bot number on the host is not connected. "
                                  "Owner digests, alerts and replies are down. "
-                                 "Open link.tryasva.com/qr and re-link if needed."})
+                                 "Re-link it from the Command Center (/ops), Health tab."})
 
     for j in health.get("jobs", []):
         if j.get("stale"):

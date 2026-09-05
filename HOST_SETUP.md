@@ -72,7 +72,9 @@ Advanced alternative (CLI + `TUNNEL.bat`): `cloudflared tunnel login` -> `create
 - Recommended: in Cloudflare **Zero Trust -> Access**, add an application for `app.tryasva.com/ops*` allowing only **almmatix@gmail.com**.
 
 ### 6. Scan the bot WhatsApp
-Open `https://link.tryasva.com/qr` (or `http://localhost:3002/qr` on the i3) and scan with the phone holding **9344110272**.
+Open the **Command Center** (`https://app.tryasva.com/ops?key=<ADMIN_API_KEY>`), Health tab, and press **Re-link now**, then scan with the phone holding **9344110272**.
+
+`link.tryasva.com/qr` and `localhost:3002` now require `WA_API_KEY` (see `/etc/asva-bot.env` on the host); the Command Center proxies the QR so you only need the admin key.
 
 ### 7. Start on boot
 `Win+R` -> `shell:startup` -> drop a shortcut to **`ASVA_HOST.bat`** there. (The

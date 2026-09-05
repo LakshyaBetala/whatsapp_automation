@@ -329,6 +329,53 @@ def ops_delete_business(payload: DeleteBusinessPayload):
     return {"ok": True, "deleted": name, "rows": wiped}
 
 
+def _bot_wa_base() -> str:
+    base = (settings.platform_wa_url or "").strip()
+    if not base:
+        raise HTTPException(status_code=503,
+                            detail="PLATFORM_WA_URL is not set on this host.")
+    return base.rstrip("/")
+
+
+@router.get("/wa-qr")
+async def ops_wa_qr(key: str = Query(default="")):
+    """Bot WhatsApp link state + the pairing QR, behind the operator key.
+
+    wa_service is bound to localhost and needs its own WA_API_KEY, so its /qr
+    page is no longer reachable from a browser. Proxying it here means the
+    operator re-links with the ONE credential they already use for the Command
+    Center, instead of keeping a second secret to hand."""
+    if not _key_ok(key):
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    try:
+        async with httpx.AsyncClient(timeout=8) as h:
+            r = await h.get(_bot_wa_base() + "/api/wa/status",
+                            headers=whatsapp.wa_auth_headers())
+            r.raise_for_status()
+            d = r.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("bot WhatsApp status unreachable: %s", exc)
+        return JSONResponse({"reachable": False, "error": str(exc)[:200]})
+    return JSONResponse({"reachable": True, "ready": bool(d.get("ready")),
+                         "qr": d.get("qr"), "registered": bool(d.get("registered"))})
+
+
+@router.post("/wa-relink")
+async def ops_wa_relink(key: str = Query(default="")):
+    """Log the bot number out and produce a fresh QR (the escape hatch when
+    linking is stuck). Destructive on purpose: the UI confirms first."""
+    if not _key_ok(key):
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    async with httpx.AsyncClient(timeout=20) as h:
+        r = await h.post(_bot_wa_base() + "/api/wa/relink",
+                         headers=whatsapp.wa_auth_headers())
+        r.raise_for_status()
+    log.info("bot WhatsApp relink requested from the Command Center")
+    return JSONResponse({"ok": True})
+
+
 class SendCodePayload(BaseModel):
     admin_key: str
     business_id: str
@@ -541,6 +588,17 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .tfck input{accent-color:#2f8f52}
  .tfcount{color:#6f8a7b;font-size:.8rem;margin-left:auto}
 </style></head><body>
+<div id="walink" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:50">
+  <div style="background:#fff;border:1px solid #EAEAEA;border-radius:12px;padding:26px;max-width:380px;text-align:center">
+    <h3 style="margin:0 0 4px;letter-spacing:-.02em">Bot WhatsApp</h3>
+    <div class="muted" style="margin-bottom:12px">The ASVA number that sends owner digests and replies.</div>
+    <div id="wabody"><p class="muted">Loading&hellip;</p></div>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:center">
+      <button id="warelink" onclick="doWaRelink()">Re-link (fresh QR)</button>
+      <button onclick="closeWaLink()">Close</button>
+    </div>
+  </div>
+</div>
 <div class="top">
   <h1>ASVA Command Center<span id="statuspill" class="statuspill ok" onclick="showTab('health')" title="Jump to Health">checking...</span></h1>
   <div class="meta"><button class="add" onclick="openAdd()">+ Add business</button>
@@ -993,7 +1051,7 @@ async function loadHealth(){
     renderIssues(open);   // keep the top banner fresh on the Health tab too
     // Bot WhatsApp down is a critical, host-level outage - surface it explicitly
     // (bw is the bot_wa status already read above in this function).
-    if(bw && bw.configured && bw.ok===false){ showBanner('down','<b>&#9888; ASVA bot WhatsApp is disconnected.</b> Owner digests, alerts and replies are down. Re-link at link.tryasva.com/qr on the host. <a href="#" onclick="showTab(\'health\');return false">See Health &#8594;</a>'); }
+    if(bw && bw.configured && bw.ok===false){ showBanner('down','<b>&#9888; ASVA bot WhatsApp is disconnected.</b> Owner digests, alerts and replies are down. <a href="#" onclick="openWaLink();return false"><b>Re-link now &#8594;</b></a> <a href="#" onclick="showTab(\'health\');return false">See Health &#8594;</a>'); }
     let kpi=K.map(k=>'<div class="kpi '+k[2]+'"><div class="n">'+inr(t[k[0]]||0)+'</div><div class="l">'+k[1]+'</div></div>').join('');
     kpi+='<div class="kpi '+((t.wa_down||0)?'bad':'good')+'"><div class="n">'+inr(t.wa_down||0)+'</div><div class="l">WhatsApp down</div></div>';
     kpi+='<div class="kpi '+(open.length?'bad':'good')+'"><div class="n">'+open.length+'</div><div class="l">Open alerts</div></div>';
@@ -1070,4 +1128,53 @@ setInterval(loadAssistant, 30000);
 loadSupport();   // populate the Requests badge on boot, whatever tab is open
 setInterval(()=>{ if(TAB==='health') loadHealth(); else if(TAB==='requests') loadSupport(); else load(); }, 30000);
 setInterval(loadSupport, 60000);   // keep the pending-requests badge fresh on any tab
+
+// -- Bot WhatsApp re-link ------------------------------------------------
+// wa_service is localhost-only and key-protected now, so its /qr page cannot
+// be opened in a browser. Re-link here with the operator key this page
+// already holds - no second secret to look up when the bot drops.
+let WA_POLL = null;
+function openWaLink(){
+  document.getElementById('walink').style.display='flex';
+  pollWa(); WA_POLL = setInterval(pollWa, 4000);
+}
+function closeWaLink(){
+  document.getElementById('walink').style.display='none';
+  if(WA_POLL){ clearInterval(WA_POLL); WA_POLL=null; }
+}
+async function pollWa(){
+  const box = document.getElementById('wabody');
+  try{
+    const r = await fetch('/ops/wa-qr?key='+encodeURIComponent(KEY));
+    if(!r.ok) throw new Error('http '+r.status);
+    const d = await r.json();
+    if(!d.reachable){
+      box.innerHTML = '<p class="bad">The bot WhatsApp service is not reachable on this host.</p>'
+        + '<p class="muted">Check that asva-bot is running, then try again.</p>';
+    } else if(d.ready){
+      box.innerHTML = '<p class="good" style="font-size:1.1em"><b>Connected.</b></p>'
+        + '<p class="muted">Owner digests, alerts and replies are working.</p>';
+    } else if(d.qr){
+      box.innerHTML = '<p>Scan with the phone holding the ASVA number '
+        + '(WhatsApp &rarr; Linked devices &rarr; Link a device):</p>'
+        + '<img src="'+d.qr+'" width="260" height="260" alt="Pairing QR">'
+        + '<p class="muted">The code refreshes itself. This box updates on its own.</p>';
+    } else {
+      box.innerHTML = '<p class="muted">Waiting for a fresh QR&hellip;</p>';
+    }
+  }catch(e){
+    box.innerHTML = '<p class="bad">Could not read the link state.</p>';
+  }
+}
+async function doWaRelink(){
+  if(!confirm('Log the ASVA number out and start a fresh link?')) return;
+  const b = document.getElementById('warelink');
+  b.disabled = true; b.textContent = 'Working...';
+  try{
+    const r = await fetch('/ops/wa-relink?key='+encodeURIComponent(KEY), {method:'POST'});
+    if(!r.ok) throw new Error('http '+r.status);
+    document.getElementById('wabody').innerHTML = '<p class="muted">Logged out. A fresh QR is coming&hellip;</p>';
+  }catch(e){ alert('Could not re-link. Check that asva-bot is running.'); }
+  b.disabled = false; b.textContent = 'Re-link (fresh QR)';
+}
 </script></body></html>"""

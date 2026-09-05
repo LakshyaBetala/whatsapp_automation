@@ -104,4 +104,4 @@ ssh <i3> "journalctl -u asva-bot -n 80 --no-pager"       # bot WhatsApp logs
 ssh <i3> "bash <path>/deploy/linux/asva_status.sh"       # one-glance status
 ```
 Command Center (from any browser): `https://app.tryasva.com/ops?key=<ADMIN_API_KEY>`
-Re-scan the bot WhatsApp: `https://link.tryasva.com/qr` (scan with 9344110272).
+Re-scan the bot WhatsApp: Command Center (`/ops?key=<ADMIN_API_KEY>`) -> Health -> **Re-link now** (scan with 9344110272). The raw `link.tryasva.com/qr` needs `WA_API_KEY` from `/etc/asva-bot.env`.
