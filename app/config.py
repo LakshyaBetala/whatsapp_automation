@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # CLIENT never renews itself - only you, the operator, with this key. Set
     # ADMIN_API_KEY in .env; while it stays empty, all ops endpoints refuse.
     admin_api_key: str = ""
+    # Shared secret for wa_service's own HTTP API (x-asva-key). The bot host is
+    # reachable from the internet through its Cloudflare tunnel, and every
+    # wa_service route can send WhatsApp as that number, log the session out, or
+    # hand out a fresh pairing QR - so it must be authenticated there. Blank
+    # keeps a shop's local wa_service working unchanged.
+    wa_api_key: str = ""
     # 30-day billing cycle: one paid "month" = this many days.
     subscription_cycle_days: int = 30
     # Folder the website serves the downloadable shop app from (put ASVA_shop.zip

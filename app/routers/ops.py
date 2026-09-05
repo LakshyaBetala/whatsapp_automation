@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import require_db
 from app.models import PLAN_LABELS, PLAN_LIMITS, Plan
-from app.services import alerts, monitoring
+from app.services import alerts, monitoring, whatsapp
 from app.services import subscription as subs
 
 log = logging.getLogger(__name__)
@@ -382,7 +382,8 @@ async def ops_health(key: str = Query("")):
     if base:
         try:
             async with httpx.AsyncClient(timeout=6) as h:
-                r = await h.get(base.rstrip("/") + "/api/wa/status")
+                r = await h.get(base.rstrip("/") + "/api/wa/status",
+                                headers=whatsapp.wa_auth_headers())
                 bot_ok = bool(r.json().get("ready"))
         except Exception:
             bot_ok = False

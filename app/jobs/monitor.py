@@ -13,6 +13,7 @@ import httpx
 from app.config import settings
 from app.db import require_db
 from app.services import alerts, monitoring
+from app.services import whatsapp
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +26,8 @@ async def _check_bot_wa() -> bool | None:
         return None
     try:
         async with httpx.AsyncClient(timeout=8) as http:
-            r = await http.get(base.rstrip("/") + "/api/wa/status")
+            r = await http.get(base.rstrip("/") + "/api/wa/status",
+                               headers=whatsapp.wa_auth_headers())
             return bool(r.json().get("ready"))
     except Exception:
         return False   # configured but unreachable = down

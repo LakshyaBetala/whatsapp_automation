@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.db import require_db
 from app.models import PLAN_LIMITS, Plan
+from app.services import whatsapp
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["businesses"])
@@ -175,7 +176,8 @@ async def get_whatsapp_qr(business_id: str):
 
     try:
         async with httpx.AsyncClient(timeout=5) as http:
-            resp = await http.get(f"{settings.openwa_url}/api/wa/status")
+            resp = await http.get(f"{settings.openwa_url}/api/wa/status",
+                                  headers=whatsapp.wa_auth_headers())
             resp.raise_for_status()
             return resp.json()
     except Exception as e:

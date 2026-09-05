@@ -33,6 +33,7 @@ import httpx
 from app.config import settings
 from app.db import require_db
 from app.services import pdf as pdf_service
+from app.services import whatsapp
 
 log = logging.getLogger(__name__)
 
@@ -141,7 +142,8 @@ async def run() -> None:
 
         try:
             async with httpx.AsyncClient(timeout=60) as http:
-                resp = await http.post(f"{settings.openwa_url}/api/wa/send", json=r["payload"])
+                resp = await http.post(f"{settings.openwa_url}/api/wa/send", json=r["payload"],
+                                       headers=whatsapp.wa_auth_headers())
                 resp.raise_for_status()
                 data = resp.json()
                 if not data.get("success", True):

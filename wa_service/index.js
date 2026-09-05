@@ -51,6 +51,7 @@ const https = require('https');
 const { URL } = require('url');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Stay alive through transient errors instead of crashing + re-QR looping.
 process.on('unhandledRejection', (e) => console.error('unhandledRejection:', (e && e.message) || e));
@@ -170,6 +171,16 @@ const WA_TOKEN = process.env.WA_TOKEN || '';
 // assistant number (set on the host bot service + backend). Shop channel proves
 // itself with WA_TOKEN instead, so this stays empty on shop laptops.
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+// Shared secret guarding this service's OWN HTTP API. Every route here can send
+// WhatsApp messages as this number, log the session out, or hand a fresh pairing
+// QR to whoever asks - so exposing them unauthenticated is account takeover.
+// Empty = open (a shop laptop reachable only from its own machine); the internet
+// facing bot host MUST set it.
+const WA_API_KEY = process.env.WA_API_KEY || '';
+// Bind address. The bot host serves this through a Cloudflare tunnel that
+// connects from localhost, so binding to 127.0.0.1 removes the public-IP path
+// entirely while keeping the tunnel working.
+const BIND_HOST = process.env.WA_BIND_HOST || '0.0.0.0';
 let allowSet = null;                 // null = not loaded yet -> fail open
 function _last10(n) { const d = String(n || '').replace(/\D/g, ''); return d.length > 10 ? d.slice(-10) : d; }
 async function refreshAllowlist() {
@@ -582,10 +593,26 @@ async function start() {
 
 // ── HTTP API (unchanged shape) ──────────────────────────────────────────
 const app = express();
-app.use(cors());
+// A wide-open CORS policy let ANY web page call this API from a visitor's
+// browser. Same-origin only; the backend talks to us server-to-server.
+app.use(cors({ origin: false }));
 app.use(express.json({ limit: '10mb' }));
 
-app.get('/api/wa/status', (req, res) => {
+// ── Auth guard ────────────────────────────────────────────────────────────
+// Constant-time compare so the key cannot be recovered a byte at a time.
+function keyOk(req) {
+    if (!WA_API_KEY) return true;                    // not configured = open
+    const given = String(req.get('x-asva-key') || req.query.key || '');
+    const a = Buffer.from(given), b = Buffer.from(WA_API_KEY);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function requireKey(req, res, next) {
+    if (keyOk(req)) return next();
+    console.warn(`Rejected unauthenticated ${req.method} ${req.path}`);
+    return res.status(401).json({ success: false, error: 'unauthorized' });
+}
+
+app.get('/api/wa/status', requireKey, (req, res) => {
     res.json({ ready: clientReady, qr: qrCodeData, registered, last_close_code: lastCloseCode });
 });
 
@@ -594,7 +621,7 @@ app.get('/api/wa/status', (req, res) => {
 // a half-dead registration for this session. The fix is a REAL logout
 // (clears the server side), a clean local wipe, and a fresh QR - plus
 // removing the old entry in the phone's Linked Devices.
-app.post('/api/wa/relink', async (req, res) => {
+app.post('/api/wa/relink', requireKey, async (req, res) => {
     console.log('RELINK requested: logging out, wiping session, fresh QR coming.');
     gen += 1;   // orphan the old socket first so nothing races the wipe
     try { if (sock) await sock.logout(); } catch (e) { /* best-effort: server may be unreachable */ }
@@ -621,7 +648,7 @@ const QR_HELP = `
         style="padding:10px 18px;font-size:1em;cursor:pointer">Re-link (fresh QR)</button>
     </div>`;
 
-app.get('/qr', (req, res) => {
+app.get('/qr', requireKey, (req, res) => {
     if (clientReady) return res.send('<h2>&#9989; WhatsApp is connected.</h2>' + QR_HELP);
     if (!qrCodeData) {
         return res.send('<h2>&#9203; Getting a fresh QR&hellip; this page refreshes itself.</h2><script>setTimeout(()=>location.reload(),3000)</script>');
@@ -633,7 +660,7 @@ app.get('/qr', (req, res) => {
         <script>setTimeout(()=>location.reload(),8000)</script>`);
 });
 
-app.post('/api/wa/send', async (req, res) => {
+app.post('/api/wa/send', requireKey, async (req, res) => {
     if (!clientReady || !sock) {
         return res.status(503).json({ success: false, error: 'WhatsApp not ready' });
     }
@@ -676,8 +703,8 @@ app.post('/api/wa/send', async (req, res) => {
     }
 });
 
-const server = app.listen(PORT, () => {
-    console.log(`WhatsApp Background Service (Baileys) running on port ${PORT} [channel=${WA_CHANNEL}, session=${SESSION_ID}]`);
+const server = app.listen(PORT, BIND_HOST, () => {
+    console.log(`WhatsApp Background Service (Baileys) on ${BIND_HOST}:${PORT} [channel=${WA_CHANNEL}, session=${SESSION_ID}, auth=${WA_API_KEY ? 'on' : 'OFF'}]`);
     console.log(`Forwarding inbound messages to ${BACKEND_URL}/webhooks/aisensy`);
     // Port bound = we are the only instance. NOW it is safe to connect WhatsApp.
     start();

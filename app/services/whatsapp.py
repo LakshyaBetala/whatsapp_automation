@@ -37,6 +37,17 @@ async def _check_usage_and_increment(business_id: str, plan: Plan) -> bool:
     return bool(data.get("allowed", False))
 
 
+
+def wa_auth_headers() -> dict | None:
+    """Auth header for wa_service's own HTTP API, or None when unconfigured.
+
+    Every wa_service route can send WhatsApp as that number, log the session out
+    or hand out a pairing QR, so the internet-reachable bot host requires this.
+    A shop's local wa_service leaves WA_API_KEY empty and is unaffected."""
+    key = (settings.wa_api_key or "").strip()
+    return {"x-asva-key": key} if key else None
+
+
 async def send_message(
     *,
     business_id: str,
@@ -181,9 +192,12 @@ async def send_message(
     if channel == "platform" and settings.platform_wa_url:
         base_url = settings.platform_wa_url
 
+    wa_headers = wa_auth_headers()
+
     try:
         async with httpx.AsyncClient(timeout=30) as http:
-            resp = await http.post(f"{base_url}/api/wa/send", json=payload)
+            resp = await http.post(f"{base_url}/api/wa/send", json=payload,
+                                   headers=wa_headers)
             resp.raise_for_status()
             resp_data = resp.json()
             if not resp_data.get("success", True):
