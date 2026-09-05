@@ -216,7 +216,7 @@ async def _generate_and_deliver(
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/create", response_model=BillCreateResponse, status_code=201)
-async def create_bill(payload: BillCreate, background_tasks: BackgroundTasks):
+def create_bill(payload: BillCreate, background_tasks: BackgroundTasks):
     """Create a bill manually (non-Tally flow).
 
     Auto-calculates due_date from client's credit_days.
@@ -278,7 +278,7 @@ async def create_bill(payload: BillCreate, background_tasks: BackgroundTasks):
 
 
 @router.get("/{business_id}", response_model=list[BillListItem])
-async def list_bills(
+def list_bills(
     business_id: str,
     status: Optional[str] = Query(default=None, description="Filter: pending, partial, paid, overdue"),
     client_id: Optional[str] = Query(default=None, description="Filter by client UUID"),

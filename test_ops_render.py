@@ -54,8 +54,18 @@ def test_ops_page_renders_with_key():
     # New controls/transparency elements are present.
     for needle in ('id="statuspill"', 'id="hfilter"', 'id="sfilter"',
                    'id="hprob"', 'id="sprob"', "applyHFilter", "applySFilter",
-                   "setStatusPill"):
+                   "setStatusPill", "sendCodeWA", "/ops/send-code",
+                   'id="p_sendmsg"', 'id="a_sendmsg"'):
         assert needle in html, "missing %s" % needle
+
+
+def test_ops_send_code_bad_key_refused():
+    from fastapi import HTTPException
+    try:
+        asyncio.run(ops.ops_send_code(ops.SendCodePayload(admin_key="nope", business_id="b1")))
+        assert False, "should refuse a bad key"
+    except HTTPException as e:
+        assert e.status_code == 401
 
 
 def test_ops_page_wrong_key_shows_login_not_500():

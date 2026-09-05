@@ -5,6 +5,7 @@ the business, and every owner-facing reply comes back in that language ("English
 chosen -> pure English everywhere"). Unknown values never crash - they fall back
 to English.
 """
+from conftest import maybe_await
 import asyncio
 import sys
 from unittest.mock import MagicMock
@@ -97,6 +98,6 @@ def test_set_language_endpoint_persists(monkeypatch):
         def table(self, name): return _Q()
 
     monkeypatch.setattr(lr, "require_db", lambda: _DB())
-    out = asyncio.run(lr.set_language(lr.SetLanguagePayload(agent_token="tok", language="hi")))
+    out = maybe_await(lr.set_language(lr.SetLanguagePayload(agent_token="tok", language="hi")))
     assert out["owner_language"] == "hinglish"
     assert saved == {"owner_language": "hinglish"}    # normalised value written

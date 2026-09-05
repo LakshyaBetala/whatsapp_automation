@@ -125,7 +125,7 @@ def _extract(body: dict) -> tuple[str | None, str | None, str | None]:
 # ── GET: Meta verification handshake ──────────────────────────────────
 
 @router.get("/aisensy")
-async def verify_webhook(
+def verify_webhook(
     hub_mode: str | None = Query(default=None, alias="hub.mode"),
     hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
@@ -145,7 +145,7 @@ async def verify_webhook(
 
 
 @router.get("/allowlist")
-async def wa_allowlist(token: str = Query(default="")):
+def wa_allowlist(token: str = Query(default="")):
     """The shop's own customer numbers (last 10 digits) for the given agent token.
 
     Privacy: the shop's wa_service uses this to forward ONLY messages from its

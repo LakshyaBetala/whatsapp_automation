@@ -207,6 +207,36 @@ def _make_outstanding_resolver(clients_by_ledger: dict, clients_by_guid: dict, p
     return resolve
 
 
+def _flag_setup_problem(db, business_id: str, problem: str) -> None:
+    """Record a setup problem on the business (best-effort, never fails a sync).
+
+    Surfaced on the owner's dashboard and in the Command Center so a shop that
+    is technically 'online' but importing nothing can never read as healthy."""
+    try:
+        db.table("businesses").update({
+            "setup_problem": problem[:400],
+            "setup_problem_at": _dt_now_iso(),
+        }).eq("id", business_id).execute()
+    except Exception:
+        log.exception("could not flag setup problem for business %s", business_id)
+
+
+def _clear_setup_problem(db, business_id: str) -> None:
+    """Clear the flag once real data flows again (best-effort)."""
+    try:
+        db.table("businesses").update({
+            "setup_problem": None, "setup_problem_at": None,
+        }).eq("id", business_id).execute()
+    except Exception:
+        log.debug("could not clear setup problem for business %s", business_id,
+                  exc_info=True)
+
+
+def _dt_now_iso() -> str:
+    import datetime as _d
+    return _d.datetime.now(_d.timezone.utc).isoformat()
+
+
 def _verify_token(business_id: uuid.UUID, agent_token: str):
     db = require_db()
     resp = db.table("businesses").select("agent_token").eq("id", str(business_id)).execute()
@@ -230,7 +260,7 @@ def _biz_default_credit_days(db, business_id) -> int:
         return 30
 
 @router.get("/pending-refresh")
-async def pending_refresh(business_id: uuid.UUID, agent_token: str):
+def pending_refresh(business_id: uuid.UUID, agent_token: str):
     """Agent polls this each watch tick. Returns whether the owner pressed
     'Reload data' (an override that forces an immediate outstanding refresh
     instead of waiting for the 5-min auto cycle). Cleared by /outstandings."""
@@ -265,7 +295,7 @@ class DepositLedgersPayload(BaseModel):
 
 
 @router.post("/deposit-ledgers")
-async def push_deposit_ledgers(payload: DepositLedgersPayload):
+def push_deposit_ledgers(payload: DepositLedgersPayload):
     """The agent reports the shop's Cash/Bank ledger names (read from Tally) so
     the confirm popup can offer the owner their own deposit accounts."""
     db = _verify_token(payload.business_id, payload.agent_token)
@@ -286,7 +316,7 @@ def _receipt_out(rows: list) -> dict:
 
 
 @router.get("/receipts/confirmed")
-async def receipts_confirmed(business_id: uuid.UUID, agent_token: str):
+def receipts_confirmed(business_id: uuid.UUID, agent_token: str):
     """Read-only peek at owner-approved receipts (does NOT claim them)."""
     db = _verify_token(business_id, agent_token)
     from app.services import receipts_queue as rq
@@ -299,7 +329,7 @@ class ClaimPayload(BaseModel):
 
 
 @router.post("/receipts/claim")
-async def receipts_claim(payload: ClaimPayload):
+def receipts_claim(payload: ClaimPayload):
     """The agent CLAIMS confirmed receipts for posting: they flip confirmed ->
     posting and are returned once. A claimed (posting) receipt is never handed out
     again, so a lost report never causes a double post into Tally. The agent then
@@ -320,7 +350,7 @@ class ReceiptReportPayload(BaseModel):
 
 
 @router.post("/receipts/report")
-async def receipts_report(payload: ReceiptReportPayload):
+def receipts_report(payload: ReceiptReportPayload):
     """The agent reports the outcome of writing a confirmed receipt into Tally.
     Success -> 'posted' (keeps the voucher id + allocation for revert/audit);
     failure -> 'failed' (with the error surfaced to the owner in the app)."""
@@ -340,7 +370,7 @@ class RegisterCompanyPayload(BaseModel):
 
 
 @router.post("/companies/register")
-async def register_company(payload: RegisterCompanyPayload):
+def register_company(payload: RegisterCompanyPayload):
     """Add another Tally company under an existing customer account.
 
     Each Tally company gets its OWN businesses row = its own fully isolated
@@ -912,7 +942,7 @@ def _run_reconcile(db, biz: str, all_clients: list, all_parties: list, parties: 
 
 
 @router.post("/outstandings")
-async def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: BackgroundTasks):
+def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: BackgroundTasks):
     """Make Tally's bill-by-bill OUTSTANDING the source of truth.
 
     Each open bill is upserted (keyed by tally_voucher_number = TB-<client>-<ref>)
@@ -929,6 +959,34 @@ async def import_outstandings(payload: TallyOutstandingsPayload, background_task
 
     biz_row = db.table("businesses").select("plan").eq("id", biz).limit(1).execute()
     plan_name = biz_row.data[0]["plan"] if biz_row.data else "starter"
+
+    # ── A refresh that finds NO customers is a broken setup, not a quiet day ──
+    # A shop whose Tally groups customers under a renamed reserved group (or
+    # outside the Sundry Debtors tree) sends an EMPTY party list on every cycle.
+    # That used to log records_synced=0 / success=true / error=null, so the sync
+    # looked clean and the owner's dashboard said "All clear" on a shop that had
+    # never imported a single party. Flag it loudly, server-side, so it surfaces
+    # even for agents too old to report the problem themselves.
+    if not payload.parties and not payload.all_parties:
+        _flag_setup_problem(
+            db, biz,
+            "Tally answered but ASVA could not find any customers in it. This "
+            "usually means the customer group is named something other than "
+            "Sundry Debtors. Nothing has been changed.")
+        try:
+            db.table("tally_syncs").insert({
+                "business_id": biz, "sync_type": "poll", "records_synced": 0,
+                "success": False,
+                "error": "no debtor parties returned by the agent - "
+                         "customer group not found in Tally",
+            }).execute()
+        except Exception:
+            log.exception("failed to log the empty-parties diagnostic")
+        return {"ok": False, "reason": "no_parties",
+                "detail": "No customers found in Tally. Check the customer group name."}
+
+    # Parties are flowing again -> clear any stale setup problem.
+    _clear_setup_problem(db, biz)
 
     _all_clients = _fetch_all(lambda: db.table("clients")
                               .select("id, tally_ledger_name, name, whatsapp_number, language, tally_guid, archived_at")

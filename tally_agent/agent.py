@@ -453,14 +453,26 @@ async def check_company(config: dict):
     except Exception as e:
         log_and_print(f"Could not verify company list (continuing): {e}", is_error=True)
 
+async def fetch_debtor_groups(config: dict, company: str):
+    """(debtor_groups, group_parent) for THIS company, rename-proof.
+
+    Tally lets a shop RENAME a reserved primary group, so matching the literal
+    string "Sundry Debtors" silently returned ZERO customers for such a company
+    while every sync still reported success. We now resolve the root by its
+    RESERVEDNAME (which keeps the original English label after a rename) and
+    only then fall back to the display name."""
+    groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
+    group_parent = tally_xml.parse_groups(groups_xml)
+    reserved = tally_xml.parse_group_reserved(groups_xml)
+    return tally_xml.debtor_group_names(group_parent, reserved), group_parent
+
+
 async def run_import(config: dict):
     log_and_print("Starting Initial Outstanding Import (no TDL needed)...")
     company = config['company_name']
 
     # 1. Group tree -> which groups hold customers (street/route subgroups)
-    groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
-    group_parent = tally_xml.parse_groups(groups_xml)
-    debtor_groups = tally_xml.debtor_group_names(group_parent)
+    debtor_groups, group_parent = await fetch_debtor_groups(config, company)
     log_and_print(f"Found {len(debtor_groups)} customer groups under Sundry Debtors.")
 
     # 2. All ledgers -> debtors with balances + phone numbers
@@ -893,8 +905,7 @@ async def run_check_outstanding(config: dict):
     today = date.today()
     log_and_print("Fetching bill-by-bill outstanding from Tally (PREVIEW - nothing will change)...")
 
-    groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
-    debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
+    debtor_groups, group_parent = await fetch_debtor_groups(config, company)
     masters_xml = await fetch_masters(config, company, debtor_groups)
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
     debtor_names = {d['name'] for d in debtors}
@@ -945,12 +956,35 @@ async def run_apply_outstanding(config: dict, reconcile: bool = False):
     to archive parties no longer in Tally (owner pressed 'Clean up')."""
     company = config['company_name']
     emit_progress(1, 4, "Reading customer list from Tally")
-    groups_xml = await fetch_and_parse(config, tally_xml.build_groups_query(company))
-    debtor_groups = tally_xml.debtor_group_names(tally_xml.parse_groups(groups_xml))
+    debtor_groups, group_parent = await fetch_debtor_groups(config, company)
     emit_progress(2, 4, "Reading customers from Tally")
     masters_xml = await fetch_masters(config, company, debtor_groups)
     debtors = tally_xml.parse_masters(masters_xml, debtor_groups)
     debtor_names = sorted({d['name'] for d in debtors})
+
+    # ── Tally answered, but it holds no customers we can see ──────────────
+    # Almost always the customer group is named something other than Sundry
+    # Debtors. Returning quietly here is what let a shop sit at "0 parties /
+    # All clear" for days, so tell the backend explicitly: it flags the
+    # business and the owner's dashboard stops claiming everything is fine.
+    if not debtors:
+        tops = ", ".join(tally_xml.top_level_groups(group_parent)[:12]) or "none"
+        log_and_print(
+            "Tally answered but ASVA found NO customers. The customer group is "
+            f"probably not called 'Sundry Debtors'. Top-level groups here: {tops}",
+            is_error=True)
+        try:
+            await send_to_backend(
+                config['backend_url'], '/tally/outstandings', config['agent_token'],
+                {"business_id": config['business_id'],
+                 "agent_token": config['agent_token'],
+                 "company_name": company,
+                 "bills": [], "all_parties": [], "parties": [],
+                 "ledger_balances": {}, "contacts": [], "reconcile": False})
+        except Exception as e:
+            log_and_print(f"Could not report the empty customer list: {e}", is_error=True)
+        emit_progress(4, 4, "Done")
+        return
 
     # Ledger ClosingBalance per party = Tally's authoritative "owes today" total.
     # The backend uses this as the source of truth for the amount and only keeps

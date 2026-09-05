@@ -195,9 +195,16 @@ def _collection_query(objtype: str, methods: List[str], company: str = "") -> st
 
 
 def build_groups_query(company: str = "") -> str:
-    """All account groups (name + parent) - used to find every subgroup
-    under Sundry Debtors (shops group customers by street/route)."""
-    return _collection_query('Group', ['Name', 'Parent'], company)
+    """All account groups (name + parent + reserved name).
+
+    Used to find every subgroup under Sundry Debtors (shops group customers by
+    street/route). RESERVEDNAME is fetched because Tally lets a shop RENAME a
+    reserved primary group: a company whose debtors sit under "Party A/c" or
+    "Debtors" still carries RESERVEDNAME "Sundry Debtors", so matching on the
+    reserved name finds the real root where matching the display name cannot.
+    (A shop with a renamed group otherwise reported ZERO debtors forever while
+    every sync looked successful.)"""
+    return _collection_query('Group', ['Name', 'Parent', 'ReservedName'], company)
 
 
 _MASTERS_FIELDS = [
@@ -566,6 +573,24 @@ def parse_companies(xml_text: str) -> List[str]:
     return [n for n in (_elem_name(c) for c in root.iter('COMPANY')) if n]
 
 
+def parse_group_reserved(xml_text: str) -> Dict[str, str]:
+    """Group name -> RESERVEDNAME (empty for a user-created group).
+
+    Only Tally's built-in groups carry a reserved name, and it keeps the ORIGINAL
+    English label after the shop renames the group. That makes it the only
+    rename-proof way to identify the Sundry Debtors root."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return {}
+    out: Dict[str, str] = {}
+    for g in root.iter('GROUP'):
+        name = _elem_name(g)
+        if name:
+            out[name] = (g.findtext('RESERVEDNAME', '') or '').strip()
+    return out
+
+
 def parse_groups(xml_text: str) -> Dict[str, str]:
     """Group name -> parent group name."""
     try:
@@ -580,20 +605,58 @@ def parse_groups(xml_text: str) -> Dict[str, str]:
     return out
 
 
-def debtor_group_names(group_parent: Dict[str, str]) -> Set[str]:
-    """Every group that descends from 'Sundry Debtors' (plus the root)."""
+DEBTOR_RESERVED = 'sundry debtors'
+
+
+def debtor_root_names(group_parent: Dict[str, str],
+                      reserved: Optional[Dict[str, str]] = None) -> Set[str]:
+    """The group(s) that ARE the Sundry Debtors root in THIS company.
+
+    Resolution order, most reliable first:
+      1. RESERVEDNAME == 'Sundry Debtors'  - survives a rename ("Party A/c").
+      2. the literal display name           - older agents / no reserved name.
+      3. the literal string as a last resort so behaviour never gets worse.
+    """
+    roots: Set[str] = set()
+    for g, rn in (reserved or {}).items():
+        if (rn or '').strip().lower() == DEBTOR_RESERVED:
+            roots.add(g)
+    if not roots:
+        roots = {g for g in group_parent if g.strip().lower() == DEBTOR_RESERVED}
+    if not roots:
+        roots = {'Sundry Debtors'}
+    return roots
+
+
+def debtor_group_names(group_parent: Dict[str, str],
+                       reserved: Optional[Dict[str, str]] = None) -> Set[str]:
+    """Every group that descends from the Sundry Debtors root (plus the root).
+
+    `reserved` (group -> RESERVEDNAME, from parse_group_reserved) makes this
+    rename-proof; without it the behaviour is exactly as before."""
+    roots = debtor_root_names(group_parent, reserved)
+    lowered_roots = {r.strip().lower() for r in roots}
+
     def under(g: str) -> bool:
         seen = set()
         while g and g not in seen:
-            if g.strip().lower() == 'sundry debtors':
+            if g.strip().lower() in lowered_roots:
                 return True
             seen.add(g)
             g = group_parent.get(g, '')
         return False
 
     result = {g for g in group_parent if under(g)}
-    result.add('Sundry Debtors')
+    result |= roots
     return result
+
+
+def top_level_groups(group_parent: Dict[str, str]) -> List[str]:
+    """Groups with no parent - what this company actually uses at the top.
+
+    Reported when the debtor walk finds nothing, so the operator can SEE the
+    shop's real chart of accounts instead of guessing at it remotely."""
+    return sorted(g for g, parent in group_parent.items() if not (parent or '').strip())
 
 
 def parse_masters(xml_text: str, debtor_groups: Set[str]) -> List[Dict[str, Any]]:

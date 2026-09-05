@@ -4,6 +4,7 @@ the trilingual translator and the Today + Payments pages started 500ing in prod:
 the money-math unit tests all passed because none of them actually rendered a
 page. This does, for english / hinglish / hindi.
 """
+from conftest import maybe_await
 import asyncio
 import sys
 from unittest.mock import MagicMock
@@ -97,13 +98,13 @@ def _ok(resp):
 ])
 def test_admin_pages_render(page, lang):
     fn = getattr(admin, page)
-    resp = asyncio.run(fn(token="tok", lang=lang))
+    resp = maybe_await(fn(token="tok", lang=lang))
     _ok(resp)
 
 
 @pytest.mark.parametrize("lang", LANGS)
 def test_party_page_renders(lang):
-    resp = asyncio.run(admin.admin_party(token="tok", client_id="c1", lang=lang))
+    resp = maybe_await(admin.admin_party(token="tok", client_id="c1", lang=lang))
     _ok(resp)
 
 
@@ -113,7 +114,7 @@ def test_manual_payment_enqueue_does_not_crash():
     # Tally" 500'd ("Could not save") while the WhatsApp PAID path worked. Exercise
     # the POST endpoint end to end (page-render tests never hit it).
     from app.routers.admin import PromiseActionPayload
-    out = asyncio.run(admin.admin_promise_action(
+    out = maybe_await(admin.admin_promise_action(
         PromiseActionPayload(token="tok", client_id="c1", action="enqueue",
                              amount=5000, deposit_ledger="INDIAN BANK",
                              receipt_date="2026-08-28")))
@@ -123,7 +124,7 @@ def test_manual_payment_enqueue_does_not_crash():
 def test_dashboard_collapses_to_cards_on_narrow():
     # P2: the 9-column parties table must carry per-cell labels + a narrow-width
     # media query so WhatsApp + Actions never scroll off-screen on a small laptop.
-    text = _ok(asyncio.run(admin.admin_page(token="tok", lang="hinglish")))
+    text = _ok(maybe_await(admin.admin_page(token="tok", lang="hinglish")))
     assert "@media (max-width:760px)" in text
     assert 'data-label="Actions"' in text
     assert 'data-label="WhatsApp"' in text
@@ -133,7 +134,7 @@ def test_dashboard_collapses_to_cards_on_narrow():
 @pytest.mark.parametrize("lang", LANGS)
 def test_today_has_language_runtime(lang):
     # The Today page must ship the TT() runtime so its JS-built strings localise.
-    text = _ok(asyncio.run(admin.admin_today(token="tok", lang=lang)))
+    text = _ok(maybe_await(admin.admin_today(token="tok", lang=lang)))
     assert "function TT(" in text
     assert ('const LANG="%s"' % lang) in text
 
@@ -160,7 +161,31 @@ def test_inr_keeps_its_prefix_once():
 def test_dashboard_has_no_western_grouped_rupees():
     """A western-grouped amount (3 digits, comma, exactly 3 digits, comma, 3
     digits) must never reach the page - that is the 2,829,280 bug."""
-    resp = asyncio.run(admin.admin_page(token="tok", lang="english"))
+    resp = maybe_await(admin.admin_page(token="tok", lang="english"))
     html = _ok(resp)
     bad = _re.findall(r"(?:&#8377;|₹|Rs\s?)\d{1,3},\d{3},\d{3}\b", html)
     assert not bad, "western-grouped rupee amounts leaked: %s" % bad[:5]
+
+
+def test_no_python_literals_leak_into_dashboard_javascript():
+    """A Python value embedded with repr() is not always a JS literal.
+
+    `{flag!r}` on a bool emits `True`, which JS reads as an UNDEFINED IDENTIFIER:
+    the whole <script> throws on load and the dashboard renders blank for every
+    shop. node --check does not catch it (it is valid syntax, a runtime
+    ReferenceError), so guard it here.
+    """
+    import re
+    html = _ok(maybe_await(admin.admin_page(token="tok", lang="english")))
+    js = "\n".join(re.findall(r"<script[^>]*>(.*?)</script>", html, re.S))
+    bad = re.findall(r"=\s*(True|False|None)\s*[;,)]", js)
+    assert not bad, f"Python literals leaked into the dashboard JS: {set(bad)}"
+
+
+def test_dashboard_exposes_setup_problem_and_party_state():
+    # The dashboard must be able to tell "nothing to do" apart from "nothing
+    # imported" - a shop that never imported a party must never read All clear.
+    html = _ok(maybe_await(admin.admin_page(token="tok", lang="english")))
+    assert "const SETUP_PROBLEM =" in html
+    assert "const HAS_PARTIES =" in html
+    assert "No customers imported yet" in html

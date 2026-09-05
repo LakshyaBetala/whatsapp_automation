@@ -73,6 +73,11 @@ class HeartbeatPayload(BaseModel):
     agent_version: Optional[str] = None
     wa_ready: Optional[bool] = None       # shop's own WhatsApp connected? (health)
     outbox_pending: Optional[int] = None  # queued sends the shop still owes
+    # A setup problem the agent detected that makes the shop LOOK healthy while
+    # being useless - e.g. Tally answers but no customer group could be found, so
+    # zero parties sync forever. Empty string clears it. Kept as free text so a
+    # new class of problem needs no migration.
+    setup_problem: Optional[str] = None
 
 
 _BIZ_COLS = ("id, business_name, plan, plan_expires_on, license_key, "
@@ -88,7 +93,7 @@ def _biz_by_token(db, token: str) -> dict:
 
 
 @router.post("/heartbeat")
-async def heartbeat(payload: HeartbeatPayload):
+def heartbeat(payload: HeartbeatPayload):
     """Record the client as alive and return the authoritative subscription
     state (plan, expiry, remaining messages, debtor cap, feature flags, update
     info). Safe to call often; it is cheap and idempotent."""
@@ -109,6 +114,11 @@ async def heartbeat(payload: HeartbeatPayload):
         update["wa_checked_at"] = now_iso
     if payload.outbox_pending is not None:
         update["outbox_pending"] = max(0, int(payload.outbox_pending))
+    if payload.setup_problem is not None:
+        # "" means the agent is healthy again -> clear the flag.
+        problem = payload.setup_problem.strip()[:400]
+        update["setup_problem"] = problem or None
+        update["setup_problem_at"] = now_iso if problem else None
     try:
         db.table("businesses").update(update).eq("id", biz["id"]).execute()
     except Exception:
@@ -126,7 +136,7 @@ class SetLanguagePayload(BaseModel):
 
 
 @router.post("/set-language")
-async def set_language(payload: SetLanguagePayload):
+def set_language(payload: SetLanguagePayload):
     """The app saves the owner's chosen language (english | hinglish) here, so the
     WhatsApp assistant answers the owner in the SAME language as the app. Scoped
     to the one business by its agent_token; unknown values normalise to English."""
@@ -142,7 +152,7 @@ async def set_language(payload: SetLanguagePayload):
 
 
 @router.get("/status")
-async def status(token: str):
+def status(token: str):
     """Read-only status for a dashboard/browser (no liveness write). Same body
     as the heartbeat, keyed by the agent token as a query param."""
     db = require_db()
@@ -160,7 +170,7 @@ class CreateBizPayload(BaseModel):
 
 
 @router.post("/create-business")
-async def create_business(payload: CreateBizPayload, background_tasks: BackgroundTasks):
+def create_business(payload: CreateBizPayload, background_tasks: BackgroundTasks):
     """OPS ONLY: onboard a new shop. Creates the business row and mints its
     agent_token + licence key + first paid cycle, and returns them so the
     operator can drop the token into the new shop's config. The agent_token is
@@ -211,7 +221,7 @@ class PairPayload(BaseModel):
 
 
 @router.post("/pair")
-async def pair(payload: PairPayload):
+def pair(payload: PairPayload):
     """PUBLIC: a fresh install redeems a one-time pairing code (minted by the
     operator) to receive its business identity + agent_token. The code IS the
     bearer credential - single use, short-lived - so there is deliberately no
@@ -232,7 +242,7 @@ class OutboxPullPayload(BaseModel):
 
 
 @router.post("/outbox/pull")
-async def outbox_pull(payload: OutboxPullPayload):
+def outbox_pull(payload: OutboxPullPayload):
     """THIN CLIENT: a keyless shop pulls its own queued customer sends to deliver
     from its WhatsApp. The agent_token scopes this to that one business; the
     server withholds everything outside the shop's send window."""
@@ -250,7 +260,7 @@ class OutboxAckPayload(BaseModel):
 
 
 @router.post("/outbox/ack")
-async def outbox_ack(payload: OutboxAckPayload):
+def outbox_ack(payload: OutboxAckPayload):
     """THIN CLIENT: report the outcome of a delivery the shop attempted. On a
     confirmed send the server mirrors the audit row and drops the stored PDF."""
     db = require_db()
@@ -268,7 +278,7 @@ class MintCodePayload(BaseModel):
 
 
 @router.post("/mint-code")
-async def mint_code(payload: MintCodePayload):
+def mint_code(payload: MintCodePayload):
     """OPS ONLY: mint a pairing code for an EXISTING business - e.g. re-pair a
     shop onto a fresh install (its DB-stored reminders carry over untouched)."""
     _require_admin(payload.admin_key)
@@ -296,7 +306,7 @@ class RenewPayload(BaseModel):
 
 
 @router.post("/renew")
-async def renew(payload: RenewPayload):
+def renew(payload: RenewPayload):
     """OPS ONLY: mark a business paid - extend its 30-day cycle (and optionally
     set its plan). The client can NEVER call this; it needs ADMIN_API_KEY.
 
@@ -348,7 +358,7 @@ class RenewUntilPayload(BaseModel):
 
 
 @router.post("/renew-until")
-async def renew_until(payload: RenewUntilPayload):
+def renew_until(payload: RenewUntilPayload):
     """OPS ONLY: set a business's access to last until an EXACT date (not a
     +N-month cycle) - e.g. free Pro for a pilot shop until 2026-09-15. Optionally
     moves the plan tier. Reversible with /suspend or another /renew-until."""
@@ -379,7 +389,7 @@ class SetPlanPayload(BaseModel):
 
 
 @router.post("/set-plan")
-async def set_plan(payload: SetPlanPayload):
+def set_plan(payload: SetPlanPayload):
     """OPS ONLY: change a business's plan tier WITHOUT touching its expiry."""
     _require_admin(payload.admin_key)
     db = require_db()
@@ -400,7 +410,7 @@ class SuspendPayload(BaseModel):
 
 
 @router.post("/suspend")
-async def suspend(payload: SuspendPayload):
+def suspend(payload: SuspendPayload):
     """OPS ONLY: cut a business off now (non-payment) by expiring it past the
     grace window. Sends stop immediately (server-side). Reversible with /renew."""
     _require_admin(payload.admin_key)

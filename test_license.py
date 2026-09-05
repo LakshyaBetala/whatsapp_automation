@@ -5,6 +5,7 @@ Covers licence-key shape, the status -> feature-flags mapping (paid actions
 stop when suspended, read-only sync stays on), and build_heartbeat assembling
 the right numbers for active / grace / suspended businesses.
 """
+from conftest import maybe_await
 import datetime as _dt
 import re
 import sys
@@ -157,7 +158,7 @@ def test_heartbeat_endpoint_reflects_reported_version(monkeypatch):
     _patch_counts(monkeypatch, debtors=1, used=0)
     monkeypatch.setattr(lr.lic.settings, "app_min_version", "1.8.0")
 
-    hb = asyncio.run(lr.heartbeat(lr.HeartbeatPayload(
+    hb = maybe_await(lr.heartbeat(lr.HeartbeatPayload(
         agent_token="tok", agent_version="1.8.4")))   # this ping: current
     assert hb["below_min"] is False
 
@@ -247,7 +248,7 @@ def test_create_business_endpoint_admin_gate(monkeypatch):
     from fastapi import BackgroundTasks, HTTPException
     monkeypatch.setattr(lr.settings, "admin_api_key", "s3cret")
     try:
-        asyncio.run(lr.create_business(lr.CreateBizPayload(
+        maybe_await(lr.create_business(lr.CreateBizPayload(
             admin_key="wrong", owner_name="x", whatsapp_number="9876543210"),
             BackgroundTasks()))
         assert False, "should have refused"
@@ -264,7 +265,7 @@ def test_renew_endpoint_admin_gate(monkeypatch):
     # key unset -> 503 (feature disabled)
     monkeypatch.setattr(lr.settings, "admin_api_key", "")
     try:
-        asyncio.run(lr.renew(lr.RenewPayload(admin_key="x", agent_token="t")))
+        maybe_await(lr.renew(lr.RenewPayload(admin_key="x", agent_token="t")))
         assert False, "should have refused"
     except HTTPException as e:
         assert e.status_code == 503
@@ -272,7 +273,7 @@ def test_renew_endpoint_admin_gate(monkeypatch):
     # key set but wrong -> 401
     monkeypatch.setattr(lr.settings, "admin_api_key", "s3cret")
     try:
-        asyncio.run(lr.renew(lr.RenewPayload(admin_key="wrong", agent_token="t")))
+        maybe_await(lr.renew(lr.RenewPayload(admin_key="wrong", agent_token="t")))
         assert False, "should have refused"
     except HTTPException as e:
         assert e.status_code == 401

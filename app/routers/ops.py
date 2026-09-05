@@ -82,7 +82,7 @@ def build_ops_data(db) -> dict:
     # (1) all businesses
     bizes = _paged(lambda: db.table("businesses").select(
         "id, business_name, plan, plan_expires_on, license_key, last_seen, "
-        "agent_version, whatsapp_number"))
+        "agent_version, whatsapp_number, setup_problem"))
     # (2) this-month usage, one query -> dict
     used_by: dict = {}
     for r in _paged(lambda: db.table("usage").select("business_id, message_count")
@@ -146,6 +146,9 @@ def build_ops_data(db) -> dict:
             "messages_used": used,
             "messages_limit": int(limits["messages"]),
             "failed_today": failed,
+            # Online + syncing but importing nothing (e.g. the customer group is
+            # not called Sundry Debtors). Looks perfectly healthy without this.
+            "setup_problem": (b.get("setup_problem") or "").strip() or None,
         })
 
     # sort: problems first (suspended, then grace, then most days-left), online last
@@ -201,14 +204,14 @@ def _latest_release(db) -> tuple[str, bool]:
 
 
 @router.get("/data")
-async def ops_data(key: str = Query("")):
+def ops_data(key: str = Query("")):
     if not _key_ok(key):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
     return JSONResponse(build_ops_data(require_db()))
 
 
 @router.get("/support")
-async def ops_support(key: str = Query("")):
+def ops_support(key: str = Query("")):
     """Every TEAM/support request an owner sent, so the operator can see who asked
     what, and when - and mark each resolved."""
     if not _key_ok(key):
@@ -218,7 +221,7 @@ async def ops_support(key: str = Query("")):
 
 
 @router.get("/assistant")
-async def ops_assistant(key: str = Query("")):
+def ops_assistant(key: str = Query("")):
     """The marketing/bot assistant switch + recent leads (founder-only)."""
     if not _key_ok(key):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
@@ -234,7 +237,7 @@ class AssistantTogglePayload(BaseModel):
 
 
 @router.post("/assistant/toggle")
-async def ops_assistant_toggle(payload: AssistantTogglePayload):
+def ops_assistant_toggle(payload: AssistantTogglePayload):
     """Founder flips the global auto-pitch switch. Owner commands are unaffected."""
     if not _key_ok(payload.admin_key):
         raise HTTPException(status_code=401, detail="Invalid admin key")
@@ -249,7 +252,7 @@ class LeadResumePayload(BaseModel):
 
 
 @router.post("/assistant/resume")
-async def ops_assistant_resume(payload: LeadResumePayload):
+def ops_assistant_resume(payload: LeadResumePayload):
     """Clear a lead's hand-over so the assistant handles it again from here."""
     if not _key_ok(payload.admin_key):
         raise HTTPException(status_code=401, detail="Invalid admin key")
@@ -265,7 +268,7 @@ class SupportResolvePayload(BaseModel):
 
 
 @router.post("/support/resolve")
-async def ops_support_resolve(payload: SupportResolvePayload):
+def ops_support_resolve(payload: SupportResolvePayload):
     if not _key_ok(payload.admin_key):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
     from app.services import support
@@ -294,7 +297,7 @@ _BUSINESS_DATA_TABLES = (
 
 
 @router.post("/delete-business")
-async def ops_delete_business(payload: DeleteBusinessPayload):
+def ops_delete_business(payload: DeleteBusinessPayload):
     """DPDP delete-on-request: erase a business and ALL its data (its customers'
     numbers, bills, messages, receipts). Admin-gated + name-confirmed so it can
     never fire by accident. Irreversible - the shop's data is gone."""
@@ -324,6 +327,45 @@ async def ops_delete_business(payload: DeleteBusinessPayload):
         raise HTTPException(status_code=500, detail="Data wiped but the business row could not be removed - retry.")
     log.info("delete-business: erased %s (%s) rows=%s", payload.business_id, name, wiped)
     return {"ok": True, "deleted": name, "rows": wiped}
+
+
+class SendCodePayload(BaseModel):
+    admin_key: str
+    business_id: str
+
+
+@router.post("/send-code")
+async def ops_send_code(payload: SendCodePayload):
+    """Send the shop owner their setup/pairing code + the drafted welcome message
+    on WhatsApp (from the bot number), so the operator does not have to read it out
+    over the phone. Reuses the SAME message as onboarding (license._send_welcome)
+    and the SAME idempotent code as 'Get code', so pressing it twice sends the same
+    code, never a new pile."""
+    if not _key_ok(payload.admin_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin key")
+    db = require_db()
+    r = (db.table("businesses")
+         .select("id, business_name, owner_name, whatsapp_number")
+         .eq("id", payload.business_id).limit(1).execute()).data
+    if not r:
+        raise HTTPException(status_code=404, detail="Business not found")
+    biz = r[0]
+    num = "".join(ch for ch in str(biz.get("whatsapp_number") or "") if ch.isdigit())
+    if len(num) < 10:
+        raise HTTPException(status_code=400,
+                            detail="This shop has no WhatsApp number on file - add one, then send the code.")
+    from app.services import pairing
+    from app.routers.license import _send_welcome
+    out = (pairing.active_code(db, payload.business_id)
+           or pairing.mint(db, payload.business_id, ttl_hours=24, note="ops send-code"))
+    code_disp = out.get("code_display") or out.get("code") or ""
+    try:
+        await _send_welcome(payload.business_id, biz.get("owner_name"), code_disp)
+    except Exception:
+        log.exception("ops send-code: welcome send failed for %s", payload.business_id)
+        raise HTTPException(status_code=502,
+                            detail="Could not send on WhatsApp - is the bot number connected? Try again.")
+    return {"ok": True, "sent_to": "..." + num[-4:], "code_display": code_disp}
 
 
 @router.get("/health")
@@ -549,6 +591,8 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
     <div class="kv"><div class="l">Agent token (secret)</div><div class="v"><span id="r_tok"></span><button class="copy" onclick="cp('r_tok')">Copy</button></div></div>
     <div class="kv"><div class="l">Shop config.json</div><div class="v"><span id="r_cfg"></span><button class="copy" onclick="cp('r_cfg')">Copy</button></div></div>
   </details>
+  <div id="a_sendmsg" style="color:#7fe0a6;font-size:.85rem;min-height:16px;margin:6px 0 8px">Sent to the owner on WhatsApp automatically. Use the button to re-send.</div>
+  <button class="go" style="background:#123524;border:1px solid #2c5c42;color:#cfe6d8;margin-bottom:8px" onclick="sendCodeWA(ADD_BID,'a_sendmsg')">Re-send code to owner on WhatsApp</button>
   <button class="go" onclick="closeAdd()">Done</button>
  </div>
 </div>
@@ -565,6 +609,8 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
     <li>Type this code when it asks.</li>
     <li>It reconnects to <b>this same business</b>, so every reminder and setting is kept.</li>
   </ol></div>
+  <div id="p_sendmsg" style="color:#7fe0a6;font-size:.85rem;min-height:16px;margin:2px 0 8px"></div>
+  <button class="go" style="background:#123524;border:1px solid #2c5c42;color:#cfe6d8;margin-bottom:8px" onclick="sendCodeWA(PAIR_BID,'p_sendmsg')">Send code to owner on WhatsApp</button>
   <button class="go" onclick="closePair()">Done</button>
  </div>
 </div>
@@ -639,6 +685,17 @@ const inr = n => (n||0).toLocaleString('en-IN');
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Basic',growth:'Growth',pro:'Pro',max:'Custom'};
 let PUBLIC_URL='';
+let PAIR_BID='', ADD_BID='';
+// Send the drafted welcome + setup code to the owner on WhatsApp (bot number).
+async function sendCodeWA(bid, msgId){
+  const m=msgId&&document.getElementById(msgId);
+  if(!bid){ if(m)m.textContent='No shop selected.'; return; }
+  if(m)m.textContent='Sending on WhatsApp...';
+  const x=await post('/ops/send-code',{admin_key:KEY,business_id:bid});
+  if(m)m.textContent = x.ok
+    ? ('Sent to '+(x.j.sent_to||'the owner')+' on WhatsApp.')
+    : ('Could not send: '+((x.j&&x.j.detail)||'is the bot connected? try again'));
+}
 
 // A failed data/health fetch is one of two things. A 401/403 means the operator key
 // went stale (a redeploy rotates it), so bounce to the key screen where a single
@@ -797,8 +854,10 @@ async function delBiz(id,name){
 async function pairCode(id,name){
   const x=await post('/license/mint-code',{admin_key:KEY,business_id:id,ttl_hours:24});
   if(!x.ok){flash(x.j.detail||'Could not create a code');return;}
+  PAIR_BID=id;
   document.getElementById('p_name').textContent=name;
   document.getElementById('p_code').textContent=x.j.code_display||x.j.code;
+  document.getElementById('p_sendmsg').textContent='';
   document.getElementById('pairModal').classList.add('show');
 }
 function closePair(){document.getElementById('pairModal').classList.remove('show');}
@@ -830,6 +889,7 @@ async function doAdd(){
   const x=await post('/license/create-business',body);
   btn.disabled=false;btn.textContent='Create business';
   if(!x.ok){document.getElementById('addErr').textContent=x.j.detail||'Could not create.';return;}
+  ADD_BID=x.j.business_id||'';
   const cfg=JSON.stringify({
     backend_url:PUBLIC_URL||'https://tryasva.com',
     business_id:x.j.business_id,
@@ -954,8 +1014,12 @@ async function loadHealth(){
       const vcur=(b.version&&b.version!=='-'&&b.version===d.server_version);
       const vcell=(!b.version||b.version==='-')?'<span class="muted">not reported</span>'
         :('<span'+(vcur?'':' class="warnv" title="Older than the server build - the shop will update when it next opens ASVA"')+'>'+esc(b.version)+'</span>');
-      const prob = !b.online || b.wa_ready===false || (b.failed_today>0) || (b.queued>0) || (b.status && b.status!=='active');
-      return '<tr data-name="'+esc(b.name).toLowerCase()+'" data-prob="'+(prob?'1':'0')+'"><td>'+esc(b.name)+'</td>'+
+      const prob = !b.online || b.wa_ready===false || (b.failed_today>0) || (b.queued>0) || (b.status && b.status!=='active') || !!b.setup_problem;
+      // A shop can be online, current and sending, yet importing ZERO customers.
+      // Flag it on the NAME so it cannot be mistaken for a healthy row.
+      const setup = b.setup_problem
+        ? '<div class="warnv" style="font-size:.85em;margin-top:2px" title="'+esc(b.setup_problem)+'">&#9888; no customers importing</div>' : '';
+      return '<tr data-name="'+esc(b.name).toLowerCase()+'" data-prob="'+(prob?'1':'0')+'"><td>'+esc(b.name)+setup+'</td>'+
         '<td><span class="pill '+b.status+'">'+b.status+'</span></td>'+
         '<td><span class="dot '+(b.online?'on':'off')+'"></span>'+(b.online?'online':'offline')+'</td>'+
         '<td>'+vcell+'</td>'+

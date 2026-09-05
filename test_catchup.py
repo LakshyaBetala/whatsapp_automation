@@ -10,6 +10,7 @@ sweep that DID run at the batch hour keeps same-day catch-up automatic.
 
 Also covers /admin/skip-today: cancel ONE party's reminder for today.
 """
+from conftest import maybe_await
 import asyncio
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -77,7 +78,7 @@ def _run(monkeypatch, fake, hour):
     monkeypatch.setattr(bot_svc, "_send_consolidated_reminder", fake_consolidated)
     monkeypatch.setattr(rs.whatsapp, "send_template", fake_template)
 
-    asyncio.run(rs.run())
+    maybe_await(rs.run())
     return sends, alerts
 
 
@@ -174,7 +175,7 @@ def test_skip_today_marks_points_skipped(monkeypatch):
     monkeypatch.setattr(adm, "require_db", lambda: fake)
     monkeypatch.setattr(adm, "_biz_by_token", lambda token: biz)
 
-    res = asyncio.run(adm.admin_skip_today(
+    res = maybe_await(adm.admin_skip_today(
         adm.SkipTodayPayload(token="t", client_id="c1")))
 
     assert res["ok"] is True

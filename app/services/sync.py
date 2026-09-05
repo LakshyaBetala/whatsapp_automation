@@ -184,6 +184,32 @@ async def ingest(payload: TallySyncPayload) -> TallySyncResult:
                 "Payment apply failed: %s - %s", receipt.ledger_name, exc
             )
 
+    # ── Broken-setup detection ────────────────────────────────────────
+    # Tally is handing us real vouchers whose parties we cannot match, AND this
+    # shop has no customers at all. That is not a mismatch to resolve by hand -
+    # the debtor import has never worked (usually the customer group is not
+    # called "Sundry Debtors", so the group walk returns nothing). Flag it, or
+    # the shop sits at "0 parties / All clear" forever while every sync reports
+    # success. Detected HERE because /tally/sync keeps ticking even when the
+    # outstanding refresh bails out early, so this catches shops whose agent is
+    # too old to report the problem itself.
+    unmatched = [e for e in errors if "unmatched_ledger:" in e]
+    if unmatched:
+        try:
+            n_clients = (db.table("clients").select("id", count="exact")
+                         .eq("business_id", str(payload.business_id))
+                         .limit(1).execute().count or 0)
+            if n_clients == 0:
+                from app.routers.tally import _flag_setup_problem
+                _flag_setup_problem(
+                    db, str(payload.business_id),
+                    "Tally is sending ASVA your invoices, but ASVA cannot find "
+                    "any customers in it. This usually means your customer group "
+                    "is named something other than Sundry Debtors. Nothing in "
+                    "Tally has been changed.")
+        except Exception:
+            log.debug("setup-problem detection skipped", exc_info=True)
+
     # ── Audit log ─────────────────────────────────────────────────────
     total_records = bills_created + payments_applied
     await _log_sync(

@@ -61,7 +61,7 @@ class UsageResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=BusinessResponse, status_code=201)
-async def register_business(payload: BusinessRegister):
+def register_business(payload: BusinessRegister):
     """Onboard a new SMB owner. Returns the business_id the Tally agent needs."""
     db = require_db()
 
@@ -121,7 +121,7 @@ async def register_business(payload: BusinessRegister):
 
 
 @router.get("/{business_id}/usage", response_model=UsageResponse)
-async def get_usage(business_id: str):
+def get_usage(business_id: str):
     """Return message usage vs plan limit for current month."""
     db = require_db()
 

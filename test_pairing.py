@@ -5,6 +5,7 @@ redeems it and receives the agent_token - no token is ever typed by hand. These
 tests cover mint/redeem, single-use, expiry, the unambiguous alphabet, and the
 admin gate on /license/mint-code plus the public /license/pair error mapping.
 """
+from conftest import maybe_await
 import asyncio
 import datetime as _dt
 import sys
@@ -162,7 +163,7 @@ def test_mint_code_endpoint_admin_gate(monkeypatch):
     from fastapi import HTTPException
     monkeypatch.setattr(lr.settings, "admin_api_key", "s3cret")
     try:
-        asyncio.run(lr.mint_code(lr.MintCodePayload(
+        maybe_await(lr.mint_code(lr.MintCodePayload(
             admin_key="wrong", business_id="b1")))
         assert False, "should refuse a bad admin key"
     except HTTPException as e:
@@ -175,12 +176,12 @@ def test_pair_endpoint_maps_bad_code_to_400(monkeypatch):
     db = FakeDB(); db.add_business()
     monkeypatch.setattr(lr, "require_db", lambda: db)
     try:
-        asyncio.run(lr.pair(lr.PairPayload(code="ZZZZ9999")))
+        maybe_await(lr.pair(lr.PairPayload(code="ZZZZ9999")))
         assert False, "unknown code should 400"
     except HTTPException as e:
         assert e.status_code == 400
 
     # a freshly minted code pairs successfully through the endpoint
     code = pairing.mint(db, "b1")["code"]
-    res = asyncio.run(lr.pair(lr.PairPayload(code=code)))
+    res = maybe_await(lr.pair(lr.PairPayload(code=code)))
     assert res["ok"] and res["agent_token"] == "tok-secret-123"

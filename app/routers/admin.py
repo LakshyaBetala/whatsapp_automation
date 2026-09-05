@@ -39,7 +39,7 @@ def _biz_by_token(token: str) -> dict:
                     "discount_pct, plan, upi_vpa, upi_vpa_2, upi_vpa_3, whatsapp_number, reminder_cadence, "
                     "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
                     "overdue_repeat_days, overdue_max_repeats, reminder_batches, plan_expires_on, "
-                    "catchup_date, catchup_action, wa_ready, wa_checked_at")
+                    "catchup_date, catchup_action, wa_ready, wa_checked_at, setup_problem")
             .eq("agent_token", token).limit(1).execute())
     if not resp.data:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -334,6 +334,14 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
         if len(batch) < 1000:
             break
         start += 1000
+
+    # Shown instead of "All clear": a shop can be online, syncing, and still be
+    # importing zero customers (see tally._flag_setup_problem).
+    # json.dumps (NOT repr): Python's repr of a bool is "True", which is an
+    # undefined identifier in JS and would throw before any of the page's script
+    # runs - a blank dashboard for every shop.
+    setup_problem_js = json.dumps((biz.get("setup_problem") or "").strip())
+    has_parties_js = json.dumps(bool(clients))
 
     today = _dt.date.today()
     totals: dict[str, Decimal] = {}
@@ -737,6 +745,10 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
 
 <script>
 const TOKEN = {token!r};
+// A shop can be 'connected' and still be importing nothing (e.g. its Tally
+// groups customers under a renamed group). Never let that read as 'All clear'.
+const SETUP_PROBLEM = {setup_problem_js};
+const HAS_PARTIES = {has_parties_js};
 const LANG = {lang!r};
 
 // Sync time + Tally status + Reload live in the app's top bar now (global).
@@ -950,6 +962,20 @@ async function buildToday() {{
     if (miss) rows.push(['<b>' + miss + '</b> owe money but have no WhatsApp number', 'openImportNumbers()']);
   }} catch (e) {{}}
   el.style.display = 'block';
+  // A setup problem outranks everything: the shop is online but importing
+  // nothing, so "All clear" would be a lie.
+  if (SETUP_PROBLEM) {{
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:6px;color:#9F2F2D">ASVA cannot read your customers</div>'
+      + '<div style="line-height:1.6">' + SETUP_PROBLEM + '</div>'
+      + '<div style="margin-top:10px;color:#787774">Nothing has been changed in Tally. Send this message to ASVA support and we will fix the setup.</div>';
+    return;
+  }}
+  if (!rows.length && !HAS_PARTIES) {{
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:6px;color:#9F2F2D">No customers imported yet</div>'
+      + '<div style="line-height:1.6">ASVA has not received a single customer from Tally, so there is nothing to chase. '
+      + 'Open Tally, keep your company loaded, then press <b>Get latest from Tally</b>.</div>';
+    return;
+  }}
   if (!rows.length) {{
     el.innerHTML = '<b>All clear.</b> Nothing needs you right now. ASVA is chasing on its own.';
     return;
@@ -1444,7 +1470,7 @@ class SavePayload(BaseModel):
 
 
 @router.post("/admin/save")
-async def admin_save(payload: SavePayload):
+def admin_save(payload: SavePayload):
     biz = _biz_by_token(payload.token)
     db = require_db()
 
@@ -1485,7 +1511,7 @@ class ReloadPayload(BaseModel):
 
 
 @router.post("/admin/reload")
-async def admin_reload(payload: ReloadPayload):
+def admin_reload(payload: ReloadPayload):
     """Override switch: force the Tally agent to refresh outstanding NOW instead
     of waiting for its 5-min auto cycle. Rate-limited to once per 10 minutes so
     a big shop's single-threaded Tally isn't hammered. The agent polls
@@ -1514,7 +1540,7 @@ async def admin_reload(payload: ReloadPayload):
 
 
 @router.post("/admin/reconcile")
-async def admin_reconcile(payload: ReloadPayload):
+def admin_reconcile(payload: ReloadPayload):
     """Owner pressed "Clean up removed parties" (with a confirmation). Flags a
     reconcile: the agent's next outstanding push archives any Tally-sourced party
     no longer in Tally (soft, reversible - see tally._run_reconcile). Also sets the
@@ -1533,7 +1559,7 @@ async def admin_reconcile(payload: ReloadPayload):
 
 
 @router.get("/admin/sync-status")
-async def admin_sync_status(token: str = Query(...)):
+def admin_sync_status(token: str = Query(...)):
     """Lightweight poll for the dashboard: last Tally sync time + whether a
     manual reload is still pending. The page polls this after Reload and
     re-renders once the sync completes (last_synced advances / flag clears)."""
@@ -1711,7 +1737,7 @@ class CatchupPayload(BaseModel):
 
 
 @router.post("/admin/catchup")
-async def admin_catchup(payload: CatchupPayload, background_tasks: BackgroundTasks):
+def admin_catchup(payload: CatchupPayload, background_tasks: BackgroundTasks):
     """Owner's decision on held catch-up reminders. 'send' releases them (the
     sweep runs immediately in the background); 'skip' drops them for today -
     the cadence continues normally tomorrow, nothing stacks."""
@@ -1736,7 +1762,7 @@ class SkipTodayPayload(BaseModel):
 
 
 @router.post("/admin/skip-today")
-async def admin_skip_today(payload: SkipTodayPayload):
+def admin_skip_today(payload: SkipTodayPayload):
     """Cancel TODAY's reminder for one party: mark today's reached cadence
     points as 'skipped' so the sweep won't send them. Tomorrow the cadence
     continues normally (nothing stacks - latest point only)."""
@@ -1809,7 +1835,7 @@ class BatchesPayload(BaseModel):
 
 
 @router.post("/admin/batches")
-async def admin_save_batches(payload: BatchesPayload):
+def admin_save_batches(payload: BatchesPayload):
     """Save the business's reminder batches (up to 5). Each batch carries its own
     severity (style), language, early-pay discount and custom line."""
     from app.services.batches import normalize_batches
@@ -1827,7 +1853,7 @@ class AssignBatchPayload(BaseModel):
 
 
 @router.post("/admin/assign-batch")
-async def admin_assign_batch(payload: AssignBatchPayload):
+def admin_assign_batch(payload: AssignBatchPayload):
     """Assign one or more parties to a reminder batch (0-4)."""
     biz = _biz_by_token(payload.token)
     db = require_db()
@@ -1864,7 +1890,7 @@ class SettingsPayload(BaseModel):
 
 
 @router.post("/admin/settings")
-async def admin_settings(payload: SettingsPayload):
+def admin_settings(payload: SettingsPayload):
     """Save the reminder schedule: style (+ cadence), send hour, custom line,
     weekly off day and festival/holiday dates."""
     biz = _biz_by_token(payload.token)
@@ -1924,7 +1950,7 @@ async def admin_settings(payload: SettingsPayload):
 
 
 @router.get("/admin/preview")
-async def admin_preview(
+def admin_preview(
     token: str = Query(...),
     style: str = Query("standard"),
     language: str = Query("hinglish"),
@@ -2193,7 +2219,7 @@ class SetNumberPayload(BaseModel):
 
 
 @router.post("/admin/set-number")
-async def admin_set_number(payload: SetNumberPayload):
+def admin_set_number(payload: SetNumberPayload):
     """Owner adds/edits a customer's WhatsApp number in ASVA, for the many parties
     whose number was never stored in Tally. The owner types just the 10 digits; we
     normalise to 91XXXXXXXXXX (India). Tally still wins WHEN it has a number - a
@@ -2215,7 +2241,7 @@ async def admin_set_number(payload: SetNumberPayload):
 
 
 @router.get("/admin/missing-numbers")
-async def admin_missing_numbers(token: str = Query(...)):
+def admin_missing_numbers(token: str = Query(...)):
     """Worklist for problem #4: every party that OWES money but has no WhatsApp
     number, sorted by outstanding (biggest first). The owner knocks out the top
     debtors from their phone in a couple of minutes - that is what turns 'no
@@ -2331,7 +2357,7 @@ def _parse_contacts(text: str):
 
 
 @router.post("/admin/import-numbers")
-async def admin_import_numbers(payload: ImportNumbersPayload):
+def admin_import_numbers(payload: ImportNumbersPayload):
     """Bulk-fill WhatsApp numbers by PASTING them from the owner's phone (where
     they already keep party numbers). Each line is matched to a Tally party by
     name; a valid number fills a party that has none. Returns what filled, what
@@ -2395,7 +2421,7 @@ class CreditDaysPayload(BaseModel):
 
 
 @router.post("/admin/set-credit-days")
-async def admin_set_credit_days(payload: CreditDaysPayload):
+def admin_set_credit_days(payload: CreditDaysPayload):
     """Override/assign a party's credit period. Also recomputes due_date on its
     open bills (due_date = invoice_date + days) so the scaled reminder cadence
     picks up the new terms immediately."""
@@ -2481,7 +2507,7 @@ class NTBillAddPayload(BaseModel):
 
 
 @router.post("/admin/nt-bill/add")
-async def admin_nt_bill_add(payload: NTBillAddPayload):
+def admin_nt_bill_add(payload: NTBillAddPayload):
     """Add a non-Tally bill from the party page: choose the amount, the bill date,
     and (optionally) the due date. The same record the BILL command makes, but
     silent - no WhatsApp send."""
@@ -2527,7 +2553,7 @@ class NTBillEditPayload(BaseModel):
 
 
 @router.post("/admin/nt-bill/edit")
-async def admin_nt_bill_edit(payload: NTBillEditPayload):
+def admin_nt_bill_edit(payload: NTBillEditPayload):
     """Edit a non-Tally bill's amount, bill number, bill date and/or due date.
     Status and the derived outstanding recompute automatically."""
     biz = _biz_by_token(payload.token)
@@ -2574,7 +2600,7 @@ class NTBillDeletePayload(BaseModel):
 
 
 @router.post("/admin/nt-bill/delete")
-async def admin_nt_bill_delete(payload: NTBillDeletePayload):
+def admin_nt_bill_delete(payload: NTBillDeletePayload):
     """Delete a non-Tally bill (wrong OCR read, duplicate, test entry).
     Audit messages keep their rows (bill_id just becomes null)."""
     biz = _biz_by_token(payload.token)
@@ -2627,7 +2653,7 @@ class PartyEditPayload(BaseModel):
 
 
 @router.post("/admin/party/edit")
-async def admin_party_edit(payload: PartyEditPayload):
+def admin_party_edit(payload: PartyEditPayload):
     """Edit a NON-Tally party's name and/or WhatsApp number. Fixes a bad OCR
     read (e.g. the whole bill text saved as the name) or adds a missing phone."""
     biz = _biz_by_token(payload.token)
@@ -2657,7 +2683,7 @@ class PartyCreatePayload(BaseModel):
 
 
 @router.post("/admin/party/create")
-async def admin_party_create(payload: PartyCreatePayload):
+def admin_party_create(payload: PartyCreatePayload):
     """Create a brand-new NON-Tally party (a customer the shop tracks in ASVA
     only, not in Tally). No tally_ledger_name = non-Tally, so it is fully editable
     here and gets the same reminders + payment detection as any party."""
@@ -2687,7 +2713,7 @@ class PartyDeletePayload(BaseModel):
 
 
 @router.post("/admin/party/delete")
-async def admin_party_delete(payload: PartyDeletePayload):
+def admin_party_delete(payload: PartyDeletePayload):
     """Delete a NON-Tally party and all its bills (wrong OCR entry, duplicate,
     test). Message rows are kept for audit with their client_id cleared."""
     biz = _biz_by_token(payload.token)
@@ -2847,7 +2873,7 @@ class SetReminderPayload(BaseModel):
 
 
 @router.post("/admin/set-reminder")
-async def admin_set_reminder(payload: SetReminderPayload):
+def admin_set_reminder(payload: SetReminderPayload):
     """Turn reminders ON/OFF for ONE party (per-party page toggle). Removal is
     confirmed client-side before this is called."""
     biz = _biz_by_token(payload.token)
@@ -2871,7 +2897,7 @@ class SetExcludedPayload(BaseModel):
 
 
 @router.post("/admin/set-excluded")
-async def admin_set_excluded(payload: SetExcludedPayload):
+def admin_set_excluded(payload: SetExcludedPayload):
     """Move ONE party on/off the do-not-chase (excluded) list. Excluded parties
     get no reminders and no morning-checkpoint mention, and show only in the
     Do-not-chase tab (out of Tally/Non-Tally). Reversible."""
@@ -3943,7 +3969,7 @@ setInterval(load, 30000);
 
 
 @router.get("/admin/today/data")
-async def admin_today_data(token: str = Query(...)):
+def admin_today_data(token: str = Query(...)):
     """JSON behind the Today home. Best-effort - always returns a usable shape."""
     biz = _biz_by_token(token)
     db = require_db()
@@ -4063,7 +4089,7 @@ async function finish() {{
 
 
 @router.get("/admin/analytics", response_class=HTMLResponse)
-async def admin_analytics(token: str = Query(...), lang: str = Query("english")):
+def admin_analytics(token: str = Query(...), lang: str = Query("english")):
     biz = _biz_by_token(token)
     db = require_db()
     today = _dt.date.today()
@@ -4486,7 +4512,7 @@ _PAYMENTS_CSS = """
 
 
 @router.get("/admin/payments/data")
-async def admin_payments_data(token: str = Query(...)):
+def admin_payments_data(token: str = Query(...)):
     """JSON feed for the Payments tab: open promises (AI-read), the receipt queue,
     and the shop's deposit accounts."""
     from app.services import promises as promises_svc, receipts_queue as rq
@@ -4576,7 +4602,7 @@ async def admin_payments_data(token: str = Query(...)):
 
 
 @router.get("/admin/payments/clients")
-async def admin_payments_clients(token: str = Query(...)):
+def admin_payments_clients(token: str = Query(...)):
     """Party picker for the Payments tab's 'Add a payment' button: the shop's
     customers with their current outstanding, most-owed first. Fetched lazily
     when the owner opens the add popup, so the 15s Payments poll stays light."""
@@ -4606,7 +4632,7 @@ async def admin_payments_clients(token: str = Query(...)):
 
 
 @router.get("/admin/notifications")
-async def admin_notifications(token: str = Query(...), since: str = Query("")):
+def admin_notifications(token: str = Query(...), since: str = Query("")):
     """Money-in signal for the desktop 'ping'. Returns payment captures (customer
     said they paid / sent a screenshot) newer than `since` - the moment a shop
     owner most wants a nudge. The desktop app polls this and fires a native
@@ -4648,7 +4674,7 @@ class PromiseActionPayload(BaseModel):
 
 
 @router.post("/admin/promises/action")
-async def admin_promise_action(payload: PromiseActionPayload):
+def admin_promise_action(payload: PromiseActionPayload):
     """Owner acts on an AI-read promise: 'chase' resumes reminders now; 'enqueue'
     queues a receipt (already confirmed) for the agent to post into Tally."""
     from app.services import promises as promises_svc, receipts_queue as rq
@@ -4715,7 +4741,7 @@ class PendingConfirmPayload(BaseModel):
 
 
 @router.post("/admin/pending/confirm")
-async def admin_pending_confirm(payload: PendingConfirmPayload):
+def admin_pending_confirm(payload: PendingConfirmPayload):
     """Owner approved a queued receipt (optionally editing amount/account/date):
     move it to 'confirmed' so the agent writes it into Tally."""
     from app.services import receipts_queue as rq
@@ -4738,7 +4764,7 @@ class PendingCancelPayload(BaseModel):
 
 
 @router.post("/admin/pending/cancel")
-async def admin_pending_cancel(payload: PendingCancelPayload):
+def admin_pending_cancel(payload: PendingCancelPayload):
     """Owner removed a queued receipt (won't post it to Tally)."""
     from app.services import receipts_queue as rq
     biz = _biz_by_token(payload.token)
@@ -4842,7 +4868,7 @@ class AccountsPayload(BaseModel):
 
 
 @router.post("/admin/accounts/save")
-async def admin_accounts_save(payload: AccountsPayload):
+def admin_accounts_save(payload: AccountsPayload):
     from app.models import CATEGORY_CREDIT_DAYS, credit_days_for_category
     biz = _biz_by_token(payload.token)
     db = require_db()

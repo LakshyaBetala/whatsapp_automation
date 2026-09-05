@@ -71,3 +71,6 @@ dev/_bringup.log
 dev/.env.dev
 dev/.supabase-status.txt
 dev/*.log
+
+# build transcripts (electron-builder / pyinstaller)
+*.log

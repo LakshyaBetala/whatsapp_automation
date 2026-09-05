@@ -71,7 +71,7 @@ class CreditUpdateResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/create", response_model=ClientResponse, status_code=201)
-async def create_client(payload: ClientCreate):
+def create_client(payload: ClientCreate):
     """Add a new client (debtor) for a business."""
     db = require_db()
 
@@ -111,7 +111,7 @@ async def create_client(payload: ClientCreate):
 
 
 @router.put("/{client_id}/toggle", response_model=ToggleResponse)
-async def toggle_reminders(client_id: str):
+def toggle_reminders(client_id: str):
     """Flip reminders_enabled for a client."""
     db = require_db()
 
@@ -132,7 +132,7 @@ async def toggle_reminders(client_id: str):
 
 
 @router.put("/{client_id}/credit", response_model=CreditUpdateResponse)
-async def update_credit_days(client_id: str, credit_days: int):
+def update_credit_days(client_id: str, credit_days: int):
     """Update credit period and recalculate due_date on ALL open bills.
 
     This is critical - if an owner upgrades a customer from 30-day to 90-day
