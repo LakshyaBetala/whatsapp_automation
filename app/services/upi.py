@@ -98,37 +98,50 @@ def _unb64u(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + pad)
 
 
-def pay_token(business_id: str, amount: Decimal | float | None) -> str:
-    """Short signed token naming the shop and the amount to collect."""
+def _id_bytes(value: str) -> bytes:
     try:
-        raw = _uuid.UUID(str(business_id)).bytes
+        return _uuid.UUID(str(value)).bytes
     except (ValueError, AttributeError, TypeError):
-        # Real business ids are UUIDs; never raise inside message composition
-        # over an odd one, or a whole reminder send would fail.
-        raw = hashlib.sha256(str(business_id).encode("utf-8")).digest()[:16]
+        # Real ids are UUIDs; never raise inside message composition over an odd
+        # one, or a whole reminder send would fail.
+        return hashlib.sha256(str(value).encode("utf-8")).digest()[:16]
+
+
+def pay_token(business_id: str, amount: Decimal | float | None,
+              client_id: Optional[str] = None) -> str:
+    """Short signed token naming the shop, the amount, and (optionally) the
+    customer, so the pay page can itemise every bill they still owe."""
     paise = max(0, min(int(round(float(amount or 0) * 100)), 0xFFFFFFFF))
-    body = raw + paise.to_bytes(4, "big")
+    body = _id_bytes(business_id)
+    if client_id:
+        body += _id_bytes(client_id)
+    body += paise.to_bytes(4, "big")
     return _b64u(body + hmac.new(_pay_key(), body, hashlib.sha256).digest()[:6])
 
 
 def parse_pay_token(token: str) -> Optional[tuple]:
-    """(business_id, amount) from a token, or None if it was tampered with."""
+    """(business_id, amount, client_id|None), or None if tampered with.
+
+    Accepts the short (no customer) and long (with customer) forms, so links
+    already sitting in customers' chats keep working."""
     try:
         blob = _unb64u((token or "").strip())
-        if len(blob) != 26:
+        if len(blob) not in (26, 42):        # 20|36 body + 6 signature
             return None
-        body, sig = blob[:20], blob[20:]
+        body, sig = blob[:-6], blob[-6:]
         want = hmac.new(_pay_key(), body, hashlib.sha256).digest()[:6]
         if not hmac.compare_digest(sig, want):
             return None
-        return str(_uuid.UUID(bytes=body[:16])), Decimal(
-            int.from_bytes(body[16:], "big")) / 100
+        biz = str(_uuid.UUID(bytes=body[:16]))
+        cid = str(_uuid.UUID(bytes=body[16:32])) if len(body) == 36 else None
+        amount = Decimal(int.from_bytes(body[-4:], "big")) / 100
+        return biz, amount, cid
     except Exception:
         return None
 
 
 def pay_page_url(business_id: str, amount: Decimal | float | None,
-                 ref: str = "") -> str:
+                 ref: str = "", client_id: Optional[str] = None) -> str:
     """The https link a customer can actually TAP in WhatsApp.
 
     Send this instead of the raw upi:// deep link: WhatsApp does not linkify
@@ -136,7 +149,23 @@ def pay_page_url(business_id: str, amount: Decimal | float | None,
     carries the UPI button, the QR and the bank details."""
     from app.config import settings
     base = (settings.public_base_url or "").rstrip("/")
-    url = f"{base}/pay/{pay_token(business_id, amount)}"
+    url = f"{base}/pay/{pay_token(business_id, amount, client_id)}"
     if ref:
         url += "?ref=" + quote(str(ref)[:40], safe="")
     return url
+
+
+def looks_like_vpa(value: str) -> bool:
+    """Is this a UPI address (name@handle)?
+
+    Every UPI ID has this shape whatever the bank: xyz@okhdfcbank, xyz@ybl,
+    xyz@indianbank. There is no such thing as a "netbanking link" to send - the
+    only two digital rails are a VPA (one tap) and A/c + IFSC (the payer starts
+    a NEFT/RTGS/IMPS from their own bank). Checked before a VPA is used so an
+    account number typed into the UPI box cannot silently break every reminder.
+    """
+    v = (value or "").strip()
+    if v.count("@") != 1 or " " in v:
+        return False
+    user, _, handle = v.partition("@")
+    return bool(user) and bool(handle) and handle.replace(".", "").isalnum()

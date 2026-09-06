@@ -74,6 +74,7 @@ _PAGE = """<!doctype html><html lang="en"><head>
     <h1>{shop}</h1>
     <p class="amt">{amount}</p>
     {ref_html}
+    {bills_html}
     {upi_html}
     {bank_html}
   </div>
@@ -103,7 +104,7 @@ def pay_page(token: str, ref: str = Query(default="")):
                     "the shop to send it again."),
             status_code=404)
 
-    business_id, amount = parsed
+    business_id, amount, client_id = parsed
     db = get_client()
     rows = []
     if db is not None:
@@ -127,10 +128,37 @@ def pay_page(token: str, ref: str = Query(default="")):
     biz = rows[0]
     shop = (biz.get("business_name") or "the shop").strip()
     vpa = (biz.get("upi_vpa") or "").strip()
+    # An account number typed into the UPI box would build a dead deep link and
+    # a dead QR. Any UPI ID is name@handle whatever the bank (xyz@indianbank is
+    # UPI just like xyz@ybl); anything else is not a VPA.
+    if not upi.looks_like_vpa(vpa):
+        vpa = ""
     bank = bank_details(biz)
     ref = (ref or "").strip()[:40]
 
     ref_html = '<p class="ref">Ref: ' + esc(ref) + "</p>" if ref else ""
+
+    # Every pending bill, not just the one that triggered the reminder, so the
+    # customer can see exactly what the amount is made of.
+    bills_html = ""
+    if client_id and db is not None:
+        try:
+            bills = (db.table("bills")
+                     .select("invoice_number, outstanding, invoice_date")
+                     .eq("business_id", business_id).eq("client_id", client_id)
+                     .in_("status", ["pending", "partial", "overdue"])
+                     .order("invoice_date").limit(50).execute()).data or []
+        except Exception:
+            log.exception("pay page bill list failed for client %s", client_id)
+            bills = []
+        rows_html = "".join(
+            '<div class="row"><i>' + esc(b.get("invoice_number") or "Balance")
+            + "</i><b>" + esc(inr(b.get("outstanding") or 0)) + "</b></div>"
+            for b in bills if float(b.get("outstanding") or 0) > 0)
+        if rows_html:
+            label = ("bill" if len(bills) == 1 else "bills")
+            bills_html = ('<div class="sep">your pending ' + label + "</div>"
+                          + rows_html)
 
     upi_html = ""
     if vpa:
@@ -146,6 +174,12 @@ def pay_page(token: str, ref: str = Query(default="")):
         upi_html = ('<a class="btn" href="' + esc(link) + '">Pay ' + esc(inr(amount))
                     + " by UPI</a>"
                     '<p class="hint">Opens GPay, PhonePe, Paytm or your bank app.</p>'
+                    # The UPI ID in plain text as well: if the button cannot open
+                    # an app (an unusual phone, a desktop browser, an in-app
+                    # webview), the customer can still type this into their own
+                    # UPI app and pay. Never leave them with only a button.
+                    '<div class="row" style="margin-top:14px"><i>UPI ID</i><b>'
+                    + esc(vpa) + "</b></div>"
                     + qr_html)
 
     bank_html = ""
@@ -167,5 +201,5 @@ def pay_page(token: str, ref: str = Query(default="")):
                     "Please contact them directly.</div>")
 
     return HTMLResponse(_PAGE.format(shop=esc(shop), amount=esc(inr(amount)),
-                                     ref_html=ref_html, upi_html=upi_html,
-                                     bank_html=bank_html))
+                                     ref_html=ref_html, bills_html=bills_html,
+                                     upi_html=upi_html, bank_html=bank_html))

@@ -1553,7 +1553,8 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
         ref = (str(bills[0].get("invoice_number") or "").strip()
                if len(bills) == 1 else f"{len(bills)} bills")
         qr_b64 = upi.qr_png_base64(upi.upi_link(vpa, biz_name, pay_amount, ref))
-        link = upi.pay_page_url(business["id"], pay_amount, ref)
+        link = upi.pay_page_url(business["id"], pay_amount, ref,
+                                client_id=client.get("id"))
         out = [("Pay online (UPI, GPay, PhonePe or bank transfer):"
                 if en else "Online payment (UPI, GPay, PhonePe ya bank transfer):"), link]
         if qr_b64:

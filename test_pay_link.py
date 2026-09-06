@@ -45,14 +45,42 @@ def test_spaces_are_encoded_but_not_the_at():
 
 
 # ── the signed token behind the tappable link ────────────────────────────
+CLIENT = "41f5673e-9552-4d6a-b34a-d99ec9bd20b2"
+
+
 def test_token_round_trips_business_and_amount():
     t = upi.pay_token(BIZ, Decimal("9475.00"))
-    assert upi.parse_pay_token(t) == (BIZ, Decimal("9475.00"))
+    assert upi.parse_pay_token(t) == (BIZ, Decimal("9475.00"), None)
 
 
 def test_token_survives_paise():
     t = upi.pay_token(BIZ, Decimal("1234.56"))
-    assert upi.parse_pay_token(t) == (BIZ, Decimal("1234.56"))
+    assert upi.parse_pay_token(t) == (BIZ, Decimal("1234.56"), None)
+
+
+def test_token_can_carry_the_customer_so_the_page_itemises_their_bills():
+    t = upi.pay_token(BIZ, Decimal("9475.00"), CLIENT)
+    assert upi.parse_pay_token(t) == (BIZ, Decimal("9475.00"), CLIENT)
+
+
+def test_links_already_sent_to_customers_keep_working():
+    # The short (no customer) form predates itemising. Chats are full of them.
+    old = upi.pay_token(BIZ, Decimal("500"))
+    assert upi.parse_pay_token(old) == (BIZ, Decimal("500"), None)
+
+
+@pytest.mark.parametrize("vpa,ok", [
+    ("rupeshrtc-1@okhdfcbank", True),
+    ("x@indianbank", True),              # a bank handle is STILL a UPI ID
+    ("shop@ybl", True),
+    ("50200060256152", False),           # an account number is not a VPA
+    ("a b@c", False),
+    ("no-at-sign", False),
+    ("two@at@signs", False),
+    ("", False),
+])
+def test_vpa_detection(vpa, ok):
+    assert upi.looks_like_vpa(vpa) is ok
 
 
 def test_tampered_token_is_rejected():
