@@ -1168,6 +1168,11 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("english"))
     time, weekly off, holidays, custom line, early-pay discount, and preview.
     Timing itself is ASVA's logic (per-party credit days), not editable here."""
     biz = _biz_by_token(token)
+    # Customer sends only drain during shop hours, so the batch time picker
+    # must not offer an hour the sender will ignore (a batch set to 23:00
+    # looked accepted, then sat in the outbox until 10 AM next day).
+    send_from = settings.send_window_start_hour if settings.enforce_send_window else 0
+    send_to = settings.send_window_end_hour if settings.enforce_send_window else 24
 
     festivals = sorted(str(d) for d in (biz.get("blackout_dates") or []))
     festivals_json = json.dumps(festivals)
@@ -1190,7 +1195,20 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("english"))
 var LANGS=[['hinglish','Hindi'],['english','English']];
 function besc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
 function bopts(list,val){return list.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('');}
-function hourOpts(val){var v=(val==null?11:Number(val));var s='';for(var h=0;h<24;h++){var hh=(h<10?'0':'')+h;s+='<option value="'+h+'"'+(h===v?' selected':'')+'>'+hh+':00</option>';}return s;}
+// Only offer hours the sender will actually honour. Customer sends drain
+// between SEND_FROM and SEND_TO (shop hours); a batch set to 23:00 used to look
+// accepted and then sit in the outbox until the window reopened next morning,
+// so the owner picked 11 PM and messages left at 10 AM. Out-of-window hours are
+// still listed if already saved, marked so the reason is visible.
+function hourOpts(val){var v=(val==null?11:Number(val));var s='';
+  for(var h=0;h<24;h++){
+    var inWin=(h>=SEND_FROM&&h<SEND_TO);
+    if(!inWin&&h!==v) continue;
+    var hh=(h<10?'0':'')+h;
+    s+='<option value="'+h+'"'+(h===v?' selected':'')+'>'+hh+':00'
+      +(inWin?'':' (outside shop hours)')+'</option>';
+  }
+  return s;}
 function upiOpts(val) {
   var opts = [['', 'Shop Default (UPI)']];
   if (typeof UPI_1 !== 'undefined' && UPI_1) opts.push([UPI_1, 'UPI 1: ' + UPI_1]);
@@ -1409,6 +1427,7 @@ Ek party = EK message: saare bills jodkar, total + QR ke saath.</details>
  
  <script>
  const TOKEN = {token!r};
+ const SEND_FROM = {send_from}, SEND_TO = {send_to};   // hours the sender actually honours
 
 // ── Busy guard ───────────────────────────────────────────────────────────
 // The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
