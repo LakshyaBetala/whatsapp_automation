@@ -1,5 +1,6 @@
 """Batch collection method decides what the reminder carries:
-  - UPI  -> a upi:// link (and a QR image)
+  - UPI  -> a TAPPABLE https pay link (and a QR image). WhatsApp does not
+             linkify "upi://", so the raw deep link arrived as dead grey text.
   - Bank -> NEFT/RTGS bank details + a cheque line, then UPI too
   - Cash -> NOTHING digital: no UPI link, no QR, no bank details (no paper trail
             for a cash / off-books customer). This is the key guarantee.
@@ -48,14 +49,17 @@ def test_cash_batch_carries_no_digital_rails(monkeypatch):
     assert cap.get("image_base64") is None      # no QR attached for cash
 
 
-def test_upi_batch_carries_a_upi_link(monkeypatch):
+def test_upi_batch_carries_a_tappable_pay_link(monkeypatch):
     cap = _send(monkeypatch, "")                 # blank = shop default UPI
-    assert "upi://" in cap["message_text"]
-    assert "IFSC" not in cap["message_text"]     # UPI batch stays UPI-only
+    txt = cap["message_text"]
+    # Must be an https link WhatsApp will actually make tappable, never upi://.
+    assert "/pay/" in txt and "upi://" not in txt
+    assert cap.get("image_base64")               # the QR still rides along
+    assert "IFSC" not in txt                     # UPI batch stays UPI-only
 
 
 def test_bank_batch_carries_bank_and_cheque(monkeypatch):
     cap = _send(monkeypatch, batches.BANK_SENTINEL)
     txt = cap["message_text"]
     assert "IFSC" in txt and "Cheque" in txt
-    assert "upi://" in txt                        # bank batch still offers UPI too
+    assert "/pay/" in txt and "upi://" not in txt  # bank batch still offers UPI too

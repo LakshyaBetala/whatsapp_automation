@@ -973,7 +973,7 @@ async def _confirm_photo_bill(business: dict) -> str:
     if phone:
         amount_fmt = inr(Decimal(str(pb["amount"])))
         vpa = business.get("upi_vpa")
-        pay_link = upi.upi_link(vpa, business.get("business_name", ""), Decimal(str(pb["amount"])), invoice_number) if vpa else ""
+        pay_link = upi.pay_page_url(business["id"], Decimal(str(pb["amount"])), invoice_number) if vpa else ""
         english = str(business.get("msg_language") or "").lower() == "english"
         body = _manual_bill_body(client["name"], business.get("business_name", ""),
                                  invoice_number, amount_fmt, pay_link, english, photo=True)
@@ -1094,7 +1094,7 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
     phone = client.get("whatsapp_number")
     if phone:
         vpa = business.get("upi_vpa")
-        pay_link = upi.upi_link(vpa, business.get("business_name", ""), amount, invoice_number) if vpa else ""
+        pay_link = upi.pay_page_url(business["id"], amount, invoice_number) if vpa else ""
         english = str(business.get("msg_language") or "").lower() == "english"
         body = _manual_bill_body(client["name"], business.get("business_name", ""),
                                  invoice_number, amount_fmt, pay_link, english, photo=False)
@@ -1539,13 +1539,26 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
     qr_b64 = None
 
     def _upi_lines() -> list[str]:
-        """UPI heading + link (+ a QR line only when a QR image will attach)."""
+        """Payment heading + a TAPPABLE link (+ a QR line when one attaches).
+
+        The message used to carry the raw "upi://pay?..." deep link. WhatsApp
+        does not linkify custom schemes, so customers saw dead grey text and
+        told shop owners "the link does not work". We send an https link to the
+        pay page instead; it holds the real UPI button, the QR and the bank
+        details. The QR still rides along for anyone who prefers to scan.
+        """
         nonlocal qr_b64
-        link = upi.upi_link(vpa, biz_name, pay_amount, f"{len(bills)} bills")
-        qr_b64 = upi.qr_png_base64(link)
-        out = [("Pay by UPI:" if en else "UPI se payment:"), link]
+        # The reference is what the shop sees on its bank statement, so make it
+        # the invoice number when there is exactly one bill.
+        ref = (str(bills[0].get("invoice_number") or "").strip()
+               if len(bills) == 1 else f"{len(bills)} bills")
+        qr_b64 = upi.qr_png_base64(upi.upi_link(vpa, biz_name, pay_amount, ref))
+        link = upi.pay_page_url(business["id"], pay_amount, ref)
+        out = [("Pay online (UPI, GPay, PhonePe or bank transfer):"
+                if en else "Online payment (UPI, GPay, PhonePe ya bank transfer):"), link]
         if qr_b64:
-            out.append("(or scan the QR below)" if en else "(ya neeche QR scan karein)")
+            out.append("Or scan the QR below with any UPI app."
+                       if en else "Ya neeche ka QR kisi bhi UPI app se scan karein.")
         return out
 
     # Payment instructions, by the batch's collection method. One clean block with
