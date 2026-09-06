@@ -745,6 +745,28 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
 
 <script>
 const TOKEN = {token!r};
+
+// ── Busy guard ───────────────────────────────────────────────────────────
+// The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
+// when a background Tally sync lands. A page is BUSY whenever a dialog is open
+// or the owner is typing into something. Without this, a sync arriving while the
+// owner was half-way through "Add a payment" reloaded the page under them: the
+// dialog vanished and the typed name was gone, which reads as "the app will not
+// let me enter anything".
+function _asvaBusy(){{
+  try{{
+    var m = document.querySelectorAll('.cfback');
+    for (var i=0;i<m.length;i++){{
+      var d = m[i].style.display;
+      if (d && d !== 'none') return true;
+    }}
+    var a = document.activeElement;
+    if (a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return true;
+  }}catch(e){{}}
+  return false;
+}}
+setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
+
 // A shop can be 'connected' and still be importing nothing (e.g. its Tally
 // groups customers under a renamed group). Never let that read as 'All clear'.
 const SETUP_PROBLEM = {setup_problem_js};
@@ -767,7 +789,7 @@ function _searchActive() {{
   return !!(q && (q.value || document.activeElement === q));
 }}
 function updateBusy() {{
-  try {{ window.__ASVA_DIRTY__ = DIRTY || _searchActive(); }} catch (e) {{}}
+  try {{ window.__ASVA_DIRTY__ = DIRTY || _searchActive() || _asvaBusy(); }} catch (e) {{}}
 }}
 function markDirty() {{ DIRTY = true; updateBusy(); }}
 setInterval(async () => {{
@@ -1387,6 +1409,28 @@ Ek party = EK message: saare bills jodkar, total + QR ke saath.</details>
  
  <script>
  const TOKEN = {token!r};
+
+// ── Busy guard ───────────────────────────────────────────────────────────
+// The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
+// when a background Tally sync lands. A page is BUSY whenever a dialog is open
+// or the owner is typing into something. Without this, a sync arriving while the
+// owner was half-way through "Add a payment" reloaded the page under them: the
+// dialog vanished and the typed name was gone, which reads as "the app will not
+// let me enter anything".
+function _asvaBusy(){{
+  try{{
+    var m = document.querySelectorAll('.cfback');
+    for (var i=0;i<m.length;i++){{
+      var d = m[i].style.display;
+      if (d && d !== 'none') return true;
+    }}
+    var a = document.activeElement;
+    if (a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return true;
+  }}catch(e){{}}
+  return false;
+}}
+setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
+
  const UPI_1 = {upi_vpa!r};
  const UPI_2 = {upi_vpa_2!r};
  const UPI_3 = {upi_vpa_3!r};
@@ -3388,6 +3432,28 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
 <script>
 const TOKEN = {token!r};
+
+// ── Busy guard ───────────────────────────────────────────────────────────
+// The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
+// when a background Tally sync lands. A page is BUSY whenever a dialog is open
+// or the owner is typing into something. Without this, a sync arriving while the
+// owner was half-way through "Add a payment" reloaded the page under them: the
+// dialog vanished and the typed name was gone, which reads as "the app will not
+// let me enter anything".
+function _asvaBusy(){{
+  try{{
+    var m = document.querySelectorAll('.cfback');
+    for (var i=0;i<m.length;i++){{
+      var d = m[i].style.display;
+      if (d && d !== 'none') return true;
+    }}
+    var a = document.activeElement;
+    if (a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return true;
+  }}catch(e){{}}
+  return false;
+}}
+setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
+
 const CID = {client_id!r};
 const LANG = {lang!r};
 const PNAME = {json.dumps(c["name"] or "")};
@@ -3752,6 +3818,28 @@ async def admin_today(token: str = Query(...), lang: str = Query("english")):
 </div>
 <script>
 const TOKEN = __TOKEN__;
+
+// ── Busy guard ───────────────────────────────────────────────────────────
+// The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
+// when a background Tally sync lands. A page is BUSY whenever a dialog is open
+// or the owner is typing into something. Without this, a sync arriving while the
+// owner was half-way through "Add a payment" reloaded the page under them: the
+// dialog vanished and the typed name was gone, which reads as "the app will not
+// let me enter anything".
+function _asvaBusy(){{
+  try{{
+    var m = document.querySelectorAll('.cfback');
+    for (var i=0;i<m.length;i++){{
+      var d = m[i].style.display;
+      if (d && d !== 'none') return true;
+    }}
+    var a = document.activeElement;
+    if (a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return true;
+  }}catch(e){{}}
+  return false;
+}}
+setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
+
 __I18N__
 const EN = (LANG==='english');
 // This same page opens inside the ASVA desktop app (no phone dialer) AND on a
@@ -4064,6 +4152,28 @@ async def admin_setup(token: str = Query(...), lang: str = Query("english")):
 <style>.seg button{{background:#fff;color:#2F3437;border-radius:0}} .seg button.on{{background:#0a7d33;color:#fff}}</style>
 <script>
 const TOKEN = {token!r};
+
+// ── Busy guard ───────────────────────────────────────────────────────────
+// The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
+// when a background Tally sync lands. A page is BUSY whenever a dialog is open
+// or the owner is typing into something. Without this, a sync arriving while the
+// owner was half-way through "Add a payment" reloaded the page under them: the
+// dialog vanished and the typed name was gone, which reads as "the app will not
+// let me enter anything".
+function _asvaBusy(){{
+  try{{
+    var m = document.querySelectorAll('.cfback');
+    for (var i=0;i<m.length;i++){{
+      var d = m[i].style.display;
+      if (d && d !== 'none') return true;
+    }}
+    var a = document.activeElement;
+    if (a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return true;
+  }}catch(e){{}}
+  return false;
+}}
+setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
+
 let LANG = 'hinglish', TONE = 'standard';
 document.querySelectorAll('#lang button').forEach(b => b.onclick = () => {{
   LANG = b.dataset.v; document.querySelectorAll('#lang button').forEach(x => x.classList.toggle('on', x===b)); }});
@@ -4268,6 +4378,28 @@ async def admin_payments(token: str = Query(...), lang: str = Query("english")):
 </div>
 <script>
 const TOKEN = {token!r};
+
+// ── Busy guard ───────────────────────────────────────────────────────────
+// The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
+// when a background Tally sync lands. A page is BUSY whenever a dialog is open
+// or the owner is typing into something. Without this, a sync arriving while the
+// owner was half-way through "Add a payment" reloaded the page under them: the
+// dialog vanished and the typed name was gone, which reads as "the app will not
+// let me enter anything".
+function _asvaBusy(){{
+  try{{
+    var m = document.querySelectorAll('.cfback');
+    for (var i=0;i<m.length;i++){{
+      var d = m[i].style.display;
+      if (d && d !== 'none') return true;
+    }}
+    var a = document.activeElement;
+    if (a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return true;
+  }}catch(e){{}}
+  return false;
+}}
+setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
+
 const EN = {str(en).lower()};
 let DATA = {{promises:[], pending:[], deposit_ledgers:[]}};
 let CF = null;   // the receipt being confirmed
@@ -4823,6 +4955,28 @@ async def admin_accounts(token: str = Query(...), lang: str = Query("english")):
 </div>
 <script>
 const TOKEN = {token!r};
+
+// ── Busy guard ───────────────────────────────────────────────────────────
+// The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
+// when a background Tally sync lands. A page is BUSY whenever a dialog is open
+// or the owner is typing into something. Without this, a sync arriving while the
+// owner was half-way through "Add a payment" reloaded the page under them: the
+// dialog vanished and the typed name was gone, which reads as "the app will not
+// let me enter anything".
+function _asvaBusy(){{
+  try{{
+    var m = document.querySelectorAll('.cfback');
+    for (var i=0;i<m.length;i++){{
+      var d = m[i].style.display;
+      if (d && d !== 'none') return true;
+    }}
+    var a = document.activeElement;
+    if (a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return true;
+  }}catch(e){{}}
+  return false;
+}}
+setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
+
 async function saveShare() {{
   const on = document.getElementById('share').checked;
   const r = await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
