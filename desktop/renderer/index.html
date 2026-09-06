@@ -612,10 +612,19 @@ async function runDiag() {
   if (btn) { btn.disabled = false; btn.textContent = 'Check connection and find the problem'; }
 }
 
+// Tabs marked stale by a sync refresh themselves when the owner next opens
+// them, instead of all six reloading at once behind their back.
+const STALE = new Set();
 function show(v) {
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   document.querySelectorAll('.view').forEach(el => el.classList.remove('on'));
-  document.getElementById('v-' + v).classList.add('on');
+  const view = document.getElementById('v-' + v);
+  view.classList.add('on');
+  const w = view.querySelector('webview');
+  if (w && STALE.has(w.id)) {
+    STALE.delete(w.id);
+    try { if (w.src && w.src !== 'about:blank') w.reload(); } catch (e) {}
+  }
 }
 document.querySelectorAll('.nav').forEach(b => b.onclick = () => show(b.dataset.v));
 function toggleStatus() { document.getElementById('statuspanel').classList.toggle('show'); }
@@ -868,7 +877,13 @@ function loadPage(id, url) {
   if (url && !loaded[id]) { loaded[id] = true; const w = document.getElementById(id); hardenWebview(w); w.src = urlWithLang(url); }
 }
 async function reloadAll() {
+  // Reload ONLY the tab on screen; mark the other visited tabs stale so they
+  // refresh when the owner opens them. Reloading all six at once meant six
+  // simultaneous page loads (the Dashboard alone can be a couple of MB) every
+  // time a sync landed - the burst that made the app feel frozen and left panes
+  // blank right after a refresh.
   const ids = ['wv-today', 'wv-dash', 'wv-reminders', 'wv-payments', 'wv-analytics', 'wv-accounts'];
+  const visible = document.querySelector('.view.on webview');
   for (const id of ids) {
     const w = document.getElementById(id);
     if (!(w && w.reload && loaded[id])) continue;
@@ -878,7 +893,8 @@ async function reloadAll() {
       // we skip reloading it so a background Tally sync can't wipe the selection.
       const dirty = await w.executeJavaScript('!!(window.__ASVA_DIRTY__)').catch(() => false);
       if (dirty) continue;
-      w.reload();
+      if (w === visible) w.reload();
+      else STALE.add(id);
     } catch (e) {}
   }
 }

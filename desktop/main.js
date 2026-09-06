@@ -384,7 +384,20 @@ function startAll() {
     } catch (e) { console.error('updater skipped:', (e && e.message) || e); }
   }
   const toStart = DEV_DEMO ? ['whatsapp'] : Object.keys(SPECS);
-  toStart.forEach(startService);
+  // STAGGER the heavy children instead of firing them in one tick.
+  // Each agent service is a one-file PyInstaller exe that unpacks its whole
+  // bundle to %TEMP% on every launch, and wa_service is a full Node runtime.
+  // Starting all three at once - which used to happen BEFORE the window even
+  // opened - saturated disk and RAM at exactly the moment the owner was also
+  // booting Windows and opening Tally, so ASVA appeared to stop other programs
+  // from starting. Spacing them out costs a few seconds of nothing and keeps
+  // the laptop usable. Order matters: WhatsApp first (customer sends depend on
+  // it), then the Tally reader, then the outbox drainer.
+  const STAGGER_MS = 6000;
+  toStart.forEach((name, i) => {
+    if (i === 0) return startService(name);
+    setTimeout(() => { if (!app.isQuitting) startService(name); }, i * STAGGER_MS);
+  });
 }
 
 // ── Setup wizard plumbing ─────────────────────────────────────────────────
@@ -1100,9 +1113,11 @@ if (!app.requestSingleInstanceLock()) {
     // We're back after a (possible) update: remove the flag so the detached
     // "Updating ASVA" window closes itself now that the real app is on screen.
     try { fs.unlinkSync(UPDATING_FLAG); } catch (_) {}
-    startAll();
+    // Window FIRST: the owner sees ASVA immediately instead of staring at
+    // nothing while three child processes fight over the disk.
     createWindow();
     createTray();
+    setTimeout(() => { if (!app.isQuitting) startAll(); }, 2500);
     // Keep the app findable in Windows search after an update. Run it NOW (so
     // even an open-then-close within seconds heals the shortcut), again shortly
     // after (in case the exe path settles late post-update), and once more on
