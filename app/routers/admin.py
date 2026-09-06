@@ -982,6 +982,11 @@ async function buildToday() {{
     if (pend) rows.push(['<b>' + pend + '</b> payment' + (pend > 1 ? 's' : '') + ' ready to post to Tally', 'goPayments()']);
     if (prom) rows.push(['<b>' + prom + '</b> customer' + (prom > 1 ? 's' : '') + ' said they paid, review', 'goPayments()']);
     if (miss) rows.push(['<b>' + miss + '</b> owe money but have no WhatsApp number', 'openImportNumbers()']);
+    // Intent, not confirmation: they were handed to their UPI app. Worth a look
+    // at the bank now, so the wording says "tapped Pay", never "paid".
+    (p.pay_signals || []).forEach(function (s) {{
+      rows.push([esc(s.name) + ' opened your payment link and tapped Pay. Check if it came in.', 'goPayments()']);
+    }});
   }} catch (e) {{}}
   el.style.display = 'block';
   // A setup problem outranks everything: the shop is online but importing
@@ -4745,9 +4750,45 @@ def admin_payments_data(token: str = Query(...)):
         except Exception:
             log.warning("skipping a malformed receipt row (business %s)", bid, exc_info=True)
 
+    # Customers who opened the pay link and tapped Pay in the last 24h. This is
+    # INTENT, never a confirmed payment (a UPI deep link calls nobody back), so
+    # the wording downstream says "tapped Pay", not "paid". It is still the
+    # earliest signal the owner gets - usually hours before the customer
+    # remembers to reply PAID.
+    pay_signals = []
+    try:
+        since = (_dt.datetime.now(_dt.timezone.utc)
+                 - _dt.timedelta(hours=24)).isoformat()
+        evs = (db.table("pay_link_events")
+               .select("client_id, kind, amount, created_at")
+               .eq("business_id", bid).eq("kind", "tapped")
+               .gte("created_at", since)
+               .order("created_at", desc=True).limit(20).execute()).data or []
+        ev_cids = list({e["client_id"] for e in evs if e.get("client_id")})
+        ev_names = {}
+        if ev_cids:
+            cr2 = (db.table("clients").select("id, name")
+                   .in_("id", ev_cids).execute()).data or []
+            ev_names = {c["id"]: c.get("name") for c in cr2}
+        seen_c = set()
+        for e in evs:
+            cid = e.get("client_id")
+            if cid in seen_c:
+                continue
+            seen_c.add(cid)
+            pay_signals.append({
+                "client_id": cid,
+                "name": ev_names.get(cid) or "A customer",
+                "amount": float(e.get("amount") or 0),
+                "at": e.get("created_at"),
+            })
+    except Exception:
+        log.debug("pay-link signals unavailable", exc_info=True)
+
     return {
         "promises": promises_out,
         "pending": pending_out,
+        "pay_signals": pay_signals,
         "deposit_ledgers": rq.get_deposit_ledgers(db, bid),
     }
 

@@ -2,6 +2,7 @@
   - UPI  -> a TAPPABLE https pay link (and a QR image). WhatsApp does not
              linkify "upi://", so the raw deep link arrived as dead grey text.
   - Bank -> NEFT/RTGS bank details + a cheque line, then UPI too
+  - Bank -> A/c + IFSC + cheque in the message, no link and no QR
   - Cash -> NOTHING digital: no UPI link, no QR, no bank details (no paper trail
             for a cash / off-books customer). This is the key guarantee.
 """
@@ -62,4 +63,14 @@ def test_bank_batch_carries_bank_and_cheque(monkeypatch):
     cap = _send(monkeypatch, batches.BANK_SENTINEL)
     txt = cap["message_text"]
     assert "IFSC" in txt and "Cheque" in txt
-    assert "/pay/" in txt and "upi://" not in txt  # bank batch still offers UPI too
+    assert "A/c" in txt
+
+
+def test_bank_batch_sends_no_link_and_no_qr(monkeypatch):
+    # The account number and IFSC ARE the instruction: the payer starts the
+    # NEFT/RTGS/IMPS from their own bank app. A pay link or a UPI QR on a bank
+    # message only invites the wrong rail.
+    cap = _send(monkeypatch, batches.BANK_SENTINEL)
+    txt = cap["message_text"]
+    assert "/pay/" not in txt and "upi://" not in txt
+    assert cap.get("image_base64") is None

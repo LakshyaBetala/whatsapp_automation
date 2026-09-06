@@ -15,6 +15,7 @@ database write and the URL cannot be edited to another shop or another amount.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
@@ -93,6 +94,38 @@ def _simple(title: str, body: str) -> str:
             '<p style="color:#787774">' + esc(body) + "</p>")
 
 
+def _log_event(db, business_id, client_id, kind: str, amount) -> None:
+    """Record customer INTENT on the pay page. Best-effort and never fatal.
+
+    This is not a payment confirmation and must never be shown as one: a UPI
+    deep link hands the customer to their own app and nothing calls us back.
+    It tells the owner "worth checking your bank now", hours before the
+    customer gets round to replying PAID.
+    """
+    if db is None:
+        return
+    try:
+        db.table("pay_link_events").insert({
+            "business_id": business_id,
+            "client_id": client_id,
+            "kind": kind,
+            "amount": float(amount or 0),
+        }).execute()
+    except Exception:
+        log.debug("pay event %s not recorded", kind, exc_info=True)
+
+
+@router.post("/pay/{token}/tapped")
+def pay_tapped(token: str):
+    """The customer pressed "Pay by UPI" and was handed to their UPI app."""
+    parsed = upi.parse_pay_token(token)
+    if not parsed:
+        return {"ok": False}
+    business_id, amount, client_id = parsed
+    _log_event(get_client(), business_id, client_id, "tapped", amount)
+    return {"ok": True}
+
+
 @router.get("/pay/{token}", response_class=HTMLResponse)
 def pay_page(token: str, ref: str = Query(default="")):
     """Render the shop's own collection details for one reminder amount."""
@@ -136,6 +169,8 @@ def pay_page(token: str, ref: str = Query(default="")):
     bank = bank_details(biz)
     ref = (ref or "").strip()[:40]
 
+    _log_event(db, business_id, client_id, "opened", amount)
+
     ref_html = '<p class="ref">Ref: ' + esc(ref) + "</p>" if ref else ""
 
     # Every pending bill, not just the one that triggered the reminder, so the
@@ -159,6 +194,19 @@ def pay_page(token: str, ref: str = Query(default="")):
             label = ("bill" if len(bills) == 1 else "bills")
             bills_html = ('<div class="sep">your pending ' + label + "</div>"
                           + rows_html)
+        # A link lives in a chat for days. If the customer part-paid since it was
+        # sent, the amount baked into the token is stale and would ask for money
+        # they no longer owe. Show the LIVE balance instead. min() is right both
+        # ways: a part payment drops the live total below the token amount, and
+        # a batch discount puts the token amount below the live total - either
+        # way the customer is never asked for more than is due.
+        live = sum(float(b.get("outstanding") or 0) for b in bills)
+        if live > 0 and abs(live - float(amount)) >= 1:
+            if live < float(amount):
+                note = ("Part of this has already been received. "
+                        "The balance below is up to date.")
+                bills_html = ('<div class="warn">' + note + "</div>" + bills_html)
+            amount = Decimal(str(min(live, float(amount))))
 
     upi_html = ""
     if vpa:
@@ -171,8 +219,10 @@ def pay_page(token: str, ref: str = Query(default="")):
                        'src="data:image/png;base64,' + qr + '">'
                        '<p class="hint">Scan from another phone with any UPI app.</p>'
                        "</div>")
-        upi_html = ('<a class="btn" href="' + esc(link) + '">Pay ' + esc(inr(amount))
-                    + " by UPI</a>"
+        # sendBeacon survives the page being replaced by the UPI app.
+        tap = ("try{navigator.sendBeacon('/pay/" + esc(token) + "/tapped')}catch(e){}")
+        upi_html = ('<a class="btn" href="' + esc(link) + '" onclick="' + tap + '">Pay '
+                    + esc(inr(amount)) + " by UPI</a>"
                     '<p class="hint">Opens GPay, PhonePe, Paytm or your bank app.</p>'
                     # The UPI ID in plain text as well: if the button cannot open
                     # an app (an unusual phone, a desktop browser, an in-app

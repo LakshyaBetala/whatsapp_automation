@@ -1584,8 +1584,11 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
             block.append((f"Cheque: in favour of {biz_name}"
                           if en else f"Cheque: {biz_name} ke naam"))
             lines += block
-        if vpa:
-            lines += [""] + _upi_lines()
+        # A bank-transfer batch is self-sufficient: the account number and IFSC
+        # ARE the instruction, and the payer starts the NEFT/RTGS/IMPS from
+        # their own bank app. No link and no UPI QR here - a UPI QR on a bank
+        # message just invites the wrong rail. Owners who want the one-tap UPI
+        # option put those parties in a UPI batch.
     else:  # upi
         if vpa:
             lines += [""] + _upi_lines()
