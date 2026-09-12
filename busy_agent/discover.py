@@ -31,6 +31,11 @@ from datetime import datetime
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "busy_discovery.json")
 
+# Every engine a BUSY product might use. Classic BUSY: Access (.mdb/.bds) or
+# SQL Server. BUSY Magic is newer and undocumented, so also catch SQLite
+# (.db/.sqlite), SQL Server LocalDB (.mdf) and Firebird (.fdb).
+DATA_EXT = (".mdb", ".bds", ".accdb", ".db", ".sqlite", ".sqlite3", ".mdf", ".fdb")
+
 # Words that, in a table name, suggest the tables we need. Case-insensitive.
 HINTS = {
     "party_masters": ["master", "party", "ledger", "account", "acc"],
@@ -105,10 +110,24 @@ def _find_data_files(install_dirs: list[str], registry: list[dict]) -> list[dict
             if isinstance(v, str) and os.path.isdir(v):
                 roots.append(v)
     for c in "CDEF":
-        for name in ("BusyData", "BUSYWIN", "BusyWin", "Busy", "BUSY"):
+        for name in ("BusyData", "BUSYWIN", "BusyWin", "Busy", "BUSY", "BusyMagic", "BUSY Magic"):
             d = os.path.join(f"{c}:\\", name)
             if os.path.isdir(d):
                 roots.append(d)
+    # BUSY Magic is a newer product and may keep data where modern Windows apps
+    # do, not in C:\BusyData. Look in every per-user / per-machine app folder.
+    for env in ("ProgramData", "LOCALAPPDATA", "APPDATA", "USERPROFILE"):
+        base = os.environ.get(env)
+        if not base or not os.path.isdir(base):
+            continue
+        for sub in ("", "Documents"):
+            top = os.path.join(base, sub) if sub else base
+            try:
+                for d in os.listdir(top):
+                    if "usy" in d.lower() and os.path.isdir(os.path.join(top, d)):
+                        roots.append(os.path.join(top, d))
+            except OSError:
+                pass
     found = []
     seen_roots = set()
     for root in roots:
@@ -123,7 +142,7 @@ def _find_data_files(install_dirs: list[str], registry: list[dict]) -> list[dict
                 dirnames[:] = []
                 continue
             for fn in filenames:
-                if fn.lower().endswith((".mdb", ".bds", ".accdb")):
+                if fn.lower().endswith(DATA_EXT):
                     f = os.path.join(dirpath, fn)
                     try:
                         st = os.stat(f)
@@ -189,6 +208,50 @@ def _dump_access(path: str, max_tables: int = 400) -> dict:
     return out
 
 
+def _dump_sqlite(path: str, max_tables: int = 400) -> dict:
+    """Schema + row counts of a SQLite file, READ-ONLY, no driver needed."""
+    import sqlite3
+    out = {"driver": "sqlite3 (stdlib)", "tables": []}
+    try:
+        cn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except Exception as e:
+        return {"error": f"open failed: {e}"[:300]}
+    try:
+        cur = cn.cursor()
+        names = [r[0] for r in cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for name in names[:max_tables]:
+            entry = {"name": name, "looks_like": _classify(name), "columns": [], "rows": None}
+            try:
+                entry["columns"] = [{"name": r[1], "type": r[2]} for r in
+                                    cur.execute(f'PRAGMA table_info("{name}")')][:80]
+                entry["rows"] = cur.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+            except Exception as e:
+                entry["error"] = str(e)[:120]
+            out["tables"].append(entry)
+        out["table_count"] = len(names)
+    finally:
+        cn.close()
+    return out
+
+
+def _is_sqlite(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(16) == b"SQLite format 3\x00"
+    except OSError:
+        return False
+
+
+def _dump_company(path: str) -> dict:
+    if _is_sqlite(path):
+        return _dump_sqlite(path)
+    if path.lower().endswith((".mdb", ".bds", ".accdb")):
+        return _dump_access(path)
+    return {"error": f"engine not recognised for {os.path.basename(path)} - send the file's first 64 bytes: "
+                     + repr(open(path, "rb").read(64))}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--company", help="path to ONE company .mdb/.bds to dump its schema")
@@ -215,7 +278,7 @@ def main() -> int:
     if not target and report["data_files"]:
         target = report["data_files"][0]["path"]
     if target and os.path.isfile(target):
-        report["company_schema"] = {"path": target, **_dump_access(target)}
+        report["company_schema"] = {"path": target, **_dump_company(target)}
 
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, default=str)

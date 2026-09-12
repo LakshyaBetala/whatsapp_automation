@@ -917,7 +917,7 @@ function reloadActive() {
 }
 // Top-bar / sidebar "Reload data": force an immediate Tally refresh, then reload
 // the webviews once the sync lands (so the dashboard re-renders with fresh data).
-let awaitingSync = false, syncBaseline = null, lastSyncedAtSeen = null;
+let awaitingSync = false, syncBaseline = null, lastSyncedAtSeen = null, statusSeen = false;
 function setReloadLabel(html) {
   const b = document.getElementById('reloadbtn');
   if (b) b.innerHTML = html;
@@ -1566,11 +1566,19 @@ window.asva.onStatus((s) => {
   }
   // Dynamic data loading: whenever a NEWER sync lands (from any source), re-
   // render the pages on their own so fresh dues/bills appear without pressing
-  // anything. Skip the very first value so the initial load isn't double-fetched.
-  if (s.lastSyncedAt && s.lastSyncedAt !== lastRenderedSync) {
-    if (lastRenderedSync !== null && loaded['wv-dash']) reloadAll();
+  // anything. Skip only the FIRST STATUS after app open (the pages just loaded,
+  // no double fetch) - never skip a real change.
+  //
+  // The old guard was `lastRenderedSync !== null`, which broke the first-ever
+  // import on a fresh pairing: the app opens with lastSyncedAt = null, so when
+  // the first import landed the null -> timestamp change was mistaken for
+  // "first value" and ignored. The dashboard sat on "No customers imported
+  // yet" for up to 5 minutes after a SUCCESSFUL import, until the next sync.
+  if (s.lastSyncedAt !== lastRenderedSync) {
+    if (statusSeen && s.lastSyncedAt && loaded['wv-dash']) reloadAll();
     lastRenderedSync = s.lastSyncedAt;
   }
+  statusSeen = true;
 
   setDot('d-backend', !!s.backend); setDot('s-backend', !!s.backend);
   setDot('d-whatsapp', !!s.whatsapp); setDot('s-whatsapp', !!s.whatsapp);
