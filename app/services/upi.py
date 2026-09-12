@@ -56,9 +56,9 @@ def _clean_note(text: str) -> str:
     return " ".join("".join(out).split())
 
 
-def qr_png_base64(data: str) -> Optional[str]:
-    """Render `data` as a QR PNG, base64-encoded. None if qrcode/pillow
-    missing - callers degrade to the text link."""
+def qr_png_bytes(data: str) -> Optional[bytes]:
+    """Render `data` as a QR PNG. None if qrcode/pillow missing - callers
+    degrade to the text link."""
     try:
         import qrcode
     except ImportError:
@@ -68,10 +68,16 @@ def qr_png_base64(data: str) -> Optional[str]:
         img = qrcode.make(data, box_size=8, border=2)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        return base64.b64encode(buf.getvalue()).decode("ascii")
+        return buf.getvalue()
     except Exception:
         log.exception("QR generation failed")
         return None
+
+
+def qr_png_base64(data: str) -> Optional[str]:
+    """qr_png_bytes, base64-encoded for an inline <img> or a WhatsApp image."""
+    raw = qr_png_bytes(data)
+    return base64.b64encode(raw).decode("ascii") if raw else None
 
 
 # ── Tappable pay link ────────────────────────────────────────────────────

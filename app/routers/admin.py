@@ -985,7 +985,8 @@ async function buildToday() {{
     // Intent, not confirmation: they were handed to their UPI app. Worth a look
     // at the bank now, so the wording says "tapped Pay", never "paid".
     (p.pay_signals || []).forEach(function (s) {{
-      rows.push([esc(s.name) + ' opened your payment link and tapped Pay. Check if it came in.', 'goPayments()']);
+      var amt = s.amount > 0 ? ' for ₹' + Math.round(s.amount).toLocaleString('en-IN') : '';
+      rows.push([esc(s.name) + ' opened your payment link and tapped Pay' + amt + '. Check if it came in.', 'goPayments()']);
     }});
   }} catch (e) {{}}
   el.style.display = 'block';
