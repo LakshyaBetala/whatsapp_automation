@@ -19,7 +19,10 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
 source deploy/remote.env
 : "${I3_HOST:?set I3_HOST in deploy/remote.env}"; : "${I3_USER:?}"; : "${I3_DIR:?}"
 PY=".venv/Scripts/python"; [ -f "$PY" ] || PY=".venv/bin/python"; [ -f "$PY" ] || PY="python"
-SSH_OPTS=(-o ConnectTimeout=10)
+# accept-new: a freshly bootstrapped box has a new host key, and the deploy
+# target is a stable Tailscale NAME (asva-vps), so the first push after a
+# migration must not stall on a known_hosts prompt.
+SSH_OPTS=(-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 [ -n "${SSH_KEY:-}" ] && SSH_OPTS+=(-i "$SSH_KEY")
 SSH()  { ssh "${SSH_OPTS[@]}" "$I3_USER@$I3_HOST" "$@"; }
 SCP()  { scp "${SSH_OPTS[@]}" "$@"; }
