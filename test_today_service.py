@@ -49,6 +49,10 @@ class _Query:
         self._in.append((col, set(vals)))
         return self
 
+    def is_(self, col, val):          # .is_("resolved_at", "null")
+        self._eq.append((col, None))
+        return self
+
     def gte(self, *a, **k):
         return self
 
@@ -161,3 +165,39 @@ def test_build_today_tolerates_empty_shop():
     assert snap["chase"] == []
     assert snap["no_number"]["count"] == 0
     assert snap["dso"]["days_stuck"] == 0
+
+
+def test_expected_and_decisions_are_small_and_honest():
+    """Today shows taps SMALL: open ones only, one per customer, five max, and
+    "opened but did not tap" as a single count. Decisions list only what the
+    owner alone can settle."""
+    db = _make_db()
+    db.store["pay_link_events"] = [
+        {"business_id": "b1", "client_id": "c1", "kind": "tapped", "amount": 5000,
+         "note": "INV 71 part", "created_at": "2099-01-01T10:00:00+00:00", "resolved_at": None, "id": "t1"},
+        {"business_id": "b1", "client_id": "c1", "kind": "tapped", "amount": 100,
+         "note": "", "created_at": "2099-01-01T09:00:00+00:00", "resolved_at": "x", "id": "t0"},
+        {"business_id": "b1", "client_id": "c3", "kind": "opened", "amount": 20000,
+         "created_at": "2099-01-01T11:00:00+00:00", "resolved_at": None, "id": "o1"},
+        {"business_id": "b1", "client_id": "c1", "kind": "opened", "amount": 5000,
+         "created_at": "2099-01-01T09:50:00+00:00", "resolved_at": None, "id": "o2"},
+    ]
+    db.store["payment_promises"] = [
+        {"business_id": "b1", "client_id": "c2", "status": "open", "promise_date": "2026-08-01",
+         "raw_text": "will pay by 1st"},
+    ]
+    db.store["pending_receipts"] = [
+        {"business_id": "b1", "status": "failed", "party_display": "RAJESH TRADERS", "amount": 999},
+    ]
+    biz = {"id": "b1", "business_name": "RISHAB TRADING", "setup_problem": None}
+    snap = today_svc.build_today(db, "b1", biz, today=TODAY)
+    x = snap["expected"]
+    assert [i["display"] for i in x["items"]] == ["Rajesh Traders"] or [i["client_id"] for i in x["items"]] == ["c1"]
+    assert x["items"][0]["amount"] == 5000 and x["items"][0]["note"] == "INV 71 part"
+    assert x["more"] == 0
+    assert x["opened_only"] == 1            # c3 opened, c1 opened AND tapped -> not counted
+    kinds = [d["kind"] for d in snap["decisions"]]
+    assert kinds == ["promise_broken", "post_failed", "no_number"]
+    assert "Promised by 01 Aug" in snap["decisions"][0]["text"]
+    # never the word "paid" for a tap
+    assert "paid" not in str(x).lower()

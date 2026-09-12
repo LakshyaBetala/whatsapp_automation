@@ -20,11 +20,32 @@ import logging
 from decimal import Decimal
 
 from app.services import aging, forecast, names, promises, proof, scorecard
+from app.services.templates import inr as _inr
 
 log = logging.getLogger(__name__)
 
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 CHASE_LIMIT = 8
+
+
+EXPECTED_MAX = 5
+
+
+def _dmy(iso: str) -> str:
+    try:
+        return _dt.date.fromisoformat(iso[:10]).strftime("%d %b")
+    except ValueError:
+        return iso
+
+
+def _opened_only_today(db, business_id: str, today: _dt.date, tap_cids: set) -> int:
+    """How many customers opened the pay link today without tapping Pay.
+    One number for one muted line; never a list."""
+    since = _dt.datetime.combine(today, _dt.time.min, tzinfo=IST).isoformat()
+    rows = (db.table("pay_link_events").select("client_id")
+            .eq("business_id", business_id).eq("kind", "opened")
+            .gte("created_at", since).limit(200).execute()).data or []
+    return len({r.get("client_id") for r in rows if r.get("client_id")} - tap_cids)
 
 
 def _today() -> _dt.date:
@@ -217,9 +238,68 @@ def build_today(db, business_id: str, business: dict, *,
             "promise_date": str(p.get("promise_date"))[:10] if p.get("promise_date") else None,
         })
 
+    # ── Money expected: customers who tapped Pay on the pay page ─────────
+    # Shown SMALL on purpose. One row per customer, only unresolved taps,
+    # at most EXPECTED_MAX rows (the rest is a count that links to Payments),
+    # and "opened but did not tap" collapsed into ONE muted line. A list of
+    # every click would bury the day's action under noise.
+    expected, expected_more, opened_only = [], 0, 0
+    try:
+        from app.services import pay_signals
+        taps = pay_signals.open_taps(db, business_id)
+        tap_cids = {t.get("client_id") for t in taps}
+        for t in taps[:EXPECTED_MAX]:
+            cid = t.get("client_id")
+            nm = name_by_id.get(cid) or "A customer"
+            expected.append({
+                "id": t["id"], "client_id": cid,
+                "display": names.clean_display(nm) or nm,
+                "amount": float(t.get("amount") or 0),
+                "note": t.get("note") or "",
+                "at": t.get("created_at"),
+            })
+        expected_more = max(0, len(taps) - EXPECTED_MAX)
+        opened_only = _opened_only_today(db, business_id, today, tap_cids)
+    except Exception:
+        pass
+
+    # ── Needs a decision: the few things only the owner can settle ───────
+    decisions = []
+    if business.get("setup_problem"):
+        decisions.append({"kind": "setup", "display": "ASVA cannot read your customers",
+                          "text": str(business.get("setup_problem"))[:160], "action": "setup"})
+    for p in rows:
+        pd = str(p.get("promise_date") or "")[:10]
+        if pd and pd < today.isoformat():
+            cid = p.get("client_id")
+            nm = name_by_id.get(cid) or "Customer"
+            decisions.append({"kind": "promise_broken", "client_id": cid,
+                              "display": names.clean_display(nm) or nm,
+                              "text": "Promised by " + _dmy(pd) + ", nothing booked since.",
+                              "action": "promise"})
+    try:
+        failed = (db.table("pending_receipts").select("id, party_display, amount")
+                  .eq("business_id", business_id).eq("status", "failed")
+                  .limit(5).execute()).data or []
+        for f_ in failed:
+            decisions.append({"kind": "post_failed", "display": f_.get("party_display") or "A payment",
+                              "text": "Did not post to Tally: " + _inr(f_.get("amount") or 0)
+                                      + ". Review and post again.",
+                              "action": "payments"})
+    except Exception:
+        pass
+    if no_number_ids:
+        decisions.append({"kind": "no_number",
+                          "display": str(len(no_number_ids)) + (" customers" if len(no_number_ids) > 1 else " customer")
+                                     + " who owe you cannot be reached",
+                          "text": "Add their WhatsApp number to start reminders.",
+                          "action": "numbers"})
+
     return {
         "greeting": _greeting(now),
         "date_label": today.strftime("%A, %d %B"),
+        "expected": {"items": expected, "more": expected_more, "opened_only": opened_only},
+        "decisions": decisions,
         "business": business.get("business_name") or "Your shop",
         "money_in": {
             "yesterday": {"amount": y_amt, "count": y_cnt},

@@ -697,26 +697,45 @@ function httpGetJson(url, cb) {
 // lastMoneySince starts at the server's clock (set on the first poll) so we
 // never replay old captures as a burst of pings when the app launches.
 let lastMoneySince = null;
+let EXPECTED_OPEN = 0;
+// The tray tooltip is the "badge": it names how many payments are expected
+// (customers who tapped Pay on the link) so a glance at the tray answers
+// "anything waiting?" without opening the window.
+function updateTrayBadge() {
+  try {
+    if (!tray) return;
+    tray.setToolTip(EXPECTED_OPEN > 0
+      ? `ASVA - ${EXPECTED_OPEN} payment${EXPECTED_OPEN > 1 ? 's' : ''} expected`
+      : 'ASVA - running');
+  } catch (_) {}
+}
 function pollMoneyIn() {
   if (!CONFIG.token) return;
   const since = lastMoneySince ? `&since=${encodeURIComponent(lastMoneySince)}` : '';
-  httpGetJson(`${CONFIG.backendUrl}/admin/notifications?token=${encodeURIComponent(CONFIG.token)}${since}`,
+  // v=2: the server may also send "tapped Pay" events, each with its own
+  // title/body. Older shells (no v) only ever get payment captures, so a tap
+  // is never rendered through the "Money in" wording by mistake.
+  httpGetJson(`${CONFIG.backendUrl}/admin/notifications?token=${encodeURIComponent(CONFIG.token)}${since}&v=2`,
     (ok, j) => {
       if (!ok || !j) return;
       if (j.now) lastMoneySince = j.now;         // advance the watermark
+      if (typeof j.expected_open === 'number') { EXPECTED_OPEN = j.expected_open; updateTrayBadge(); }
       const events = Array.isArray(j.events) ? j.events : [];
       if (!events.length) return;
       if (!Notification || !Notification.isSupported || !Notification.isSupported()) return;
+      // A new tap also asks Windows for attention (taskbar flash) once; the
+      // notification alone is easy to miss behind Tally.
+      if (events.some((e) => e.kind === 'tap')) { try { mainWindow && mainWindow.flashFrame(true); } catch (_) {} }
       for (const e of events) {
         try {
           const amt = e.amount ? ('₹' + Number(e.amount).toLocaleString('en-IN')) : '';
           const n = new Notification({
-            title: amt ? `Money in: ${amt}` : 'A customer says they paid',
-            body: `${e.party || 'A customer'} - open Payments to check and post to Tally.`,
+            title: e.title || (amt ? `Money in: ${amt}` : 'A customer says they paid'),
+            body: e.body || `${e.party || 'A customer'} - open Payments to check and post to Tally.`,
             silent: false,
           });
           n.on('click', () => {
-            try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch (_) {}
+            try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); mainWindow.flashFrame(false); } } catch (_) {}
             sendToWindow('focus-tab', { tab: 'payments' });
           });
           n.show();

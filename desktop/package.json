@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",

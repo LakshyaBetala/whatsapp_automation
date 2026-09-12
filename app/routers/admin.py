@@ -2981,6 +2981,80 @@ def admin_set_excluded(payload: SetExcludedPayload):
     return {"ok": True, "excluded": bool(payload.excluded)}
 
 
+def _party_timeline(db, business_id: str, client_id: str, bills: list, receipts: list, esc) -> str:
+    """One dated line per event, newest first, capped. Never raises: a bad
+    row is skipped, an unavailable table is skipped, and an empty story
+    renders nothing at all (no empty box on a fresh party)."""
+    ev: list = []          # (sort_key_iso, css_kind, text)
+
+    def add(when, kind, text):
+        w = str(when or "")[:16].replace("T", " ")
+        if w:
+            ev.append((w, kind, text))
+
+    for b in bills or []:
+        try:
+            add(b.get("invoice_date"), "bill",
+                "Bill " + esc(b.get("invoice_number") or "-") + " for " + _inr(b.get("amount")))
+        except Exception:
+            continue
+    for r in receipts or []:
+        try:
+            add(r.get("receipt_date"), "money", "Payment received in Tally " + _inr(r.get("amount"))
+                + (" (" + esc(r["tally_voucher_number"]) + ")" if r.get("tally_voucher_number") else ""))
+        except Exception:
+            continue
+    try:
+        msgs = (db.table("messages").select("type, created_at, delivery_status, reminder_day")
+                .eq("business_id", business_id).eq("client_id", client_id)
+                .neq("type", "bot_reply").order("created_at", desc=True).limit(60).execute()).data or []
+        for m in msgs:
+            t = m.get("type") or "message"
+            st = m.get("delivery_status") or ""
+            label = {"reminder": "Reminder sent", "invoice": "Invoice sent",
+                     "owner_alert": "Letter sent", "balance_confirm": "Balance confirmation sent"}.get(t, t.replace("_", " ").capitalize())
+            tick = " (not delivered)" if st in ("failed", "limit_reached") else ""
+            add(m.get("created_at"), "msg", label + tick)
+    except Exception:
+        pass
+    try:
+        from app.services import pay_signals as _ps
+        for a_ in _ps.history_for_client(db, business_id, client_id, limit=12):
+            if a_.get("kind") == "tapped":
+                how = {"tally": "received in Tally", "screenshot": "customer sent proof",
+                       "owner": "you recorded it", "dismissed": "not received",
+                       "expired": "nothing seen in 3 days", "superseded": "tapped again"}
+                txt = "Tapped Pay " + _inr(a_.get("amount")) + (" (" + esc(a_["note"]) + ")" if a_.get("note") else "")
+                txt += " &rarr; " + (how.get(a_.get("resolved_by") or "", a_.get("resolved_by") or "") or "waiting")
+                add(a_.get("created_at"), "tap", txt)
+            else:
+                add(a_.get("created_at"), "open", "Opened the payment link")
+    except Exception:
+        pass
+    try:
+        proms = (db.table("payment_promises").select("kind, promise_date, status, raw_text, created_at")
+                 .eq("business_id", business_id).eq("client_id", client_id)
+                 .order("created_at", desc=True).limit(10).execute()).data or []
+        for p_ in proms:
+            k = (p_.get("kind") or "promise").replace("_", " ")
+            when = (" by " + str(p_.get("promise_date"))[:10]) if p_.get("promise_date") else ""
+            st = p_.get("status") or "open"
+            add(p_.get("created_at"), "promise",
+                "Customer " + esc(k) + when + " (" + esc(st) + ")"
+                + (": &ldquo;" + esc(str(p_.get("raw_text"))[:80]) + "&rdquo;" if p_.get("raw_text") else ""))
+    except Exception:
+        pass
+    if not ev:
+        return ""
+    ev.sort(key=lambda e: e[0], reverse=True)
+    rows = "".join(
+        '<div class="tl-row"><span class="tl-when">' + esc(w[:10]) + '</span>'
+        '<span class="tl-dot ' + k + '"></span><span class="tl-txt">' + t + "</span></div>"
+        for w, k, t in ev[:40])
+    more = ('<div class="tl-more">' + str(len(ev) - 40) + " earlier events not shown</div>") if len(ev) > 40 else ""
+    return ('<h2>Story</h2><div class="tl">' + rows + more + "</div>")
+
+
 @router.get("/admin/party", response_class=HTMLResponse)
 async def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str = Query("english")):
     """Per-party page: bills, payments received, and the exact reminder schedule
@@ -3067,6 +3141,12 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 
     def esc(s):
         return (str(s or "")).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    # ── The party's story: one vertical line, newest first ────────────
+    # Bills, reminders sent, link opened, tapped Pay, promises, receipts and
+    # letters, each dated. This is what the owner reads before a call, and it
+    # is the evidence bundle a legal step will need, built for free.
+    timeline_html = _party_timeline(db, biz["id"], client_id, all_bills, receipts, esc)
 
     # ── Bills table ───────────────────────────────────────────────────
     def attr(s) -> str:
@@ -3425,6 +3505,8 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
   </div>
 </div>
 
+{timeline_html}
+
 <h2>Bills <button class="ntbtn ntadd" onclick="ntAdd()">+ Add bill</button>{'' if is_tally else ' <button class="ntbtn ntpay" onclick="ntPay()">₹ Record payment</button>'}</h2>
 <div class="tablewrap"><table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th>
   <th class="n">Baaki</th><th>Due</th><th>Status</th><th class="n">Overdue</th><th></th></tr>{bill_rows}</table></div>
@@ -3752,7 +3834,7 @@ async function delParty() {{
         f'<!doctype html><meta charset="utf-8">'
         f'<title>{esc(biz.get("business_name") or "ASVA")} - {esc(c["name"])}</title>{_FAVICON}'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<style>{_CSS}{extra}</style><div class="wrap">{nav}{body}</div>',
+        f'<style>{_CSS}{extra}{_TL_CSS}</style><div class="wrap">{nav}{body}</div>',
         lang))
 
 
@@ -3787,8 +3869,35 @@ _CSS = """
 """ + _NAV_CSS
 
 
+_TL_CSS = """
+ .tl{background:#fff;border:1px solid #EAEAEA;border-radius:12px;padding:6px 16px;max-height:340px;overflow:auto;margin-bottom:22px}
+ .tl-row{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #F2F1EE;font-size:.9rem}
+ .tl-row:last-child{border-bottom:0}
+ .tl-when{color:#787774;font-variant-numeric:tabular-nums;white-space:nowrap;width:82px;flex:none;font-size:.82rem;padding-top:1px}
+ .tl-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:6px;background:#C9C7C2}
+ .tl-dot.bill{background:#2F3437}.tl-dot.money{background:#0a7d33}.tl-dot.msg{background:#9fb8a4}
+ .tl-dot.tap{background:#956400}.tl-dot.open{background:#e6d8a8}.tl-dot.promise{background:#1F6C9F}
+ .tl-txt{flex:1;min-width:0}
+ .tl-more{color:#787774;font-size:.8rem;padding:8px 0}
+"""
+
 _TODAY_CSS = """
  .hi{font-size:1.6rem;font-weight:700;letter-spacing:-.02em;margin:0}
+ .day{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:start}
+ @media(max-width:900px){.day{grid-template-columns:1fr}}
+ .side .hcard{margin-top:14px}
+ .side .hcard .n{font-size:1.5rem}
+ .side .sec{margin-top:22px}
+ .xrow .note{color:#787774;font-size:.8rem;margin-left:6px}
+ .xrow .ago{color:#787774;font-size:.78rem;white-space:nowrap}
+ .xmore{color:#787774;font-size:.84rem;padding:10px 16px;border-top:1px solid #EAEAEA}
+ .xmore a{color:#0a7d33;font-weight:600;text-decoration:none}
+ .drow .cmain .mt{color:#2F3437}
+ .kdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+ .kdot.setup{background:#9F2F2D}.kdot.promise_broken{background:#956400}.kdot.post_failed{background:#9F2F2D}.kdot.no_number{background:#787774}
+ .sk i{display:block;height:54px;border-radius:12px;background:linear-gradient(90deg,#F2F1EE 25%,#FAFAF8 50%,#F2F1EE 75%);background-size:400% 100%;animation:skm 1.2s infinite;margin-bottom:10px}
+ @keyframes skm{0%{background-position:100% 0}100%{background-position:0 0}}
+ @media(prefers-reduced-motion:reduce){.sk i{animation:none}}
  .hd{color:#787774;font-size:.9rem;margin-top:2px}
  .synp{display:inline-block;font-size:.74rem;font-weight:600;padding:3px 10px;border-radius:9999px;margin-top:8px}
  .synp.ok{background:#EDF3EC;color:#346538}
@@ -3856,7 +3965,7 @@ async def admin_today(token: str = Query(...), lang: str = Query("english")):
     title = biz.get("business_name") or "ASVA"
     body = """<div id="thead"><h1 class="hi">Loading...</h1></div>
 <div id="tflash" class="flash"></div>
-<div id="twrap"><div class="hcard" style="margin-top:18px">Loading your day...</div></div>
+<div id="twrap"><div class="sk" style="margin-top:18px"><i></i><i></i><i></i></div></div>
 
 <div id="addnum" class="cfback" style="display:none">
   <div class="cfbox">
@@ -4023,25 +4132,64 @@ function render(){
   // ── No-number nudge: ONLY the parties who OWE and have no number (not
   // "every party with no number"). Opens an inline add-number panel - no leaving
   // this page.
-  let nudge='';
-  const nn=(t.no_number&&t.no_number.count)||0;
-  if(nn>0){
-    nudge = '<div class="nudge"><b>'+nn+' '+TT(nn>1?'customers':'customer')+' who owe you can\\u2019t be reached on WhatsApp.</b> '+
-      TT('Add their number to start reminders and recover more.')+' '+
-      '<button class="nudgebtn" onclick="openAddNum()">'+TT('Add numbers')+'</button></div>';
+
+  // ── Money expected: taps on the pay page. Small by design: only open
+  // taps, one per customer, five at most, "opened but did not tap" as one
+  // muted line. Intent, never "paid" - the owner checks the bank, then posts.
+  const X=(t.expected&&t.expected.items)||[], XM=(t.expected&&t.expected.more)||0, XO=(t.expected&&t.expected.opened_only)||0;
+  let expSec='';
+  if(X.length||XO){
+    const xRows = X.map(x=>(
+      '<div class="crow xrow"><div class="cmain"><div class="nm">'+esc(x.display)+
+        (x.note?'<span class="note">'+esc(x.note)+'</span>':'')+'</div>'+
+        '<div class="mt">'+TT('tapped Pay')+' <span class="ago">'+ago(x.at)+'</span> \u00b7 '+TT('look for this amount in your bank or UPI app')+'</div></div>'+
+      '<div class="camt">'+fmt(x.amount)+'</div>'+
+      '<div class="cacts"><a class="rem" style="text-decoration:none" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'&focus='+encodeURIComponent(x.id)+'">'+TT('Received')+'</a>'+
+        '<button class="op" onclick=\'dismissTap('+JSON.stringify(x.id)+',this)\'>'+TT('Not received')+'</button></div></div>'
+    )).join('');
+    let foot='';
+    if(XM) foot += '<div class="xmore">'+XM+' '+TT('more on')+' <a href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Payments')+'</a></div>';
+    if(XO) foot += '<div class="xmore">'+XO+' '+TT(XO>1?'others opened your payment link today but did not tap Pay yet.':'other opened your payment link today but did not tap Pay yet.')+'</div>';
+    expSec = '<div class="sec"><h2>'+TT('Money expected')+'</h2><div class="sub">'+TT('They tapped Pay on your link. Check it came in, then post it to Tally.')+'</div><div class="clist">'+xRows+foot+'</div></div>';
   }
 
-  // Lead with the day's ACTION (who to chase), then the money glance, then the
-  // secondary reference (promises + aging) - so the owner never scrolls to find
-  // the one thing they open Today for.
+  // ── Needs a decision: only what the owner alone can settle ───────
+  const D=t.decisions||[];
+  const dRows = D.length ? D.map(d=>{
+    let act='';
+    if(d.action==='promise') act='<button class="rem" onclick=\'remind('+JSON.stringify(d.display)+',this)\'>'+TT('Remind')+'</button><a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Enter payment')+'</a>';
+    else if(d.action==='payments') act='<a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Review')+'</a>';
+    else if(d.action==='numbers') act='<button class="op warn" onclick="openAddNum()">'+TT('Add numbers')+'</button>';
+    else if(d.action==='setup') act='<a class="op" href="/admin/setup?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Open setup')+'</a>';
+    return '<div class="crow drow"><span class="kdot '+esc(d.kind)+'"></span><div class="cmain"><div class="nm">'+esc(d.display)+'</div><div class="mt">'+esc(d.text)+'</div></div><div class="cacts">'+act+'</div></div>';
+  }).join('') : '<div class="empty">'+TT('Nothing needs a decision today.')+'</div>';
+
+  // Main column: the three lists in priority order. Sidebar: the glance,
+  // promises and aging, so the owner runs the day from one screen without
+  // scrolling past numbers to reach the action.
   document.getElementById('twrap').innerHTML =
-    '<div class="sec"><h2>'+TT('Who to chase today')+'</h2><div class="sub">'+esc(chaseHead)+'</div><div class="clist">'+chaseRows+'</div></div>'+
-    nudge +
-    '<div class="glance">'+hero+'</div>'+
-    '<div class="twocol">'+
-      '<div class="sec"><h2>'+TT('Said they will pay')+'</h2><div class="sub">'+TT('Following up automatically. Enter the payment when it lands.')+'</div><div class="clist">'+promRows+'</div></div>'+
-      '<div class="sec"><h2>'+TT('Where your money is stuck')+'</h2><div class="sub">'+TT('Outstanding by how far past due.')+'</div><div class="card">'+ageRows+'</div></div>'+
-    '</div>';
+    '<div class="day"><div class="main">'+
+      expSec +
+      '<div class="sec"><h2>'+TT('Who to chase today')+'</h2><div class="sub">'+esc(chaseHead)+'</div><div class="clist">'+chaseRows+'</div></div>'+
+      '<div class="sec"><h2>'+TT('Needs a decision')+'</h2><div class="sub">'+TT('Only what you can settle. Everything else ASVA handles.')+'</div><div class="clist">'+dRows+'</div></div>'+
+    '</div><div class="side">'+
+      hero.replace('class="hero"','class="hero" style="grid-template-columns:1fr;gap:0"') +
+      '<div class="sec"><h2>'+TT('Said they will pay')+'</h2><div class="clist">'+promRows+'</div></div>'+
+      '<div class="sec"><h2>'+TT('Where your money is stuck')+'</h2><div class="card">'+ageRows+'</div></div>'+
+    '</div></div>';
+}
+function ago(iso){
+  if(!iso) return '';
+  const m = Math.round((Date.now() - new Date(iso).getTime())/60000);
+  if(m < 2) return TT('just now');
+  if(m < 60) return m+' '+TT('min ago');
+  const h = Math.round(m/60); if(h < 24) return h+' '+TT('hr ago');
+  const d = Math.round(h/24); return d===1 ? TT('yesterday') : d+' '+TT('days ago');
+}
+async function dismissTap(id, btn){
+  if(btn){ btn.disabled=true; }
+  try{ await fetch('/admin/pay-signals/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,id:id})}); }catch(e){}
+  load();
 }
 async function remind(party, btn){
   if(btn){ btn.disabled=true; btn.textContent=TT('Sending...'); }
@@ -4090,7 +4238,6 @@ setInterval(load, 30000);
     # The handful of English strings the page paints BEFORE its JS runs (loading
     # text) and the persistent add-number panel are localised on the server.
     for _full, _key in (
-        ("Loading your day...", "Loading your day..."),
         (">Loading...</h1>", "Loading..."),
         ("Add WhatsApp numbers", "Add WhatsApp numbers"),
         ("These customers owe you but have no number saved. Add a 10-digit mobile to start reminding them. A number in Tally always wins later.",
@@ -4391,7 +4538,7 @@ async def admin_payments(token: str = Query(...), lang: str = Query("english")):
 <div class="hint" style="margin:6px 0 2px">When a customer says they paid, it appears here. Check the amount and the deposit account, then post it into Tally with one tap. ASVA never posts on its own.</div>
 <div style="margin:12px 0 2px"><button class="mini" onclick="openAdd()">+ Add a payment</button></div>
 <div id="pmflash" class="flash"></div>
-<div id="pmwrap"><div class="card" style="margin-top:18px">Loading...</div></div>
+<div id="pmwrap"><div class="sk" style="margin-top:18px"><i></i><i></i><i></i></div></div>
 
 <div id="cf" class="cfback" style="display:none">
   <div class="cfbox">
@@ -4491,6 +4638,7 @@ async function load(){{
   }}
   PREV_INFLIGHT = new Set((DATA.pending||[]).filter(q=>q.status==='confirmed'||q.status==='posting').map(q=>q.id));
   render();
+  focusTap();
 }}
 function statusChip(s){{
   if(s==='confirmed') return '<span class="chip wait">Waiting to post</span>';
@@ -4624,6 +4772,13 @@ function ago(iso){{
   if(m < 60) return m+' min ago';
   const h = Math.round(m/60); if(h < 24) return h+' hr ago';
   const d = Math.round(h/24); return d===1 ? 'yesterday' : d+' days ago';
+}}
+// Arriving from Today's "Received" button: open the pre-filled form at once.
+const FOCUS = new URLSearchParams(location.search).get('focus') || '';
+let FOCUSED = false;
+function focusTap(){{
+  if(!FOCUS || FOCUSED) return;
+  if((DATA.expected||[]).some(e=>e.id===FOCUS)){{ FOCUSED = true; enterTap(FOCUS); }}
 }}
 function enterTap(id){{
   const x=(DATA.expected||[]).find(e=>e.id===id); if(!x)return;
@@ -4895,7 +5050,7 @@ def admin_payments_clients(token: str = Query(...)):
 
 
 @router.get("/admin/notifications")
-def admin_notifications(token: str = Query(...), since: str = Query("")):
+def admin_notifications(token: str = Query(...), since: str = Query(""), v: int = Query(1)):
     """Money-in signal for the desktop 'ping'. Returns payment captures (customer
     said they paid / sent a screenshot) newer than `since` - the moment a shop
     owner most wants a nudge. The desktop app polls this and fires a native
@@ -4922,9 +5077,42 @@ def admin_notifications(token: str = Query(...), since: str = Query("")):
             })
     except Exception:
         log.debug("notifications fetch failed", exc_info=True)
+    from app.services.templates import inr
+    for e in events:
+        e["kind"] = "capture"
+        e["title"] = ("Money in: " + inr(e["amount"])) if e["amount"] else "A customer says they paid"
+        e["body"] = e["party"] + " - open Payments to check and post to Tally."
+    # Taps on the pay page ("X tapped Pay Rs5,276"). Only for shells that
+    # understand the kind/title/body shape (v>=2): an older shell would render
+    # a tap through its "Money in" template, which claims more than we know.
+    open_expected = 0
+    try:
+        from app.services import pay_signals as _ps
+        taps = _ps.open_taps(db, biz["id"])
+        open_expected = len(taps)
+        if v >= 2:
+            fresh = [t for t in taps if not since or str(t.get("created_at") or "") > since]
+            cids = list({t.get("client_id") for t in fresh if t.get("client_id")})
+            nm = {}
+            if cids:
+                cr = (db.table("clients").select("id, name").in_("id", cids).execute()).data or []
+                nm = {c["id"]: names.clean_display(c.get("name") or "") or "A customer" for c in cr}
+            for t in fresh:
+                amt = float(t.get("amount") or 0)
+                events.append({
+                    "id": t["id"], "kind": "tap",
+                    "party": nm.get(t.get("client_id"), "A customer"), "amount": amt,
+                    "created_at": t.get("created_at"),
+                    "title": nm.get(t.get("client_id"), "A customer") + " tapped Pay " + inr(amt),
+                    "body": ("For " + t["note"] + ". " if t.get("note") else "")
+                            + "Check your bank or UPI app, then post it from Payments.",
+                })
+    except Exception:
+        log.debug("tap notifications unavailable", exc_info=True)
     # Oldest-first so the app shows them in the order they arrived.
-    events.reverse()
-    return {"now": now_iso, "events": events, "count": len(events)}
+    events.sort(key=lambda e: str(e.get("created_at") or ""))
+    return {"now": now_iso, "events": events, "count": len(events),
+            "expected_open": open_expected}
 
 
 class PromiseActionPayload(BaseModel):
