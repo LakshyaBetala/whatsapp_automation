@@ -73,29 +73,31 @@ def _page(db, amount="10975.50", client=CID, ref="2 bills"):
 
 def test_every_pending_bill_is_listed_and_tickable(db):
     _, html = _page(db)
-    assert html.count('class="row bill"') == 2
+    assert html.count('class="bill"') == 2
     assert 'data-p="947500" data-n="2526RTC0071"' in html
     assert 'data-p="150050"' in html          # paise, so nothing rounds away
     assert "overdue" in html                    # factual status per bill
-    assert "Untick any to pay later" in html
+    assert 'id="all">Clear all</button>' in html
 
 
 def test_part_payment_presets_and_custom_box(db):
     _, html = _page(db)
-    for p in ("10%", "25%", "50%", "Full"):
+    for p in ("25%", "50%", "Full"):
         assert ">" + p + "<" in html
+    assert ">10%<" not in html
     assert 'id="cust"' in html and 'inputmode="numeric"' in html
     assert 'id="bal"' in html
 
 
 def test_copy_is_honest_and_not_a_notice(db):
     _, html = _page(db)
-    assert "not a legal notice" in html
     assert "never collects or holds your money" in html
-    assert "stays open" in html                 # part payment wording lives in the JS
-    # one screen: the UPI ID, QR and bank rows fold under one line
+    assert "stay" in html and "remains due after this" in html   # part payment wording lives in the JS
+    # one screen: the UPI ID, QR and bank rows fold under one line, and the
+    # pay button sits in a fixed bar so it is in reach below a long list
     assert "<details><summary>Other ways to pay</summary>" in html
-    assert html.index('id="paybtn"') < html.index("<details>")
+    assert '<div class="bar">' in html and 'id="paybtn"' in html
+    assert "You pay Demo Traders directly" in html
     for banned in ("settled", "cleared", "interest", "penalty", "legal action"):
         assert banned not in html.lower(), banned
     assert "—" not in html and "–" not in html   # no em/en dashes
@@ -126,14 +128,14 @@ def test_bank_only_shop_keeps_bank_details_open(db, monkeypatch):
     monkeypatch.setitem(BUSINESS, "upi_vpa", "")
     _, html = _page(db)
     assert "pay by bank transfer" in html and "<details>" not in html
-    assert 'id="paybtn"' not in html
+    assert 'id="paybtn"' not in html and 'class="nobar"' in html
     monkeypatch.setitem(BUSINESS, "upi_vpa", "demo@okhdfcbank")
 
 
 def test_link_without_customer_still_offers_presets(db):
     tok = upi.pay_token(BIZ, Decimal("500"))
     html = _html(pay.pay_page(tok, ref="INV 12"))
-    assert 'class="row bill"' not in html
+    assert 'class="bill"' not in html
     assert ">Full<" in html and '"total": 500.0' in html
 
 

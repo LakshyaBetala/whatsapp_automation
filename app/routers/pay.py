@@ -54,7 +54,7 @@ _ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
 UPI_SOFT_LIMIT = 100_000
 
 # Presets in percent of the ticked bills. Whole rupees, never below 1.
-PRESETS = (10, 25, 50, 100)
+PRESETS = (25, 50, 100)
 
 
 def esc(text) -> str:
@@ -62,87 +62,110 @@ def esc(text) -> str:
 
 
 _PAGE = """<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex"><meta name="theme-color" content="#F7F6F3">
 <title>Pay {shop}</title>
 <style>
-  :root {{ color-scheme: light; }}
-  * {{ box-sizing: border-box; }}
-  body {{ margin:0; background:#F7F6F3; color:#2F3437;
+  :root {{ color-scheme: light; --ink:#1F2326; --mute:#787774; --line:#EAEAEA; --soft:#F2F1EE;
+           --paper:#F7F6F3; --card:#fff; --go:#0a7d33; --late:#9F2F2D; }}
+  * {{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }}
+  html {{ background:var(--paper); }}
+  body {{ margin:0; background:var(--paper); color:var(--ink); line-height:1.5;
          font-family:'SF Pro Display',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-         line-height:1.6; }}
-  .wrap {{ max-width:420px; margin:0 auto; padding:28px 20px 56px; }}
-  .card {{ background:#fff; border:1px solid #EAEAEA; border-radius:12px; padding:24px; }}
-  .to {{ color:#787774; font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; }}
-  h1 {{ font-size:1.25rem; margin:.25rem 0 1.1rem; letter-spacing:-.02em; }}
-  .amt {{ font-size:2.5rem; font-weight:700; letter-spacing:-.03em; margin:0;
-          font-variant-numeric:tabular-nums; }}
-  .ref {{ color:#787774; font-size:.95rem; margin:.25rem 0 0; }}
-  .btn {{ display:block; text-align:center; text-decoration:none; margin-top:22px;
-          background:#0a7d33; color:#fff; font-weight:600; font-size:1.05rem;
-          padding:15px; border-radius:8px; }}
-  .btn.off {{ background:#C9C7C2; pointer-events:none; }}
-  .hint {{ color:#787774; font-size:.85rem; text-align:center; margin-top:10px; }}
-  .sep {{ display:flex; align-items:center; gap:12px; color:#787774;
-          font-size:.75rem; margin:26px 0 18px; text-transform:uppercase;
-          letter-spacing:.08em; }}
-  .sep::before, .sep::after {{ content:""; flex:1; height:1px; background:#EAEAEA; }}
-  .qr {{ text-align:center; }}
-  .qr img {{ width:210px; height:210px; image-rendering:pixelated; }}
-  .row {{ display:flex; justify-content:space-between; gap:14px; padding:9px 0;
-          border-bottom:1px solid #F2F1EE; font-size:.95rem; }}
-  .row:last-child {{ border-bottom:0; }}
-  .row b {{ font-weight:600; text-align:right; word-break:break-all;
-            font-variant-numeric:tabular-nums; }}
-  .row i {{ color:#787774; font-style:normal; }}
-  .bill {{ align-items:center; cursor:pointer; margin:0; }}
-  .bill input {{ width:20px; height:20px; margin:0 4px 0 0; flex:none; accent-color:#0a7d33; }}
+         padding-bottom:calc(112px + env(safe-area-inset-bottom)); }}
+  body.nobar {{ padding-bottom:40px; }}
+  .wrap {{ max-width:440px; margin:0 auto; padding:20px 16px 0; }}
+  .card {{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:22px 18px; }}
+  .to {{ color:var(--mute); font-size:.74rem; letter-spacing:.1em; text-transform:uppercase; }}
+  h1 {{ font-size:1.15rem; margin:.2rem 0 1rem; letter-spacing:-.01em; line-height:1.3; }}
+  .amt {{ font-size:2.6rem; font-weight:700; letter-spacing:-.035em; margin:0; line-height:1.1;
+          font-variant-numeric:tabular-nums; transition:opacity .15s; }}
+  .sub {{ color:var(--mute); font-size:.92rem; margin:.35rem 0 0; min-height:1.4em; }}
+  .sub b {{ color:var(--ink); font-weight:600; }}
+  .head {{ display:flex; justify-content:space-between; align-items:baseline; margin:26px 0 6px; }}
+  .head span {{ color:var(--mute); font-size:.74rem; letter-spacing:.1em; text-transform:uppercase; }}
+  .head button {{ font:inherit; font-size:.82rem; color:var(--go); background:none; border:0;
+                  padding:6px 0 6px 12px; cursor:pointer; font-weight:600; }}
+  .bill {{ display:flex; align-items:center; gap:12px; padding:12px 0; margin:0;
+           border-bottom:1px solid var(--soft); cursor:pointer; }}
+  .bill:last-of-type {{ border-bottom:0; }}
+  .bill input {{ appearance:none; -webkit-appearance:none; width:24px; height:24px; margin:0; flex:none;
+                 border:2px solid #C9C7C2; border-radius:7px; background:#fff; display:grid;
+                 place-content:center; transition:background .12s, border-color .12s; }}
+  .bill input::before {{ content:""; width:12px; height:7px; border:0 solid #fff; border-width:0 0 2.5px 2.5px;
+                         transform:rotate(-45deg) translate(1px,-1px) scale(0); transition:transform .12s; }}
+  .bill input:checked {{ background:var(--go); border-color:var(--go); }}
+  .bill input:checked::before {{ transform:rotate(-45deg) translate(1px,-1px) scale(1); }}
+  .bill input:focus-visible {{ outline:2px solid var(--go); outline-offset:2px; }}
   .bill .who {{ flex:1; min-width:0; }}
-  .bill .who i {{ color:#2F3437; display:block; }}
-  .bill .who small {{ color:#787774; font-size:.8rem; display:block; line-height:1.3; }}
-  .bill .who small.late {{ color:#9F2F2D; }}
-  .bill.unticked b, .bill.unticked .who i {{ color:#A8A6A1; }}
-  .presets {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }}
-  .presets button {{ font:inherit; font-weight:600; padding:10px 0; border-radius:8px;
-                     border:1px solid #EAEAEA; background:#fff; color:#2F3437; cursor:pointer; }}
-  .presets button.on {{ background:#2F3437; color:#fff; border-color:#2F3437; }}
-  .presets button:focus-visible, .cust input:focus-visible {{ outline:2px solid #0a7d33; outline-offset:2px; }}
-  .cust {{ display:flex; align-items:center; gap:8px; margin-top:10px;
-           border:1px solid #EAEAEA; border-radius:8px; padding:6px 12px; }}
-  .cust span {{ color:#787774; }}
-  .cust input {{ font:inherit; font-size:1.1rem; font-weight:600; border:0; outline:0;
-                 width:100%; min-width:0; font-variant-numeric:tabular-nums; }}
-  .bal {{ font-size:.9rem; margin:12px 0 0; color:#2F3437; }}
-  .bal.zero {{ color:#787774; }}
-  .foot {{ color:#787774; font-size:.8rem; text-align:center; margin-top:24px; }}
-  .warn {{ background:#FBF3DB; color:#956400; border-radius:8px; padding:12px;
-           font-size:.9rem; margin-top:18px; }}
-  details {{ margin-top:22px; border-top:1px solid #EAEAEA; }}
-  summary {{ cursor:pointer; list-style:none; padding:14px 0 4px; font-size:.95rem;
-             font-weight:600; display:flex; justify-content:space-between; align-items:center; }}
+  .bill .who i {{ font-style:normal; display:block; font-weight:500; font-size:.97rem; }}
+  .bill .who small {{ color:var(--mute); font-size:.8rem; display:block; line-height:1.3; }}
+  .bill .who small.late {{ color:var(--late); }}
+  .bill b {{ font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }}
+  .bill.off .who i, .bill.off b {{ color:#B5B3AE; }}
+  .bill.off .who small {{ color:#C9C7C2; }}
+  .seg {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:8px; }}
+  .seg button {{ font:inherit; font-weight:600; font-size:1rem; padding:13px 0; border-radius:10px;
+                 border:1.5px solid var(--line); background:#fff; color:var(--ink); cursor:pointer;
+                 transition:transform .08s; }}
+  .seg button:active {{ transform:scale(.97); }}
+  .seg button.on {{ background:var(--ink); color:#fff; border-color:var(--ink); }}
+  .seg button:focus-visible, .cust:focus-within {{ outline:2px solid var(--go); outline-offset:2px; }}
+  .cust {{ display:flex; align-items:center; gap:8px; margin-top:10px; border:1.5px solid var(--line);
+           border-radius:10px; padding:9px 14px; background:#fff; }}
+  .cust.on {{ border-color:var(--ink); }}
+  .cust span {{ color:var(--mute); font-size:1.05rem; }}
+  .cust input {{ font:inherit; font-size:1.15rem; font-weight:600; border:0; outline:0; width:100%;
+                 min-width:0; font-variant-numeric:tabular-nums; background:transparent; }}
+  .bal {{ font-size:.9rem; margin:12px 0 0; color:var(--mute); }}
+  .bal b {{ color:var(--ink); font-weight:600; }}
+  .warn {{ background:#FBF3DB; color:#956400; border-radius:10px; padding:11px 13px; font-size:.88rem; margin-top:14px; }}
+  .row {{ display:flex; justify-content:space-between; gap:14px; padding:10px 0; border-bottom:1px solid var(--soft); font-size:.95rem; }}
+  .row:last-child {{ border-bottom:0; }}
+  .row i {{ color:var(--mute); font-style:normal; }}
+  .row b {{ font-weight:600; text-align:right; word-break:break-all; font-variant-numeric:tabular-nums; }}
+  .copy {{ font:inherit; font-size:.78rem; font-weight:600; color:var(--go); background:none; border:0;
+           padding:0 0 0 8px; cursor:pointer; white-space:nowrap; }}
+  .sep {{ color:var(--mute); font-size:.74rem; letter-spacing:.1em; text-transform:uppercase; margin:20px 0 8px; }}
+  .qr {{ text-align:center; margin-top:14px; }}
+  .qr img {{ width:200px; height:200px; image-rendering:pixelated; border:1px solid var(--line); border-radius:12px; padding:8px; background:#fff; }}
+  .hint {{ color:var(--mute); font-size:.84rem; margin:8px 0 0; }}
+  details {{ margin-top:20px; border-top:1px solid var(--line); }}
+  summary {{ cursor:pointer; list-style:none; padding:16px 0 6px; font-size:.97rem; font-weight:600;
+             display:flex; justify-content:space-between; align-items:center; }}
   summary::-webkit-details-marker {{ display:none; }}
-  summary::after {{ content:"+"; color:#787774; font-weight:400; font-size:1.2rem; }}
-  details[open] summary::after {{ content:"\2212"; }}
-  summary:focus-visible {{ outline:2px solid #0a7d33; outline-offset:2px; }}
-  .foot p {{ margin:0 0 8px; }}
-</style></head><body><div class="wrap">
+  summary::after {{ content:""; width:9px; height:9px; border:solid var(--mute); border-width:0 2px 2px 0;
+                    transform:rotate(45deg); margin:0 6px 4px 0; transition:transform .15s; }}
+  details[open] summary::after {{ transform:rotate(-135deg); margin-bottom:-2px; }}
+  summary:focus-visible {{ outline:2px solid var(--go); outline-offset:2px; }}
+  .bar {{ position:fixed; left:0; right:0; bottom:0; background:rgba(247,246,243,.92);
+          -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); border-top:1px solid var(--line);
+          padding:12px 16px calc(12px + env(safe-area-inset-bottom)); }}
+  .bar .in {{ max-width:440px; margin:0 auto; }}
+  .btn {{ display:block; text-align:center; text-decoration:none; background:var(--go); color:#fff;
+          font-weight:600; font-size:1.08rem; padding:16px; border-radius:12px; transition:transform .08s, background .15s; }}
+  .btn:active {{ transform:scale(.985); }}
+  .btn.off {{ background:#C9C7C2; pointer-events:none; }}
+  .bar .hint {{ text-align:center; margin-top:7px; font-size:.8rem; }}
+  .foot {{ color:var(--mute); font-size:.8rem; text-align:center; margin:22px 0 0; line-height:1.5; }}
+  .foot p {{ margin:0 0 6px; }}
+  @media (prefers-reduced-motion: reduce) {{ * {{ transition:none !important; }} }}
+</style></head><body{body_class}><div class="wrap">
   <div class="card">
     <div class="to">Pay to</div>
     <h1>{shop}</h1>
     <p class="amt" id="amt">{amount}</p>
-    {ref_html}
+    <p class="sub" id="sub">{sub}</p>
     {bills_html}
     {picker_html}
-    {pay_html}
+    {inline_html}
     {other_html}
   </div>
   <div class="foot">
-    <p>After paying, send the screenshot to {shop} on WhatsApp so your account is updated.
-       Bill looks wrong? Tell {shop} before paying.</p>
-    <p>Sent by ASVA for {shop}. You pay {shop} directly.
-       ASVA never collects or holds your money. This is a payment reminder, not a legal notice.</p>
+    <p>After paying, send the screenshot to {shop} on WhatsApp so your account is updated.</p>
+    <p>You pay {shop} directly. ASVA never collects or holds your money.</p>
   </div>
-</div>{script}</body></html>"""
+</div>{bar_html}{script}</body></html>"""
 
 
 # Inline, dependency-free, old-Android-safe (var/function only). Kept out of
@@ -152,13 +175,16 @@ _SCRIPT = """<script>
 (function () {
   var C = __CFG__;
   var bills = [].slice.call(document.querySelectorAll('.bill input'));
-  var presets = [].slice.call(document.querySelectorAll('.presets button'));
+  var presets = [].slice.call(document.querySelectorAll('.seg button'));
   var cust = document.getElementById('cust');
+  var custBox = document.getElementById('custbox');
   var amtEl = document.getElementById('amt');
+  var subEl = document.getElementById('sub');
   var balEl = document.getElementById('bal');
   var btn = document.getElementById('paybtn');
   var qr = document.getElementById('qr');
   var big = document.getElementById('bigamt');
+  var all = document.getElementById('all');
   var pct = 100, chosen = 0, qrTimer = null;
 
   function fmt(n) {
@@ -167,18 +193,18 @@ _SCRIPT = """<script>
     if (rest) last = rest.replace(/\\B(?=(\\d{2})+(?!\\d))/g, ',') + ',' + last;
     return '\\u20B9' + last;
   }
+  function money(n) { return (n % 1) ? n.toFixed(2) : String(n); }
   function ticked() {
     var out = [];
     bills.forEach(function (b) { if (b.checked) out.push(b); });
     return out;
   }
-  function total() {
-    var t = ticked();
-    if (!bills.length) return C.total;
-    var sum = 0;
-    t.forEach(function (b) { sum += parseInt(b.getAttribute('data-p'), 10) || 0; });
-    return sum / 100;
+  function sumOf(list) {
+    var s = 0;
+    list.forEach(function (b) { s += parseInt(b.getAttribute('data-p'), 10) || 0; });
+    return s / 100;
   }
+  function total() { return bills.length ? sumOf(ticked()) : C.total; }
   function note() {
     // The customer's own words to the shop, carried in the UPI transaction
     // note: which bill, and whether it is the whole of it. Letters, digits,
@@ -200,24 +226,32 @@ _SCRIPT = """<script>
     chosen = v;
     render();
   }
-  function money(n) { return (n % 1) ? n.toFixed(2) : String(n); }
   function render() {
-    var full = total(), rest = full - chosen;
+    var full = total(), rest = full - chosen, t = ticked();
     if (rest < 0.5) rest = 0;
     amtEl.textContent = fmt(chosen);
+    if (subEl && bills.length) {
+      var grand = sumOf(bills), nb = bills.length;
+      if (!t.length) subEl.textContent = 'No bill selected';
+      else if (t.length === nb && !rest) subEl.textContent = nb + (nb > 1 ? ' bills, ' : ' bill, ') + 'paying in full';
+      else if (t.length === nb) subEl.innerHTML = 'of <b>' + fmt(grand) + '</b> across ' + nb + ' bills';
+      else subEl.innerHTML = t.length + ' of ' + nb + ' bills selected' + (rest ? ', <b>' + fmt(full) + '</b> due on them' : '');
+    }
     presets.forEach(function (p) {
       p.className = (parseInt(p.getAttribute('data-pct'), 10) === pct) ? 'on' : '';
     });
+    if (custBox) custBox.className = pct ? 'cust' : 'cust on';
     if (cust && document.activeElement !== cust) cust.value = chosen ? money(chosen) : '';
     if (balEl) {
-      if (!full) { balEl.textContent = 'Nothing selected. Tick a bill above.'; balEl.className = 'bal zero'; }
-      else if (rest > 0) { balEl.innerHTML = 'Paying <b>' + fmt(chosen) + '</b> now. ' + (ticked().length > 1 ? 'These bills stay open' : 'The bill stays open') + ' and <b>' + fmt(rest) + '</b> remains due.'; balEl.className = 'bal'; }
-      else { balEl.innerHTML = 'Paying <b>' + fmt(chosen) + '</b> now clears the selected bill' + (ticked().length > 1 ? 's' : '') + '.'; balEl.className = 'bal'; }
+      if (!full) balEl.textContent = 'Tick a bill above to pay it.';
+      else if (rest > 0) balEl.innerHTML = 'The ' + (t.length > 1 ? 'bills stay' : 'bill stays') + ' open. <b>' + fmt(rest) + '</b> remains due after this.';
+      else balEl.innerHTML = 'This clears the selected ' + (t.length > 1 ? 'bills' : 'bill') + '.';
     }
+    if (all) all.textContent = (t.length === bills.length) ? 'Clear all' : 'Select all';
     if (big) big.style.display = (chosen > C.softLimit) ? 'block' : 'none';
     if (btn) {
       var tn = note();
-      btn.textContent = 'Pay ' + fmt(chosen) + ' by UPI';
+      btn.textContent = chosen ? 'Pay ' + fmt(chosen) + ' by UPI' : 'Select a bill to pay';
       btn.className = chosen ? 'btn' : 'btn off';
       btn.setAttribute('href', chosen ? C.linkBase + '&am=' + chosen.toFixed(2) + '&tn=' + encodeURIComponent(tn) : '#');
       if (qr) {
@@ -234,9 +268,14 @@ _SCRIPT = """<script>
 
   bills.forEach(function (b) {
     b.addEventListener('change', function () {
-      b.parentNode.className = b.checked ? 'row bill' : 'row bill unticked';
+      b.parentNode.className = b.checked ? 'bill' : 'bill off';
       if (pct) fromPct(pct); else setChosen(chosen);
     });
+  });
+  if (all) all.addEventListener('click', function () {
+    var on = ticked().length !== bills.length;
+    bills.forEach(function (b) { b.checked = on; b.parentNode.className = on ? 'bill' : 'bill off'; });
+    if (pct) fromPct(pct); else setChosen(chosen);
   });
   presets.forEach(function (p) {
     p.addEventListener('click', function () { fromPct(parseInt(p.getAttribute('data-pct'), 10)); });
@@ -256,6 +295,12 @@ _SCRIPT = """<script>
       try { navigator.sendBeacon('/pay/' + C.token + '/tapped?a=' + chosen.toFixed(2)); } catch (e) {}
     });
   }
+  [].slice.call(document.querySelectorAll('.copy')).forEach(function (c) {
+    c.addEventListener('click', function () {
+      var v = c.getAttribute('data-v'), done = function () { c.textContent = 'Copied'; setTimeout(function () { c.textContent = 'Copy'; }, 1500); };
+      try { navigator.clipboard.writeText(v).then(done, function () {}); } catch (e) {}
+    });
+  });
   if (qr) qr.addEventListener('error', function () { qr.parentNode.style.display = 'none'; });
   setChosen(total());
 })();
@@ -350,7 +395,7 @@ def _amount_for(token: str, requested) -> tuple | None:
 
 
 # ── Page sections. Each returns HTML or "" so the page stays one screen:
-# decide (bills, how much) and pay (one button). Everything else folds.
+# decide (bills, how much) and pay (one button that is always in reach).
 
 def _bills_section(bills: list[dict]) -> str:
     """Every pending bill, tickable, with its factual due status."""
@@ -363,15 +408,14 @@ def _bills_section(bills: list[dict]) -> str:
         no = str(b.get("invoice_number") or "Balance")
         status, late = _bill_status(b, today)
         rows.append(
-            '<label class="row bill"><input type="checkbox" checked data-p="'
+            '<label class="bill"><input type="checkbox" checked data-p="'
             + str(paise) + '" data-n="' + esc(upi._clean_note(no)[:30]) + '">'
             '<span class="who"><i>' + esc(no) + "</i>"
             + ('<small class="' + ("late" if late else "") + '">' + esc(status) + "</small>" if status else "")
             + "</span><b>" + esc(inr(b.get("outstanding") or 0)) + "</b></label>")
-    hint = ('<p class="hint" style="text-align:left;margin-top:6px">Untick any to pay later.</p>'
-            if len(bills) > 1 else "")
-    return ('<div class="sep">your pending ' + ("bill" if len(bills) == 1 else "bills")
-            + "</div>" + "".join(rows) + hint)
+    toggle = '<button type="button" id="all">Clear all</button>' if len(bills) > 1 else ""
+    return ('<div class="head"><span>your pending ' + ("bill" if len(bills) == 1 else "bills")
+            + "</span>" + toggle + "</div>" + "".join(rows))
 
 
 def _picker_section(amount, has_vpa: bool, has_bank: bool) -> str:
@@ -383,25 +427,30 @@ def _picker_section(amount, has_vpa: bool, has_bank: bool) -> str:
     more = ("use bank transfer under Other ways to pay, or " if (has_vpa and has_bank) else
             "use the bank transfer details below, or " if has_bank else "")
     return (
-        '<div class="sep">how much now</div>'
-        '<div class="presets">'
+        '<div class="head"><span>how much now</span></div>'
+        '<div class="seg">'
         + "".join('<button type="button" data-pct="' + str(p) + '"'
                   + (' class="on"' if p == 100 else "") + ">"
                   + ("Full" if p == 100 else str(p) + "%") + "</button>"
                   for p in PRESETS)
         + "</div>"
-        '<label class="cust"><span>&#8377;</span>'
+        '<label class="cust" id="custbox"><span>&#8377;</span>'
         '<input id="cust" inputmode="numeric" pattern="[0-9]*" '
-        'placeholder="or type an amount" aria-label="Amount to pay now"></label>'
+        'placeholder="or type any amount" aria-label="Amount to pay now"></label>'
         '<p class="bal" id="bal"></p>'
         '<div class="warn" id="bigamt" style="display:none">Most UPI apps allow up to '
         + esc(inr(UPI_SOFT_LIMIT)) + " in one payment. For more, " + more
         + "pay in more than one UPI payment.</div>")
 
 
+def _copy_row(label: str, value: str) -> str:
+    return ('<div class="row"><i>' + esc(label) + '</i><b>' + esc(value)
+            + '<button type="button" class="copy" data-v="' + esc(value) + '">Copy</button></b></div>')
+
+
 def _bank_rows(bank: dict) -> str:
     return "".join(
-        '<div class="row"><i>' + esc(lbl) + "</i><b>" + esc(val) + "</b></div>"
+        _copy_row(lbl, val)
         for lbl, val in (("Account name", bank["name"]),
                          ("Account number", bank["no"]),
                          ("IFSC", bank["ifsc"]),
@@ -409,37 +458,41 @@ def _bank_rows(bank: dict) -> str:
         if val)
 
 
-def _pay_sections(vpa: str, shop: str, amount, ref: str, bank) -> tuple[str, str]:
-    """(primary, other). With a VPA the primary is ONE button; the UPI ID, the
-    QR and the bank details fold under "Other ways to pay" so the page stays
-    calm. Without a VPA the bank details ARE the way to pay and stay open."""
+def _pay_sections(vpa: str, shop: str, amount, ref: str, bank) -> tuple[str, str, str]:
+    """(inline, other, bar). With a VPA the way to pay is ONE button, fixed at
+    the bottom of the screen so it is in reach however long the bill list is;
+    the UPI ID, the QR and the bank details fold under "Other ways to pay".
+    Without a VPA the bank details ARE the way to pay and stay open in the
+    card, and there is no bar."""
     if vpa:
         link = upi.upi_link(vpa, shop, amount, ref or shop)
-        primary = ('<a class="btn" id="paybtn" href="' + esc(link) + '">Pay '
-                   + esc(inr(amount)) + " by UPI</a>"
-                   '<p class="hint">Opens GPay, PhonePe, Paytm or your bank app.</p>')
+        bar = ('<div class="bar"><div class="in">'
+               '<a class="btn" id="paybtn" href="' + esc(link) + '">Pay '
+               + esc(inr(amount)) + " by UPI</a>"
+               '<p class="hint">Opens GPay, PhonePe, Paytm or your bank app</p>'
+               "</div></div>")
         # The UPI ID in plain text as well: if the button cannot open an app
         # (an unusual phone, a desktop browser, an in-app webview), the customer
-        # can still type this into their own UPI app. Never leave them with
+        # can still paste this into their own UPI app. Never leave them with
         # only a button.
-        other = '<div class="row"><i>UPI ID</i><b>' + esc(vpa) + "</b></div>"
+        other = _copy_row("UPI ID", vpa)
         qr = upi.qr_png_base64(link)
         if qr:
-            other += ('<div class="qr" style="margin-top:14px"><img id="qr" alt="UPI QR code for '
-                      + esc(shop) + '" src="data:image/png;base64,' + qr + '">'
+            other += ('<div class="qr"><img id="qr" alt="UPI QR code for ' + esc(shop)
+                      + '" src="data:image/png;base64,' + qr + '">'
                       '<p class="hint">Scan from another phone. The code follows the amount you pick.</p>'
                       "</div>")
         if bank:
             other += ('<div class="sep">bank transfer</div>' + _bank_rows(bank)
                       + '<p class="hint">NEFT, RTGS or IMPS. Put the bill number in the remarks.</p>')
-        return primary, ('<details><summary>Other ways to pay</summary>' + other + "</details>")
+        return "", ('<details><summary>Other ways to pay</summary>' + other + "</details>"), bar
     if bank:
-        primary = ('<div class="sep">pay by bank transfer</div>' + _bank_rows(bank)
-                   + '<p class="hint">NEFT, RTGS or IMPS from your bank app. '
-                     "Put the bill number in the remarks.</p>")
-        return primary, ""
+        inline = ('<div class="sep" style="margin-top:26px">pay by bank transfer</div>' + _bank_rows(bank)
+                  + '<p class="hint">NEFT, RTGS or IMPS from your bank app. '
+                    "Put the bill number in the remarks.</p>")
+        return inline, "", ""
     return ('<div class="warn">This shop has not added a payment method yet. '
-            "Please contact them directly.</div>"), ""
+            "Please contact them directly.</div>"), "", ""
 
 
 @router.post("/pay/{token}/tapped")
@@ -542,15 +595,16 @@ def pay_page(token: str, ref: str = Query(default="")):
                           "The balance below is up to date.</div>")
         amount = Decimal(str(min(live, float(amount))))
 
+    # The line under the amount is live (the script rewrites it as bills are
+    # ticked); this is only its first paint.
     if bills:
-        ref_html = ('<p class="ref">for ' + (str(len(bills)) + " bills" if len(bills) > 1
-                                              else "1 bill") + "</p>")
+        sub = (str(len(bills)) + (" bills, " if len(bills) > 1 else " bill, ") + "paying in full")
     else:
-        ref_html = '<p class="ref">Ref: ' + esc(ref) + "</p>" if ref else ""
+        sub = ("Ref: " + esc(ref)) if ref else ""
 
     bills_html = stale_html + _bills_section(bills)
     picker_html = _picker_section(amount, has_vpa=bool(vpa), has_bank=bool(bank))
-    pay_html, other_html = _pay_sections(vpa, shop, amount, ref, bank)
+    inline_html, other_html, bar_html = _pay_sections(vpa, shop, amount, ref, bank)
 
     cfg = {
         "token": token,
@@ -563,7 +617,9 @@ def pay_page(token: str, ref: str = Query(default="")):
     }
     script = _SCRIPT.replace("__CFG__", json.dumps(cfg).replace("</", "<\\/"))
 
-    return HTMLResponse(_PAGE.format(shop=esc(shop), amount=esc(inr(amount)),
-                                     ref_html=ref_html, bills_html=bills_html,
-                                     picker_html=picker_html, pay_html=pay_html,
-                                     other_html=other_html, script=script))
+    return HTMLResponse(_PAGE.format(shop=esc(shop), amount=esc(inr(amount)), sub=sub,
+                                     bills_html=bills_html, picker_html=picker_html,
+                                     inline_html=inline_html, other_html=other_html,
+                                     bar_html=bar_html,
+                                     body_class=("" if bar_html else ' class="nobar"'),
+                                     script=script))
