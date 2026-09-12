@@ -77,7 +77,7 @@ def test_every_pending_bill_is_listed_and_tickable(db):
     assert 'data-p="947500" data-n="2526RTC0071"' in html
     assert 'data-p="150050"' in html          # paise, so nothing rounds away
     assert "overdue" in html                    # factual status per bill
-    assert "Untick a bill" in html
+    assert "Untick any to pay later" in html
 
 
 def test_part_payment_presets_and_custom_box(db):
@@ -93,6 +93,9 @@ def test_copy_is_honest_and_not_a_notice(db):
     assert "not a legal notice" in html
     assert "never collects or holds your money" in html
     assert "stays open" in html                 # part payment wording lives in the JS
+    # one screen: the UPI ID, QR and bank rows fold under one line
+    assert "<details><summary>Other ways to pay</summary>" in html
+    assert html.index('id="paybtn"') < html.index("<details>")
     for banned in ("settled", "cleared", "interest", "penalty", "legal action"):
         assert banned not in html.lower(), banned
     assert "—" not in html and "–" not in html   # no em/en dashes
@@ -117,6 +120,14 @@ def test_pay_page_script_is_valid_javascript(db, tmp_path):
     f.write_text(js, encoding="utf-8")
     r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[:800]
+
+
+def test_bank_only_shop_keeps_bank_details_open(db, monkeypatch):
+    monkeypatch.setitem(BUSINESS, "upi_vpa", "")
+    _, html = _page(db)
+    assert "pay by bank transfer" in html and "<details>" not in html
+    assert 'id="paybtn"' not in html
+    monkeypatch.setitem(BUSINESS, "upi_vpa", "demo@okhdfcbank")
 
 
 def test_link_without_customer_still_offers_presets(db):

@@ -16,9 +16,27 @@ ZIP="${1:-}"
 echo "==> Updating ASVA from $ZIP"
 echo "    (keeping .env, downloads/, and the WhatsApp session)"
 # Never overwrite the live config, the published downloads, or the WA auth.
-unzip -o "$ZIP" -x ".env" "downloads/*" "wa_service/.baileys_auth/*" -d "$HERE"
+if command -v unzip >/dev/null 2>&1; then
+  unzip -oq "$ZIP" -x ".env" "downloads/*" "wa_service/.baileys_auth/*" -d "$HERE"
+else
+  # A box set up by hand may lack unzip; python is always there.
+  python3 - "$ZIP" "$HERE" <<'PY'
+import sys, zipfile
+zf, dest = sys.argv[1], sys.argv[2]
+skip = (".env", "downloads/", "wa_service/.baileys_auth/")
+with zipfile.ZipFile(zf) as z:
+    for m in z.infolist():
+        if m.filename == ".env" or m.filename.startswith(skip[1:]):
+            continue
+        z.extract(m, dest)
+PY
+fi
 ./.venv/bin/pip install -r requirements.txt --quiet
-sudo systemctl restart asva-backend asva-bot
+# bootstrap.sh grants exactly this one command via /etc/sudoers.d/asva-restart.
+sudo -n systemctl restart asva-backend asva-bot || {
+  echo "!! Cannot restart services as $(whoami). Run as root:  systemctl restart asva-backend asva-bot" >&2
+  exit 1
+}
 
 # The backend takes ~8-12s to boot (imports + Supabase connect + scheduler), so
 # POLL /health for up to 40s instead of giving one premature 4-second verdict

@@ -117,9 +117,14 @@ _PAGE = """<!doctype html><html lang="en"><head>
   .foot {{ color:#787774; font-size:.8rem; text-align:center; margin-top:24px; }}
   .warn {{ background:#FBF3DB; color:#956400; border-radius:8px; padding:12px;
            font-size:.9rem; margin-top:18px; }}
-  .note {{ background:#F7F6F3; border-radius:8px; padding:12px; font-size:.85rem;
-           color:#787774; margin-top:18px; line-height:1.5; }}
-  .note b {{ color:#2F3437; font-weight:600; }}
+  details {{ margin-top:22px; border-top:1px solid #EAEAEA; }}
+  summary {{ cursor:pointer; list-style:none; padding:14px 0 4px; font-size:.95rem;
+             font-weight:600; display:flex; justify-content:space-between; align-items:center; }}
+  summary::-webkit-details-marker {{ display:none; }}
+  summary::after {{ content:"+"; color:#787774; font-weight:400; font-size:1.2rem; }}
+  details[open] summary::after {{ content:"\2212"; }}
+  summary:focus-visible {{ outline:2px solid #0a7d33; outline-offset:2px; }}
+  .foot p {{ margin:0 0 8px; }}
 </style></head><body><div class="wrap">
   <div class="card">
     <div class="to">Pay to</div>
@@ -128,13 +133,15 @@ _PAGE = """<!doctype html><html lang="en"><head>
     {ref_html}
     {bills_html}
     {picker_html}
-    {upi_html}
-    {bank_html}
-    {note_html}
+    {pay_html}
+    {other_html}
   </div>
-  <p class="foot">Sent by ASVA on behalf of {shop}.<br>
-     You pay {shop} directly. ASVA never collects or holds your money.<br>
-     This is a payment reminder from {shop}, not a legal notice.</p>
+  <div class="foot">
+    <p>After paying, send the screenshot to {shop} on WhatsApp so your account is updated.
+       Bill looks wrong? Tell {shop} before paying.</p>
+    <p>Sent by ASVA for {shop}. You pay {shop} directly.
+       ASVA never collects or holds your money. This is a payment reminder, not a legal notice.</p>
+  </div>
 </div>{script}</body></html>"""
 
 
@@ -342,6 +349,99 @@ def _amount_for(token: str, requested) -> tuple | None:
     return business_id, client_id, chosen.quantize(Decimal("0.01"))
 
 
+# ── Page sections. Each returns HTML or "" so the page stays one screen:
+# decide (bills, how much) and pay (one button). Everything else folds.
+
+def _bills_section(bills: list[dict]) -> str:
+    """Every pending bill, tickable, with its factual due status."""
+    if not bills:
+        return ""
+    today = date.today()
+    rows = []
+    for b in bills:
+        paise = int(round(float(b.get("outstanding") or 0) * 100))
+        no = str(b.get("invoice_number") or "Balance")
+        status, late = _bill_status(b, today)
+        rows.append(
+            '<label class="row bill"><input type="checkbox" checked data-p="'
+            + str(paise) + '" data-n="' + esc(upi._clean_note(no)[:30]) + '">'
+            '<span class="who"><i>' + esc(no) + "</i>"
+            + ('<small class="' + ("late" if late else "") + '">' + esc(status) + "</small>" if status else "")
+            + "</span><b>" + esc(inr(b.get("outstanding") or 0)) + "</b></label>")
+    hint = ('<p class="hint" style="text-align:left;margin-top:6px">Untick any to pay later.</p>'
+            if len(bills) > 1 else "")
+    return ('<div class="sep">your pending ' + ("bill" if len(bills) == 1 else "bills")
+            + "</div>" + "".join(rows) + hint)
+
+
+def _picker_section(amount, has_vpa: bool, has_bank: bool) -> str:
+    """How much now: presets of the ticked bills, or any whole-rupee amount.
+    The balance line is the honest part: a part payment never reads as
+    settled."""
+    if float(amount) < 1:
+        return ""
+    more = ("use bank transfer under Other ways to pay, or " if (has_vpa and has_bank) else
+            "use the bank transfer details below, or " if has_bank else "")
+    return (
+        '<div class="sep">how much now</div>'
+        '<div class="presets">'
+        + "".join('<button type="button" data-pct="' + str(p) + '"'
+                  + (' class="on"' if p == 100 else "") + ">"
+                  + ("Full" if p == 100 else str(p) + "%") + "</button>"
+                  for p in PRESETS)
+        + "</div>"
+        '<label class="cust"><span>&#8377;</span>'
+        '<input id="cust" inputmode="numeric" pattern="[0-9]*" '
+        'placeholder="or type an amount" aria-label="Amount to pay now"></label>'
+        '<p class="bal" id="bal"></p>'
+        '<div class="warn" id="bigamt" style="display:none">Most UPI apps allow up to '
+        + esc(inr(UPI_SOFT_LIMIT)) + " in one payment. For more, " + more
+        + "pay in more than one UPI payment.</div>")
+
+
+def _bank_rows(bank: dict) -> str:
+    return "".join(
+        '<div class="row"><i>' + esc(lbl) + "</i><b>" + esc(val) + "</b></div>"
+        for lbl, val in (("Account name", bank["name"]),
+                         ("Account number", bank["no"]),
+                         ("IFSC", bank["ifsc"]),
+                         ("Bank", bank["bank"]))
+        if val)
+
+
+def _pay_sections(vpa: str, shop: str, amount, ref: str, bank) -> tuple[str, str]:
+    """(primary, other). With a VPA the primary is ONE button; the UPI ID, the
+    QR and the bank details fold under "Other ways to pay" so the page stays
+    calm. Without a VPA the bank details ARE the way to pay and stay open."""
+    if vpa:
+        link = upi.upi_link(vpa, shop, amount, ref or shop)
+        primary = ('<a class="btn" id="paybtn" href="' + esc(link) + '">Pay '
+                   + esc(inr(amount)) + " by UPI</a>"
+                   '<p class="hint">Opens GPay, PhonePe, Paytm or your bank app.</p>')
+        # The UPI ID in plain text as well: if the button cannot open an app
+        # (an unusual phone, a desktop browser, an in-app webview), the customer
+        # can still type this into their own UPI app. Never leave them with
+        # only a button.
+        other = '<div class="row"><i>UPI ID</i><b>' + esc(vpa) + "</b></div>"
+        qr = upi.qr_png_base64(link)
+        if qr:
+            other += ('<div class="qr" style="margin-top:14px"><img id="qr" alt="UPI QR code for '
+                      + esc(shop) + '" src="data:image/png;base64,' + qr + '">'
+                      '<p class="hint">Scan from another phone. The code follows the amount you pick.</p>'
+                      "</div>")
+        if bank:
+            other += ('<div class="sep">bank transfer</div>' + _bank_rows(bank)
+                      + '<p class="hint">NEFT, RTGS or IMPS. Put the bill number in the remarks.</p>')
+        return primary, ('<details><summary>Other ways to pay</summary>' + other + "</details>")
+    if bank:
+        primary = ('<div class="sep">pay by bank transfer</div>' + _bank_rows(bank)
+                   + '<p class="hint">NEFT, RTGS or IMPS from your bank app. '
+                     "Put the bill number in the remarks.</p>")
+        return primary, ""
+    return ('<div class="warn">This shop has not added a payment method yet. '
+            "Please contact them directly.</div>"), ""
+
+
 @router.post("/pay/{token}/tapped")
 def pay_tapped(token: str, a: str = Query(default="")):
     """The customer pressed "Pay by UPI" and was handed to their UPI app.
@@ -427,115 +527,30 @@ def pay_page(token: str, ref: str = Query(default="")):
 
     _log_event(db, business_id, client_id, "opened", amount)
 
-    ref_html = '<p class="ref">Ref: ' + esc(ref) + "</p>" if ref else ""
-
-    # Every pending bill, not just the one that triggered the reminder, so the
-    # customer can see exactly what the amount is made of and pick which to
-    # pay now.
-    bills_html = ""
     bills = _load_bills(db, business_id, client_id) if (client_id and db is not None) else []
+    # A link lives in a chat for days. If the customer part-paid since it was
+    # sent, the amount baked into the token is stale and would ask for money
+    # they no longer owe. Show the LIVE balance instead. min() is right both
+    # ways: a part payment drops the live total below the token amount, and
+    # a batch discount puts the token amount below the live total - either
+    # way the customer is never asked for more than is due.
+    stale_html = ""
+    live = sum(float(b.get("outstanding") or 0) for b in bills)
+    if live > 0 and abs(live - float(amount)) >= 1:
+        if live < float(amount):
+            stale_html = ('<div class="warn">Part of this has already been received. '
+                          "The balance below is up to date.</div>")
+        amount = Decimal(str(min(live, float(amount))))
+
     if bills:
-        today = date.today()
-        rows_html = []
-        for b in bills:
-            paise = int(round(float(b.get("outstanding") or 0) * 100))
-            no = str(b.get("invoice_number") or "Balance")
-            status, late = _bill_status(b, today)
-            rows_html.append(
-                '<label class="row bill"><input type="checkbox" checked data-p="'
-                + str(paise) + '" data-n="' + esc(upi._clean_note(no)[:30]) + '">'
-                '<span class="who"><i>' + esc(no) + "</i>"
-                + ('<small class="' + ("late" if late else "") + '">' + esc(status) + "</small>" if status else "")
-                + "</span><b>" + esc(inr(b.get("outstanding") or 0)) + "</b></label>")
-        label = "bill" if len(bills) == 1 else "bills"
-        bills_html = ('<div class="sep">your pending ' + label + "</div>"
-                      + "".join(rows_html)
-                      + '<p class="hint" style="text-align:left">Untick a bill to leave it for later.</p>')
-        # A link lives in a chat for days. If the customer part-paid since it was
-        # sent, the amount baked into the token is stale and would ask for money
-        # they no longer owe. Show the LIVE balance instead. min() is right both
-        # ways: a part payment drops the live total below the token amount, and
-        # a batch discount puts the token amount below the live total - either
-        # way the customer is never asked for more than is due.
-        live = sum(float(b.get("outstanding") or 0) for b in bills)
-        if live > 0 and abs(live - float(amount)) >= 1:
-            if live < float(amount):
-                note = ("Part of this has already been received. "
-                        "The balance below is up to date.")
-                bills_html = ('<div class="warn">' + note + "</div>" + bills_html)
-            amount = Decimal(str(min(live, float(amount))))
+        ref_html = ('<p class="ref">for ' + (str(len(bills)) + " bills" if len(bills) > 1
+                                              else "1 bill") + "</p>")
+    else:
+        ref_html = '<p class="ref">Ref: ' + esc(ref) + "</p>" if ref else ""
 
-    # How much now. Presets are of the ticked bills; the custom box takes any
-    # whole-rupee amount up to that. The balance line is the honest part: a
-    # part payment never reads as "settled".
-    picker_html = ""
-    if float(amount) >= 1:
-        picker_html = (
-            '<div class="sep">how much now</div>'
-            '<div class="presets">'
-            + "".join('<button type="button" data-pct="' + str(p) + '"'
-                      + (' class="on"' if p == 100 else "") + ">"
-                      + ("Full" if p == 100 else str(p) + "%") + "</button>"
-                      for p in PRESETS)
-            + "</div>"
-            '<label class="cust"><span>&#8377;</span>'
-            '<input id="cust" inputmode="numeric" pattern="[0-9]*" '
-            'placeholder="or type an amount" aria-label="Amount to pay now"></label>'
-            '<p class="bal" id="bal"></p>'
-            '<div class="warn" id="bigamt" style="display:none">Most UPI apps allow up to '
-            + esc(inr(UPI_SOFT_LIMIT)) + " in one payment. For more, "
-            + ("use the bank transfer details below, or " if bank else "")
-            + "pay in more than one UPI payment.</div>")
-
-    upi_html = ""
-    if vpa:
-        link = upi.upi_link(vpa, shop, amount, ref or shop)
-        qr = upi.qr_png_base64(link)
-        qr_html = ""
-        if qr:
-            qr_html = ('<div class="sep">or scan this code</div>'
-                       '<div class="qr"><img id="qr" alt="UPI QR code for ' + esc(shop) + '" '
-                       'src="data:image/png;base64,' + qr + '">'
-                       '<p class="hint">Scan from another phone with any UPI app. '
-                       "The code updates with the amount you pick.</p>"
-                       "</div>")
-        upi_html = ('<a class="btn" id="paybtn" href="' + esc(link) + '">Pay '
-                    + esc(inr(amount)) + " by UPI</a>"
-                    '<p class="hint">Opens GPay, PhonePe, Paytm or your bank app. '
-                    "Your app shows the account holder before you confirm.</p>"
-                    # The UPI ID in plain text as well: if the button cannot open
-                    # an app (an unusual phone, a desktop browser, an in-app
-                    # webview), the customer can still type this into their own
-                    # UPI app and pay. Never leave them with only a button.
-                    '<div class="row" style="margin-top:14px"><i>UPI ID</i><b>'
-                    + esc(vpa) + "</b></div>"
-                    + qr_html)
-
-    bank_html = ""
-    if bank:
-        rows_html = "".join(
-            '<div class="row"><i>' + esc(lbl) + "</i><b>" + esc(val) + "</b></div>"
-            for lbl, val in (("Account name", bank["name"]),
-                             ("Account number", bank["no"]),
-                             ("IFSC", bank["ifsc"]),
-                             ("Bank", bank["bank"]))
-            if val)
-        if rows_html:
-            bank_html = ('<div class="sep">bank transfer</div>' + rows_html
-                         + '<p class="hint">Use NEFT, RTGS or IMPS from your bank app. '
-                           "Put the bill number in the remarks.</p>")
-
-    if not upi_html and not bank_html:
-        upi_html = ('<div class="warn">This shop has not added a payment method yet. '
-                    "Please contact them directly.</div>")
-
-    # After-payment and dispute lines close the loop on both sides: the
-    # screenshot feeds the shop's WhatsApp payment capture, and "tell the shop
-    # first" is the dispute channel until the page grows a button for it.
-    note_html = ('<div class="note"><b>After paying,</b> send the payment screenshot to '
-                 + esc(shop) + " on WhatsApp so your account is updated. "
-                 "<b>Bill looks wrong?</b> Tell " + esc(shop)
-                 + " on WhatsApp before paying.</div>")
+    bills_html = stale_html + _bills_section(bills)
+    picker_html = _picker_section(amount, has_vpa=bool(vpa), has_bank=bool(bank))
+    pay_html, other_html = _pay_sections(vpa, shop, amount, ref, bank)
 
     cfg = {
         "token": token,
@@ -550,6 +565,5 @@ def pay_page(token: str, ref: str = Query(default="")):
 
     return HTMLResponse(_PAGE.format(shop=esc(shop), amount=esc(inr(amount)),
                                      ref_html=ref_html, bills_html=bills_html,
-                                     picker_html=picker_html, upi_html=upi_html,
-                                     bank_html=bank_html, note_html=note_html,
-                                     script=script))
+                                     picker_html=picker_html, pay_html=pay_html,
+                                     other_html=other_html, script=script))

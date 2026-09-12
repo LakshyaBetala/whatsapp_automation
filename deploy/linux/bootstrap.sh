@@ -63,9 +63,17 @@ fi
 echo "   python $(python3 --version | cut -d' ' -f2)   node $(node -v)   pg_dump $(pg_dump --version | awk '{print $3}')"
 
 # ── 2. service user ──────────────────────────────────────────────────────
-say "[2/9] service user ${APP_USER} (no sudo)"
+say "[2/9] service user ${APP_USER} (no sudo, except restarting its own units)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$APP_USER"
 chown -R "$APP_USER:$APP_USER" "/home/${APP_USER}"
+# The ONLY root action the deploy user may take: restart the two ASVA units.
+# push_release.sh runs update_asva.sh as this user and it must not need root
+# for anything else. Exact commands, no wildcards, no shell.
+cat > /etc/sudoers.d/asva-restart <<SUDO
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart asva-backend asva-bot, /usr/bin/systemctl restart asva-backend, /usr/bin/systemctl restart asva-bot
+SUDO
+chmod 440 /etc/sudoers.d/asva-restart
+visudo -cf /etc/sudoers.d/asva-restart >/dev/null || die "sudoers rule invalid"
 
 # ── 3. app dependencies ──────────────────────────────────────────────────
 say "[3/9] python venv + wa_service"
