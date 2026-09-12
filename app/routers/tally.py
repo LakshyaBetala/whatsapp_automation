@@ -762,6 +762,13 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                     "receipt_date": v.date,
                     "client_id": client_id,   # link by id (rename-proof), migration 038
                 }).execute()
+                # Money arrived: close any "tapped Pay" the customer left open
+                # on the pay page (Expected list). Best-effort, never fatal.
+                try:
+                    from app.services import pay_signals
+                    pay_signals.resolve_for_receipt(db, biz, client_id, v.amount, "tally")
+                except Exception:
+                    log.debug("pay signal resolve skipped", exc_info=True)
 
                 # Find oldest open TALLY bills. WhatsApp-made bills (source
                 # photo/manual) are excluded: a Tally receipt is money Tally

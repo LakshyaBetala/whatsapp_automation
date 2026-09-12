@@ -2045,6 +2045,13 @@ async def _handle_paid_owner(
         return f"{client['name']}: amount must be more than zero."
     if not row:
         return "Could not queue that right now. Please try again."
+    # The owner has recorded this party's payment: close their open "tapped
+    # Pay" on the pay page, whatever the amount.
+    try:
+        from app.services import pay_signals
+        pay_signals.resolve_for_client(db, business_id, client["id"], "owner")
+    except Exception:
+        log.debug("pay signal resolve skipped", exc_info=True)
 
     # A queued receipt supersedes any promise/claim hold (it's being handled).
     try:

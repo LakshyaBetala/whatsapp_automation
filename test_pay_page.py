@@ -141,21 +141,21 @@ def test_link_without_customer_still_offers_presets(db):
 
 def test_tap_records_the_amount_the_customer_chose(db):
     tok = upi.pay_token(BIZ, Decimal("10975.50"), CID)
-    assert pay.pay_tapped(tok, a="2500.00") == {"ok": True}
-    kinds = [(t, r["kind"], r["amount"]) for t, r in db.writes]
-    assert ("pay_link_events", "tapped", 2500.0) in kinds
+    assert pay.pay_tapped(tok, a="2500.00", n="INV 2526RTC0071 part") == {"ok": True}
+    rows = [(t, r["kind"], r["amount"], r.get("note")) for t, r in db.writes]
+    assert ("pay_link_events", "tapped", 2500.0, "INV 2526RTC0071 part") in rows
 
 
 def test_tap_with_junk_amount_falls_back_to_the_reminder_amount(db):
     tok = upi.pay_token(BIZ, Decimal("10975.50"), CID)
-    pay.pay_tapped(tok, a="-5")
-    pay.pay_tapped(tok, a="abc")
+    pay.pay_tapped(tok, a="-5", n="")
+    pay.pay_tapped(tok, a="abc", n="x<script>")
     amounts = [r["amount"] for _, r in db.writes if r["kind"] == "tapped"]
     assert amounts == [10975.5, 10975.5]
 
 
 def test_tap_on_a_forged_token_records_nothing(db):
-    assert pay.pay_tapped("xxxx", a="1") == {"ok": False}
+    assert pay.pay_tapped("xxxx", a="1", n="") == {"ok": False}
     assert db.writes == []
 
 
@@ -180,3 +180,9 @@ def test_bill_status_is_factual():
     assert "due today" in text and not late
     text, late = pay._bill_status({"invoice_date": "2026-09-01"}, today)
     assert text == "Billed 01 Sep" and not late
+
+
+def test_smart_assistant_is_in_the_page(db):
+    _, html = _page(db)
+    for needle in ("function applyAmount", "function suggest", "id=\"sugg\"", "overLimit", '"hasBank": true'):
+        assert needle in html, needle

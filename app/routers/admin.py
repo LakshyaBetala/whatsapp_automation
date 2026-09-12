@@ -3142,6 +3142,33 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
             '<div class="tablewrap"><table><tr><th>Date</th><th class="n">Amount</th><th>Note</th></tr>'
             + pay_rows + '</table></div>')
 
+    # ── Pay-page activity: the funnel after a reminder. Opened -> tapped Pay
+    # (amount, which bill) -> what became of it. Intent, never "paid".
+    try:
+        from app.services import pay_signals as _ps
+        _acts = _ps.history_for_client(db, biz["id"], client_id)
+    except Exception:
+        _acts = []
+    if _acts:
+        _how = {"tally": "received in Tally", "screenshot": "customer sent proof",
+                "owner": "you recorded it", "dismissed": "not received",
+                "expired": "nothing seen in 3 days", "superseded": "tapped again"}
+        act_rows = ""
+        for a_ in _acts:
+            when = str(a_.get("created_at") or "")[:16].replace("T", " ")
+            if a_.get("kind") == "tapped":
+                what = f'Tapped Pay {_inr(a_.get("amount"))}' + (f' ({esc(a_.get("note"))})' if a_.get("note") else "")
+                if a_.get("resolved_by"):
+                    what += f' <span class="muted">&rarr; {_how.get(a_["resolved_by"], a_["resolved_by"])}</span>'
+                else:
+                    what += ' <span class="muted">&rarr; waiting</span>'
+            else:
+                what = "Opened the payment link"
+            act_rows += f"<tr><td>{esc(when)}</td><td>{what}</td></tr>"
+        payments_section += ('<div class="muted" style="margin:12px 0 4px">Payment link activity</div>'
+                             '<div class="tablewrap"><table><tr><th>When</th><th>What</th></tr>'
+                             + act_rows + "</table></div>")
+
     # ── Reminder schedule: only meaningful once reminders are ON, and only
     # FORWARD from today. A party turned on AFTER the due date should see the
     # overdue messages it will now get, not a history of dates that never sent
@@ -4500,7 +4527,30 @@ function render(){{
   const cP = P.length?(' <span class="cnt">'+P.length+'</span>'):'';
   const cQ = Q.length?(' <span class="cnt">'+Q.length+'</span>'):'';
   const postingNote = posting?('<div class="postnote">&#8635; Posting '+posting+' receipt'+(posting>1?'s':'')+' to Tally...</div>'):'';
-  document.getElementById('pmwrap').innerHTML =
+  // Expected: customers who tapped Pay on the pay page. Intent, not money -
+  // every word says "tapped", and the only way into Tally is the owner's
+  // button. Resolved rows (Tally receipt / screenshot / owner) show a tick for
+  // a day so the owner sees the loop close, then leave.
+  const X = DATA.expected||[];
+  let xh = '';
+  if(X.length){{
+    xh = '<h2>Expected <span class="cnt">'+X.filter(x=>!x.resolved_by).length+'</span></h2>'+
+      '<div class="hint" style="margin:-4px 0 8px">They opened your payment link and tapped Pay. Check your bank or UPI app for exactly this amount, then post it. If it never came, press Not received.</div>'+
+      '<div class="card pad0">'+X.map(x=>{{
+        const when = ago(x.at);
+        const what = '<b>'+esc(x.name)+'</b> tapped Pay <b>&#8377;'+inr(x.amount)+'</b>'+(x.note?' <span class="meta">('+esc(x.note)+')</span>':'');
+        if(x.resolved_by){{
+          const how = x.resolved_by==='tally' ? 'Received in Tally' : x.resolved_by==='screenshot' ? 'Customer sent proof' : 'You recorded it';
+          return '<div class="prow"><div class="pmain">'+what+'<div class="meta">'+when+' &middot; <span style="color:#0a7d33">&#10003; '+how+'</span></div></div></div>';
+        }}
+        return '<div class="prow"><div class="pmain">'+what+'<div class="meta">'+when+' &middot; look for this amount in your bank or UPI app</div></div>'+
+          '<div class="pacts">'+
+            '<button class="mini" onclick='enterTap('+JSON.stringify(x.id)+')'>Received, post to Tally</button>'+
+            '<button class="mini ghost" onclick='dismissTap('+JSON.stringify(x.id)+')'>Not received</button>'+
+          '</div></div>';
+      }}).join('')+'</div>';
+  }}
+  document.getElementById('pmwrap').innerHTML = xh +
     '<div class="cols">'+
       '<div class="colp"><h2>Customers who say they paid'+cP+'</h2><div class="card pad0">'+ph+'</div></div>'+
       '<div class="colp"><h2>Ready to post to Tally'+cQ+'</h2>'+postingNote+'<div class="card pad0">'+qh+'</div></div>'+
@@ -4566,6 +4616,25 @@ async function postReceipt(){{
   // the agent next runs (Tally open). Close and let the list show its status.
   if(ok){{ closeCf(); flash('\\u2713 Payment saved. It will post to Tally shortly.'); load(); }}
   else document.getElementById('cfmsg').textContent = detail || 'Could not save. Try again.';
+}}
+function ago(iso){{
+  if(!iso) return '';
+  const m = Math.round((Date.now() - new Date(iso).getTime())/60000);
+  if(m < 2) return 'just now';
+  if(m < 60) return m+' min ago';
+  const h = Math.round(m/60); if(h < 24) return h+' hr ago';
+  const d = Math.round(h/24); return d===1 ? 'yesterday' : d+' days ago';
+}}
+function enterTap(id){{
+  const x=(DATA.expected||[]).find(e=>e.id===id); if(!x)return;
+  CF = {{mode:'promise', client_id:x.client_id, name:x.name}};
+  openCf('Payment received', x.name, x.amount, 'Cash', today(),
+    'Tapped Pay '+ago(x.at)+(x.note?' for '+x.note:'')+'. Check the amount against your bank or UPI app before posting.');
+}}
+async function dismissTap(id){{
+  await fetch('/admin/pay-signals/dismiss',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,id:id}})}});
+  load();
 }}
 async function chase(clientId){{
   await fetch('/admin/promises/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
@@ -4751,45 +4820,46 @@ def admin_payments_data(token: str = Query(...)):
         except Exception:
             log.warning("skipping a malformed receipt row (business %s)", bid, exc_info=True)
 
-    # Customers who opened the pay link and tapped Pay in the last 24h. This is
-    # INTENT, never a confirmed payment (a UPI deep link calls nobody back), so
-    # the wording downstream says "tapped Pay", not "paid". It is still the
-    # earliest signal the owner gets - usually hours before the customer
-    # remembers to reply PAID.
-    pay_signals = []
+    # Expected payments: customers who tapped Pay on the pay page and whose
+    # money has not yet been seen (Tally receipt, screenshot, or the owner's
+    # own entry). INTENT, never a confirmed payment, so the wording downstream
+    # says "tapped Pay", not "paid". Still the earliest signal the owner gets.
+    from app.services import pay_signals as _ps
+    expected = []
     try:
-        since = (_dt.datetime.now(_dt.timezone.utc)
-                 - _dt.timedelta(hours=24)).isoformat()
-        evs = (db.table("pay_link_events")
-               .select("client_id, kind, amount, created_at")
-               .eq("business_id", bid).eq("kind", "tapped")
-               .gte("created_at", since)
-               .order("created_at", desc=True).limit(20).execute()).data or []
-        ev_cids = list({e["client_id"] for e in evs if e.get("client_id")})
+        taps = _ps.open_taps(db, bid)
+        done = _ps.recently_resolved(db, bid)
+        cids = list({e["client_id"] for e in taps + done if e.get("client_id")})
         ev_names = {}
-        if ev_cids:
+        if cids:
             cr2 = (db.table("clients").select("id, name")
-                   .in_("id", ev_cids).execute()).data or []
+                   .in_("id", cids).execute()).data or []
             ev_names = {c["id"]: c.get("name") for c in cr2}
-        seen_c = set()
-        for e in evs:
-            cid = e.get("client_id")
-            if cid in seen_c:
-                continue
-            seen_c.add(cid)
-            pay_signals.append({
-                "client_id": cid,
-                "name": ev_names.get(cid) or "A customer",
-                "amount": float(e.get("amount") or 0),
-                "at": e.get("created_at"),
+        for e in taps:
+            expected.append({
+                "id": e["id"], "client_id": e.get("client_id"),
+                "name": names.clean_display(ev_names.get(e.get("client_id")) or "") or "A customer",
+                "amount": float(e.get("amount") or 0), "note": e.get("note") or "",
+                "at": e.get("created_at"), "resolved_by": None,
+            })
+        for e in done:
+            expected.append({
+                "id": e["id"], "client_id": e.get("client_id"),
+                "name": names.clean_display(ev_names.get(e.get("client_id")) or "") or "A customer",
+                "amount": float(e.get("amount") or 0), "note": e.get("note") or "",
+                "at": e.get("created_at"), "resolved_by": e.get("resolved_by"),
+                "resolved_at": e.get("resolved_at"),
             })
     except Exception:
-        log.debug("pay-link signals unavailable", exc_info=True)
+        log.debug("expected payments unavailable", exc_info=True)
+    # Kept for the dashboard row, which only wants the open ones.
+    pay_signals = [x for x in expected if not x["resolved_by"]]
 
     return {
         "promises": promises_out,
         "pending": pending_out,
         "pay_signals": pay_signals,
+        "expected": expected,
         "deposit_ledgers": rq.get_deposit_ledgers(db, bid),
     }
 
@@ -4918,11 +4988,33 @@ def admin_promise_action(payload: PromiseActionPayload):
         except Exception:
             log.warning("close_for_client failed after queueing receipt (business %s, client %s)",
                         bid, client["id"], exc_info=True)
+        # An Expected row ("tapped Pay") for this party is answered by this.
+        try:
+            from app.services import pay_signals
+            pay_signals.resolve_for_client(db, bid, client["id"], "owner")
+        except Exception:
+            log.debug("pay signal resolve skipped", exc_info=True)
         # queued=True either way; confirmed tells the UI whether it is already
         # heading to Tally or is sitting in "Ready to post" for one more tap.
         return {"ok": True, "queued": True, "confirmed": bool(confirmed)}
 
     raise HTTPException(status_code=400, detail="unknown action")
+
+
+class PaySignalPayload(BaseModel):
+    token: str
+    id: str
+
+
+@router.post("/admin/pay-signals/dismiss")
+def admin_pay_signal_dismiss(payload: PaySignalPayload):
+    """Owner pressed "Not received" on an Expected row: it leaves the list and
+    becomes history on the party page. Nothing else changes."""
+    from app.services import pay_signals
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    ok = pay_signals.resolve(db, biz["id"], payload.id, "dismissed")
+    return {"ok": bool(ok)}
 
 
 class PendingConfirmPayload(BaseModel):

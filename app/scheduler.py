@@ -25,6 +25,13 @@ log = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 
+async def _pay_signal_expiry() -> None:
+    import asyncio
+    from app.db import get_client
+    from app.services import pay_signals
+    await asyncio.to_thread(pay_signals.expire, get_client())
+
+
 def _tracked(name: str, fn):
     """Wrap a scheduler job so every run stamps job_heartbeats (ok/fail). Lets
     the health center show 'reminder sweep ran 4 min ago' and alert if a job
@@ -175,6 +182,16 @@ def start() -> AsyncIOScheduler:
         log.info("Monitor watchdog DISABLED (ENABLE_MONITOR=false)")
 
     # Ping ourselves so the Supabase free project never idles into a pause.
+    # Daily: "tapped Pay" signals nobody has seen money for become history
+    # ("nothing seen in 3 days") so the Expected list never goes stale.
+    sched.add_job(
+        _tracked("pay_signal_expiry", _pay_signal_expiry),
+        CronTrigger(hour=3, minute=20),
+        id="pay_signal_expiry",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     sched.add_job(
         keepalive.ping,
         CronTrigger(hour="*/6"),  # every 6 hours

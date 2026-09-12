@@ -40,7 +40,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, Response
 
 from app.db import get_client
-from app.services import upi
+from app.services import pay_signals, upi
 from app.services.batches import bank_details
 from app.services.templates import inr
 
@@ -119,6 +119,10 @@ _PAGE = """<!doctype html><html lang="en"><head>
                  min-width:0; font-variant-numeric:tabular-nums; background:transparent; }}
   .bal {{ font-size:.9rem; margin:12px 0 0; color:var(--mute); }}
   .bal b {{ color:var(--ink); font-weight:600; }}
+  .chip {{ display:inline-block; font:inherit; font-size:.86rem; font-weight:600; color:var(--go);
+           background:#EDF3EC; border:0; border-radius:999px; padding:8px 14px; margin-top:10px; cursor:pointer; }}
+  .chip:active {{ transform:scale(.97); }}
+  .btn.alt {{ background:var(--ink); }}
   .warn {{ background:#FBF3DB; color:#956400; border-radius:10px; padding:11px 13px; font-size:.88rem; margin-top:14px; }}
   .row {{ display:flex; justify-content:space-between; gap:14px; padding:10px 0; border-bottom:1px solid var(--soft); font-size:.95rem; }}
   .row:last-child {{ border-bottom:0; }}
@@ -249,11 +253,18 @@ _SCRIPT = """<script>
     }
     if (all) all.textContent = (t.length === bills.length) ? 'Clear all' : 'Select all';
     if (big) big.style.display = (chosen > C.softLimit) ? 'block' : 'none';
+    suggest();
     if (btn) {
       var tn = note();
-      btn.textContent = chosen ? 'Pay ' + fmt(chosen) + ' by UPI' : 'Select a bill to pay';
-      btn.className = chosen ? 'btn' : 'btn off';
-      btn.setAttribute('href', chosen ? C.linkBase + '&am=' + chosen.toFixed(2) + '&tn=' + encodeURIComponent(tn) : '#');
+      if (overLimit()) {
+        btn.textContent = 'Pay ' + fmt(chosen) + ' by bank transfer';
+        btn.className = 'btn alt';
+        btn.setAttribute('href', '#bank');
+      } else {
+        btn.textContent = chosen ? 'Pay ' + fmt(chosen) + ' by UPI' : 'Select a bill to pay';
+        btn.className = chosen ? 'btn' : 'btn off';
+        btn.setAttribute('href', chosen ? C.linkBase + '&am=' + chosen.toFixed(2) + '&tn=' + encodeURIComponent(tn) : '#');
+      }
       if (qr) {
         clearTimeout(qrTimer);
         qrTimer = setTimeout(function () {
@@ -265,6 +276,54 @@ _SCRIPT = """<script>
     }
   }
   function fromPct(p) { pct = p; setChosen(total() * p / 100); }
+  function paise(b) { return parseInt(b.getAttribute('data-p'), 10) || 0; }
+  function tickOnly(list) {
+    bills.forEach(function (b) {
+      var on = list.indexOf(b) >= 0;
+      b.checked = on; b.parentNode.className = on ? 'bill' : 'bill off';
+    });
+  }
+  function applyAmount(v) {
+    // A typed amount picks the bills for the customer: an exact match to one
+    // bill (or two) means that bill; otherwise oldest first, the way the shop
+    // will apply it anyway, with the remainder as a part on the next one.
+    pct = 0;
+    if (!bills.length) { setChosen(v); return; }
+    var want = Math.round(v * 100), grand = Math.round(sumOf(bills) * 100), i, j;
+    if (want >= grand) { tickOnly(bills); setChosen(grand / 100); return; }
+    for (i = 0; i < bills.length; i++) if (paise(bills[i]) === want) { tickOnly([bills[i]]); setChosen(v); return; }
+    for (i = 0; i < bills.length; i++) for (j = i + 1; j < bills.length; j++)
+      if (paise(bills[i]) + paise(bills[j]) === want) { tickOnly([bills[i], bills[j]]); setChosen(v); return; }
+    var sel = [], run = 0;
+    for (i = 0; i < bills.length; i++) {
+      if (run + paise(bills[i]) <= want) { sel.push(bills[i]); run += paise(bills[i]); }
+      else { if (run < want) sel.push(bills[i]); break; }
+    }
+    tickOnly(sel); setChosen(v);
+  }
+  function suggest() {
+    // One nudge: the smallest top-up that clears one more bill. First over the
+    // ticked bills in order, then the oldest bill not yet ticked.
+    var el = document.getElementById('sugg');
+    if (!el || !bills.length) return;
+    var t = ticked(), want = Math.round(chosen * 100), run = 0, i, need = 0, k = 0, add = null;
+    for (i = 0; i < t.length; i++) {
+      run += paise(t[i]);
+      if (run > want + 50) { need = run - want; k = i + 1; break; }
+    }
+    if (!need) {
+      for (i = 0; i < bills.length; i++) if (!bills[i].checked) { add = bills[i]; break; }
+      if (add) { need = paise(add); k = t.length + 1; }
+    }
+    if (!need || (chosen + need / 100 > C.softLimit && !C.hasBank)) { el.style.display = 'none'; return; }
+    el.style.display = 'inline-block';
+    el.textContent = 'Add ' + fmt(need / 100) + ' to clear ' + (k === 1 ? 'the oldest bill' : k + ' bills');
+    el.onclick = function () {
+      if (add) { add.checked = true; add.parentNode.className = 'bill'; }
+      pct = 0; setChosen(chosen + need / 100);
+    };
+  }
+  function overLimit() { return C.hasBank && chosen > C.softLimit; }
 
   bills.forEach(function (b) {
     b.addEventListener('change', function () {
@@ -282,17 +341,28 @@ _SCRIPT = """<script>
   });
   if (cust) {
     cust.addEventListener('input', function () {
-      var v = parseInt(String(cust.value).replace(/[^0-9]/g, ''), 10);
+      // Digits only, in the box as well as in the maths.
+      var clean = String(cust.value).replace(/[^0-9]/g, '');
+      if (clean !== cust.value) cust.value = clean;
+      var v = parseInt(clean, 10);
       pct = 0;
-      if (!isNaN(v)) { setChosen(v); } else { chosen = 0; render(); }
+      if (!isNaN(v)) { applyAmount(v); } else { chosen = 0; render(); }
     });
     cust.addEventListener('blur', function () { setChosen(chosen); });
   }
   if (btn) {
-    btn.addEventListener('click', function () {
+    btn.addEventListener('click', function (ev) {
       if (!chosen) return;
+      if (overLimit()) {
+        // Too big for one UPI payment and the shop takes bank transfers:
+        // take the customer to those details instead of a failing intent.
+        ev.preventDefault();
+        var d = document.querySelector('details'); if (d) d.open = true;
+        var bk = document.getElementById('bank'); if (bk) bk.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
       // sendBeacon survives the page being replaced by the UPI app.
-      try { navigator.sendBeacon('/pay/' + C.token + '/tapped?a=' + chosen.toFixed(2)); } catch (e) {}
+      try { navigator.sendBeacon('/pay/' + C.token + '/tapped?a=' + chosen.toFixed(2) + '&n=' + encodeURIComponent(note())); } catch (e) {}
     });
   }
   [].slice.call(document.querySelectorAll('.copy')).forEach(function (c) {
@@ -317,25 +387,16 @@ def _simple(title: str, body: str) -> str:
             '<p style="color:#787774">' + esc(body) + "</p>")
 
 
-def _log_event(db, business_id, client_id, kind: str, amount) -> None:
+def _log_event(db, business_id, client_id, kind: str, amount, note: str = "") -> None:
     """Record customer INTENT on the pay page. Best-effort and never fatal.
 
     This is not a payment confirmation and must never be shown as one: a UPI
     deep link hands the customer to their own app and nothing calls us back.
     It tells the owner "worth checking your bank now", hours before the
-    customer gets round to replying PAID.
+    customer gets round to replying PAID. See app.services.pay_signals for
+    how a tap is later resolved.
     """
-    if db is None:
-        return
-    try:
-        db.table("pay_link_events").insert({
-            "business_id": business_id,
-            "client_id": client_id,
-            "kind": kind,
-            "amount": float(amount or 0),
-        }).execute()
-    except Exception:
-        log.debug("pay event %s not recorded", kind, exc_info=True)
+    pay_signals.record(db, business_id, client_id, kind, amount, note)
 
 
 def _parse_date(value) -> date | None:
@@ -438,6 +499,7 @@ def _picker_section(amount, has_vpa: bool, has_bank: bool) -> str:
         '<input id="cust" inputmode="numeric" pattern="[0-9]*" '
         'placeholder="or type any amount" aria-label="Amount to pay now"></label>'
         '<p class="bal" id="bal"></p>'
+        '<button type="button" class="chip" id="sugg" style="display:none"></button>'
         '<div class="warn" id="bigamt" style="display:none">Most UPI apps allow up to '
         + esc(inr(UPI_SOFT_LIMIT)) + " in one payment. For more, " + more
         + "pay in more than one UPI payment.</div>")
@@ -483,7 +545,7 @@ def _pay_sections(vpa: str, shop: str, amount, ref: str, bank) -> tuple[str, str
                       '<p class="hint">Scan from another phone. The code follows the amount you pick.</p>'
                       "</div>")
         if bank:
-            other += ('<div class="sep">bank transfer</div>' + _bank_rows(bank)
+            other += ('<div class="sep" id="bank">bank transfer</div>' + _bank_rows(bank)
                       + '<p class="hint">NEFT, RTGS or IMPS. Put the bill number in the remarks.</p>')
         return "", ('<details><summary>Other ways to pay</summary>' + other + "</details>"), bar
     if bank:
@@ -496,14 +558,16 @@ def _pay_sections(vpa: str, shop: str, amount, ref: str, bank) -> tuple[str, str
 
 
 @router.post("/pay/{token}/tapped")
-def pay_tapped(token: str, a: str = Query(default="")):
+def pay_tapped(token: str, a: str = Query(default=""), n: str = Query(default="")):
     """The customer pressed "Pay by UPI" and was handed to their UPI app.
-    `a` is the amount they chose, so the owner's nudge can say it."""
+    `a` is the amount they chose and `n` the note their app was given (which
+    bill, whole or part), so the owner's Expected row can say both."""
     got = _amount_for(token, a)
     if not got:
         return {"ok": False}
     business_id, client_id, amount = got
-    _log_event(get_client(), business_id, client_id, "tapped", amount)
+    _log_event(get_client(), business_id, client_id, "tapped", amount,
+               note=upi._clean_note(n)[:60])
     return {"ok": True}
 
 
@@ -613,6 +677,7 @@ def pay_page(token: str, ref: str = Query(default="")):
         "ref": upi._clean_note(ref)[:40],
         "linkBase": upi.upi_link(vpa, shop) if vpa else "",
         "softLimit": UPI_SOFT_LIMIT,
+        "hasBank": bool(bank),
         "qrDirty": False,
     }
     script = _SCRIPT.replace("__CFG__", json.dumps(cfg).replace("</", "<\\/"))

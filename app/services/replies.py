@@ -142,6 +142,14 @@ def _queue_payment(business_id: str, client: dict, amount, *, ocr_payer=None,
                           party_ledger=led or client.get("name") or disp,
                           party_display=disp, amount=amt,
                           ocr_payer=ocr_payer, ocr_ref=ocr_ref, ocr_confidence=ocr_confidence)
+        # The customer's own evidence (PAID <amount> or a screenshot) closes the
+        # "tapped Pay" they left open on the pay page; the pending row above now
+        # carries the claim.
+        try:
+            from app.services import pay_signals
+            pay_signals.resolve_for_receipt(db, business_id, client.get("id"), amt, "screenshot")
+        except Exception:
+            log.debug("pay signal resolve skipped", exc_info=True)
         return True
     except Exception:
         log.exception("could not queue customer-reported payment")
