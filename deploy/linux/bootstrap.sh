@@ -121,6 +121,18 @@ if [ ! -f /etc/asva-bot.env ]; then
 fi
 chown "$APP_USER:$APP_USER" /etc/asva-bot.env; chmod 600 /etc/asva-bot.env
 
+# ── 4b. swap ─────────────────────────────────────────────────────────────
+# A 2 GB box runs ASVA fine, but a deploy (pip install) landing on top of the
+# morning sync peak can touch 2 GB for a minute. Swap turns that into a slow
+# minute instead of a killed service. Sized to half of RAM, 1 GB minimum.
+if ! swapon --show | grep -q '^/swapfile'; then
+  MB=$(( $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) / 2 )); [ "$MB" -lt 1024 ] && MB=1024; [ "$MB" -gt 4096 ] && MB=4096
+  fallocate -l "${MB}M" /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  sysctl -w vm.swappiness=10 >/dev/null; grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+  echo "   swap: ${MB} MB"
+fi
+
 # ── 5. cloudflared ───────────────────────────────────────────────────────
 say "[5/9] cloudflared tunnel"
 if ! command -v cloudflared >/dev/null 2>&1; then
