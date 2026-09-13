@@ -62,8 +62,14 @@ fi
   echo "baileys_sessions=$(ls -1d "$WORK"/state/app/baileys_auth/session-* 2>/dev/null | wc -l)"
 } > "$WORK/state/MANIFEST"
 
-echo "==> encrypting (you will be asked for a passphrase twice)"
-tar -C "$WORK" -czf - state | openssl enc -aes-256-cbc -pbkdf2 -salt -out "$OUT"
+# Passphrase from ASVA_STATE_PASS when set (scripted weekly pulls), else typed.
+if [ -n "${ASVA_STATE_PASS:-}" ]; then
+  echo "==> encrypting with ASVA_STATE_PASS"
+  tar -C "$WORK" -czf - state | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:ASVA_STATE_PASS -out "$OUT"
+else
+  echo "==> encrypting (you will be asked for a passphrase twice)"
+  tar -C "$WORK" -czf - state | openssl enc -aes-256-cbc -pbkdf2 -salt -out "$OUT"
+fi
 chmod 600 "$OUT"
 
 echo
