@@ -113,11 +113,23 @@ else
   [ -f "$APP_DIR/.env" ] || die "no .env - pass the state bundle or create $APP_DIR/.env"
 fi
 # The bot service must have its own secret file even on a first-ever box.
-if [ ! -f /etc/asva-bot.env ]; then
+# The bot env may already exist (a hand-made one carrying WEBHOOK_SECRET) yet
+# lack the WA key. Check for the KEY, not the file: without it the bot serves
+# /api/wa/send and /qr to anyone who can reach link.tryasva.com.
+touch /etc/asva-bot.env
+if ! grep -q '^WA_API_KEY=' /etc/asva-bot.env; then
   K="$(openssl rand -hex 24)"
-  printf 'WA_API_KEY=%s\nWA_BIND_HOST=127.0.0.1\n' "$K" > /etc/asva-bot.env
-  grep -q '^WA_API_KEY=' "$APP_DIR/.env" || printf '\nWA_API_KEY=%s\n' "$K" >> "$APP_DIR/.env"
-  warn "generated a new WA_API_KEY (first box)"
+  printf 'WA_API_KEY=%s\n' "$K" >> /etc/asva-bot.env
+  if grep -q '^WA_API_KEY=' "$APP_DIR/.env"; then sed -i "s/^WA_API_KEY=.*/WA_API_KEY=$K/" "$APP_DIR/.env"; else printf '\nWA_API_KEY=%s\n' "$K" >> "$APP_DIR/.env"; fi
+  warn "generated a new WA_API_KEY"
+fi
+grep -q '^WA_BIND_HOST=' /etc/asva-bot.env || echo 'WA_BIND_HOST=127.0.0.1' >> /etc/asva-bot.env
+# The bot and the backend must share the webhook secret, or owner commands
+# over WhatsApp are rejected as impersonation.
+if ! grep -q '^WEBHOOK_SECRET=' /etc/asva-bot.env; then
+  S="$(grep '^AISENSY_WEBHOOK_SECRET=' "$APP_DIR/.env" | cut -d= -f2-)"; [ -n "$S" ] || S="$(openssl rand -hex 24)"
+  printf 'WEBHOOK_SECRET=%s\n' "$S" >> /etc/asva-bot.env
+  grep -q '^AISENSY_WEBHOOK_SECRET=' "$APP_DIR/.env" || printf '\nAISENSY_WEBHOOK_SECRET=%s\n' "$S" >> "$APP_DIR/.env"
 fi
 chown "$APP_USER:$APP_USER" /etc/asva-bot.env; chmod 600 /etc/asva-bot.env
 
@@ -139,12 +151,38 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   curl -fsSL -o /tmp/cf.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
   dpkg -i /tmp/cf.deb >/dev/null
 fi
+# Two ways to carry the tunnel, both files:
+#   * token-managed (current): /etc/cloudflared/token holds the dashboard token
+#     and /etc/cloudflared/config.yml holds ONLY the ingress rules (the
+#     dashboard's "published applications" were never pushed to cloudflared,
+#     so the rules live here). CF_TUNNEL_TOKEN=... installs a fresh one.
+#   * credential-file (older): config.yml names the tunnel + the .json credential.
+if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
+  cloudflared service uninstall >/dev/null 2>&1 || true
+  cloudflared service install "$CF_TUNNEL_TOKEN" >/dev/null
+fi
+if [ ! -f /etc/cloudflared/config.yml ] && { [ -f /etc/cloudflared/token ] || [ -n "${CF_TUNNEL_TOKEN:-}" ]; }; then
+  mkdir -p /etc/cloudflared
+  cat > /etc/cloudflared/config.yml <<CF
+ingress:
+  - hostname: app.tryasva.com
+    service: http://localhost:8000
+  - hostname: link.tryasva.com
+    service: http://localhost:3002
+  - service: http_status:404
+CF
+fi
 if [ -f /etc/cloudflared/config.yml ]; then
-  cloudflared service install >/dev/null 2>&1 || true
+  if [ -f /etc/cloudflared/token ] && [ -f /etc/systemd/system/cloudflared.service ] \
+     && ! grep -q -- '--config /etc/cloudflared/config.yml' /etc/systemd/system/cloudflared.service; then
+    sed -i 's#--no-autoupdate tunnel run#--no-autoupdate --config /etc/cloudflared/config.yml tunnel run#' /etc/systemd/system/cloudflared.service
+    systemctl daemon-reload
+  fi
+  [ -f /etc/systemd/system/cloudflared.service ] || cloudflared service install >/dev/null 2>&1 || true
   systemctl enable --now cloudflared >/dev/null 2>&1 || systemctl restart cloudflared
-  echo "   tunnel $(grep '^tunnel:' /etc/cloudflared/config.yml | awk '{print $2}') will serve the public hostnames from THIS box"
+  echo "   tunnel will serve app. and link.tryasva.com from THIS box"
 else
-  warn "no /etc/cloudflared/config.yml - public hostnames are NOT served yet (first box: create the tunnel once in the Cloudflare dashboard, then re-run)"
+  warn "no tunnel on this box - pass CF_TUNNEL_TOKEN=<dashboard token> or carry /etc/cloudflared/* in the state bundle"
 fi
 
 # ── 6. systemd units ─────────────────────────────────────────────────────

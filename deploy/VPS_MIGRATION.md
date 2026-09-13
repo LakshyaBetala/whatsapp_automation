@@ -117,6 +117,33 @@ rollback is as clean as the move.
 
 ---
 
+## When the old box is already dead (no bundle): what 13 Sep 2026 taught
+
+Done once by hand, now scripted; the order that works:
+
+1. Kamatera console: check the old server is not merely **stopped** (trial or
+   billing lapse). If it is, start it and do A-G above instead.
+2. New box: put your laptop's public key on it (`ssh-copy-id` with the console
+   password once); bootstrap turns password login off.
+3. `build_zip.py server` on the laptop, scp the zip, extract with python. Its
+   `.env` is production-ready; add `APP_VERSION=` and let bootstrap generate
+   `WA_API_KEY` and the shared webhook secret.
+4. Cloudflare: Zero Trust -> Tunnels -> the tunnel -> Configure -> copy the
+   `cloudflared service install <token>` token. Run bootstrap with
+   `CF_TUNNEL_TOKEN=<token>`; it writes the two ingress rules locally (the
+   dashboard's "published applications" do NOT reach cloudflared on their own).
+5. Tailscale: `tailscale up --hostname asva-vps` prints a login URL; approve it.
+   If the old machine still holds the name you get `asva-vps-1`: fine, set
+   `I3_HOST` in `deploy/remote.env` to that.
+6. Re-link the bot's WhatsApp from the Command Center (over Tailscale:
+   `http://<tailscale ip>:8000/ops?key=...`), then publish the installer feed
+   (`downloads/updates/`: exe as .partial, verify sha512, rename, latest.yml last).
+7. Verify from outside: `/health`, a `/pay/` link, `/updates/latest.yml`,
+   `/download/latest` 302, blockmap 404, `link.tryasva.com/api/wa/status` 401.
+
+**Then pull a state bundle to the laptop the same day.** The bundle is what
+makes the next move 20 minutes instead of this list.
+
 ## First box ever (no bundle to carry)
 
 Run `bootstrap.sh` with no argument after creating `.env` by hand. It generates
