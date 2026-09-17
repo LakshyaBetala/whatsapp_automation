@@ -157,6 +157,11 @@ fi
 #     dashboard's "published applications" were never pushed to cloudflared,
 #     so the rules live here). CF_TUNNEL_TOKEN=... installs a fresh one.
 #   * credential-file (older): config.yml names the tunnel + the .json credential.
+# A carried bundle brings /etc/cloudflared/token; a fresh box gets the token
+# on the command line. Either way the service is installed FROM the token.
+if [ -z "${CF_TUNNEL_TOKEN:-}" ] && [ -f /etc/cloudflared/token ] && [ ! -f /etc/systemd/system/cloudflared.service ]; then
+  CF_TUNNEL_TOKEN="$(tr -d '[:space:]' < /etc/cloudflared/token)"
+fi
 if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
   cloudflared service uninstall >/dev/null 2>&1 || true
   cloudflared service install "$CF_TUNNEL_TOKEN" >/dev/null
