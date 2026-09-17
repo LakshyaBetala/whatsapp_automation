@@ -98,7 +98,8 @@ if [ -n "$BUNDLE" ]; then
   install -o "$APP_USER" -g "$APP_USER" -m 600 "$S/app/.env" "$APP_DIR/.env"
   [ -f "$S/etc/asva-bot.env" ] && install -o "$APP_USER" -g "$APP_USER" -m 600 "$S/etc/asva-bot.env" /etc/asva-bot.env
   if [ -d "$S/etc/cloudflared" ] && [ -f "$S/etc/cloudflared/config.yml" ]; then
-    mkdir -p /etc/cloudflared && cp -a "$S/etc/cloudflared/." /etc/cloudflared/ && chmod 600 /etc/cloudflared/*.json
+    mkdir -p /etc/cloudflared && cp -a "$S/etc/cloudflared/." /etc/cloudflared/
+    chmod 600 /etc/cloudflared/*.json /etc/cloudflared/token 2>/dev/null || true   # token-managed has no .json
   fi
   if [ -d "$S/app/baileys_auth" ]; then
     mkdir -p "$APP_DIR/wa_service/.baileys_auth"
