@@ -149,7 +149,8 @@ fi
 # ── 5. cloudflared ───────────────────────────────────────────────────────
 say "[5/9] cloudflared tunnel"
 if ! command -v cloudflared >/dev/null 2>&1; then
-  curl -fsSL -o /tmp/cf.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+  # arm64 too: the free always-on boxes (Oracle Ampere) are ARM.
+  curl -fsSL -o /tmp/cf.deb "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$(dpkg --print-architecture).deb"
   dpkg -i /tmp/cf.deb >/dev/null
 fi
 # Two ways to carry the tunnel, both files:
