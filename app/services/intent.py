@@ -27,9 +27,11 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
-# Flash-Lite with thinking off: classification needs no reasoning trace, and
-# thinking made each reply take 2.4-4 s and cost extra output tokens.
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+# Thinking off: classification needs no reasoning trace. Measured 20 Oct 2026
+# on the live key: gemini-2.5-flash with thinkingBudget 0 answers in ~1.3 s;
+# gemini-3.5-flash-lite took 16-20 s; gemini-2.5-flash-lite is retired for new
+# users (404). The model is a setting so a retirement is an .env change.
+GEMINI_MODEL = settings.gemini_intent_model
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"

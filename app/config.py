@@ -187,6 +187,8 @@ class Settings(BaseSettings):
 
     # --- AI (optional) ---
     gemini_api_key: str = ""
+    # Reply classification model (thinking is switched off in the request).
+    gemini_intent_model: str = "gemini-2.5-flash"
     anthropic_api_key: str = ""
 
     @property

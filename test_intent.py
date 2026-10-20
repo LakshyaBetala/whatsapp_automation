@@ -160,8 +160,10 @@ def test_new_intents_are_accepted():
         assert v["intent"] == it
 
 
-def test_payload_uses_flash_lite_without_thinking():
-    assert intent.GEMINI_MODEL == "gemini-2.5-flash-lite"
+def test_payload_runs_without_thinking_on_the_configured_model():
+    from app.config import settings
+    assert intent.GEMINI_MODEL == settings.gemini_intent_model == "gemini-2.5-flash"
+    assert intent.GEMINI_MODEL in intent.GEMINI_URL
     cfg = intent._payload("hello", TODAY)["generationConfig"]
     assert cfg["thinkingConfig"] == {"thinkingBudget": 0}
     assert sorted(cfg["responseSchema"]["properties"]["intent"]["enum"]) == sorted(intent.INTENTS)
