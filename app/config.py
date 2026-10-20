@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # hand out a fresh pairing QR - so it must be authenticated there. Blank
     # keeps a shop's local wa_service working unchanged.
     wa_api_key: str = ""
+    # Shop WhatsApp on the server: each shop process listens on 127.0.0.1 at a
+    # port from here upwards (wa_service/manager.js starts them).
+    wa_shops_base_port: int = 4101
+    wa_server_hourly_cap: int = 30   # ban safety: sends per shop number per hour
     # 30-day billing cycle: one paid "month" = this many days.
     subscription_cycle_days: int = 30
     # Folder the website serves the downloadable shop app from (put ASVA_shop.zip
