@@ -70,7 +70,7 @@ chown -R "$APP_USER:$APP_USER" "/home/${APP_USER}"
 # push_release.sh runs update_asva.sh as this user and it must not need root
 # for anything else. Exact commands, no wildcards, no shell.
 cat > /etc/sudoers.d/asva-restart <<SUDO
-${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart asva-backend asva-bot, /usr/bin/systemctl restart asva-backend, /usr/bin/systemctl restart asva-bot
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart asva-backend asva-bot, /usr/bin/systemctl restart asva-backend, /usr/bin/systemctl restart asva-bot, /usr/bin/systemctl restart asva-shops
 SUDO
 chmod 440 /etc/sudoers.d/asva-restart
 visudo -cf /etc/sudoers.d/asva-restart >/dev/null || die "sudoers rule invalid"
@@ -238,6 +238,29 @@ WantedBy=multi-user.target
 UNIT
 
 # Nightly database backup (pg_dump -> local, + Google Drive if rclone is set up).
+# Shop WhatsApp on this server: one process per shop (wa_service/manager.js
+# starts them from the backend's list). Same secrets file as the bot; the manager
+# strips the bot's WEBHOOK_SECRET from each shop process.
+cat > /etc/systemd/system/asva-shops.service <<UNIT
+[Unit]
+Description=ASVA shop WhatsApp manager (one WhatsApp process per shop on this server)
+After=network-online.target asva-backend.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/asva-bot.env
+User=${APP_USER}
+WorkingDirectory=${APP_DIR}/wa_service
+Environment=BACKEND_URL=http://localhost:8000
+ExecStart=/usr/bin/node manager.js
+Restart=always
+RestartSec=6
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 cat > /etc/systemd/system/asva-backup.service <<UNIT
 [Unit]
 Description=ASVA nightly database backup
@@ -315,7 +338,7 @@ fi
 
 # ── 9. start + verify ────────────────────────────────────────────────────
 say "[9/9] starting services"
-systemctl enable --now asva-backend asva-bot asva-backup.timer >/dev/null
+systemctl enable --now asva-backend asva-bot asva-shops asva-backup.timer >/dev/null
 sleep 10
 H="$(curl -s --max-time 20 http://127.0.0.1:8000/health || true)"
 echo "   backend  : ${H:-NOT ANSWERING}"

@@ -37,6 +37,11 @@ sudo -n systemctl restart asva-backend asva-bot || {
   echo "!! Cannot restart services as $(whoami). Run as root:  systemctl restart asva-backend asva-bot" >&2
   exit 1
 }
+# Shop WhatsApp manager (only on a box that has it): picks up new wa_service
+# code. Each shop process reconnects with its saved session, no QR.
+if systemctl is-enabled asva-shops >/dev/null 2>&1; then
+  sudo -n systemctl restart asva-shops || echo "!! could not restart asva-shops (run as root)" >&2
+fi
 
 # The backend takes ~8-12s to boot (imports + Supabase connect + scheduler), so
 # POLL /health for up to 40s instead of giving one premature 4-second verdict
