@@ -168,7 +168,15 @@ def build_today(db, business_id: str, business: dict, *,
     overdue.sort(key=lambda e: float(e["total"]) * (1 + e["days_late"] / 30.0),
                  reverse=True)
     chase = []
-    for e in overdue[:CHASE_LIMIT]:
+    shown = overdue[:CHASE_LIMIT]
+    # Reliability grades for the shown parties in 3 queries, not 3 per party
+    # (each query is ~180 ms to the database; this was most of a 7-10 s page).
+    try:
+        cards = scorecard.build_scorecards(
+            db, business_id, [{"id": e["client_id"], "name": e["name"]} for e in shown], today=today)
+    except Exception:
+        cards = {}
+    for e in shown:
         disp = names.clean_display(e["name"] or "") or (e["name"] or "-")
         item = {
             "client_id": e["client_id"],
@@ -179,16 +187,11 @@ def build_today(db, business_id: str, business: dict, *,
             "has_number": bool(e["phone"]),
             "phone": _dial_number(e["phone"]),   # clean 10-digit for a tap-to-call
         }
-        # Reliability grade for the shown parties only (accurate: uses the party's
-        # own bills + promises + receipts). Best-effort - never breaks the page.
-        try:
-            sc = scorecard.build_scorecard(
-                db, business_id, {"id": e["client_id"], "name": e["name"]}, today=today)
-            item["grade"] = sc.get("grade")
-            item["grade_label"] = sc.get("grade_label")
-            item["grade_color"] = sc.get("color")
-        except Exception:
-            item["grade"] = None
+        # Reliability grade (accurate: the party's own bills + promises + receipts).
+        sc = cards.get(e["client_id"]) or {}
+        item["grade"] = sc.get("grade")
+        item["grade_label"] = sc.get("grade_label")
+        item["grade_color"] = sc.get("color")
         chase.append(item)
 
     # ── Money in: yesterday + today (booked receipts) ─────────────────────

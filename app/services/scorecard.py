@@ -142,22 +142,11 @@ def _reasons(grade: str, open_count: int, overdue_count: int, max_days_late: int
     return out
 
 
-def build_scorecard(db, business_id: str, client: dict, *,
-                    today: _dt.date | None = None) -> dict:
-    """The accurate reliability snapshot for one of a shop's own customers.
-    Best-effort reads; any error degrades a field, never raises."""
-    today = today or _today()
-    cid = client.get("id")
-    ledger = client.get("tally_ledger_name") or client.get("name")
+_OPEN = ["pending", "partial", "overdue"]
 
-    # ── Open bills: terms-adjusted lateness (the core signal) ──────────
-    try:
-        open_bills = (db.table("bills")
-                      .select("outstanding, invoice_date, due_date")
-                      .eq("business_id", business_id).eq("client_id", cid)
-                      .in_("status", ["pending", "partial", "overdue"]).execute()).data or []
-    except Exception:
-        open_bills = []
+
+def _score(open_bills: list, prs: list, receipts: list, today: _dt.date) -> dict:
+    """Pure: the scorecard from one party's open bills, promises and receipts."""
     open_count = 0
     overdue_count = 0
     open_outstanding = Decimal(0)
@@ -178,37 +167,12 @@ def build_scorecard(db, business_id: str, client: dict, *,
         if age is not None and age > oldest_age:
             oldest_age = age
 
-    # ── Promise outcomes (recorded, exact) ────────────────────────────
-    kept = broken = 0
-    try:
-        prs = (db.table("payment_promises").select("status")
-               .eq("business_id", business_id).eq("client_id", cid).execute()).data or []
-        for r in prs:
-            s = r.get("status")
-            if s == "kept":
-                kept += 1
-            elif s == "broken":
-                broken += 1
-    except Exception:
-        pass
+    # Promise outcomes (recorded, exact)
+    kept = sum(1 for r in prs if r.get("status") == "kept")
+    broken = sum(1 for r in prs if r.get("status") == "broken")
 
-    # ── Real receipts booked in Tally ────────────────────────────────
-    # Prefer the id link (rename-proof, migration 038); fall back to the party
-    # name only for any historical receipt not yet linked by id.
-    receipts = []
-    try:
-        receipts = (db.table("tally_receipts").select("amount, receipt_date")
-                    .eq("business_id", business_id).eq("client_id", cid)
-                    .order("receipt_date", desc=True).execute()).data or []
-    except Exception:
-        receipts = []
-    if not receipts and ledger:
-        try:
-            receipts = (db.table("tally_receipts").select("amount, receipt_date")
-                        .eq("business_id", business_id).eq("party_name", ledger)
-                        .order("receipt_date", desc=True).execute()).data or []
-        except Exception:
-            receipts = []
+    # Real receipts booked in Tally, newest first
+    receipts = sorted(receipts, key=lambda r: str(r.get("receipt_date") or ""), reverse=True)
     payments_count = len(receipts)
     total_recovered = sum((_d(r.get("amount")) for r in receipts), Decimal(0))
     last_payment_date = receipts[0].get("receipt_date") if receipts else None
@@ -238,6 +202,70 @@ def build_scorecard(db, business_id: str, client: dict, *,
         "reasons": _reasons(grade, open_count, overdue_count, max_days_late,
                             oldest_age, kept, broken, payments_count, last_payment_date),
     }
+
+
+def _rows(fn) -> list:
+    try:
+        return fn() or []
+    except Exception:
+        return []
+
+
+def build_scorecard(db, business_id: str, client: dict, *,
+                    today: _dt.date | None = None) -> dict:
+    """The accurate reliability snapshot for one of a shop's own customers.
+    Best-effort reads; any error degrades a field, never raises."""
+    today = today or _today()
+    cid = client.get("id")
+    ledger = client.get("tally_ledger_name") or client.get("name")
+    open_bills = _rows(lambda: (db.table("bills").select("outstanding, invoice_date, due_date")
+                                .eq("business_id", business_id).eq("client_id", cid)
+                                .in_("status", _OPEN).execute()).data)
+    prs = _rows(lambda: (db.table("payment_promises").select("status")
+                         .eq("business_id", business_id).eq("client_id", cid).execute()).data)
+    # Prefer the id link (rename-proof, migration 038); fall back to the party
+    # name only for any historical receipt not yet linked by id.
+    receipts = _rows(lambda: (db.table("tally_receipts").select("amount, receipt_date")
+                              .eq("business_id", business_id).eq("client_id", cid)
+                              .order("receipt_date", desc=True).execute()).data)
+    if not receipts and ledger:
+        receipts = _rows(lambda: (db.table("tally_receipts").select("amount, receipt_date")
+                                  .eq("business_id", business_id).eq("party_name", ledger)
+                                  .order("receipt_date", desc=True).execute()).data)
+    return _score(open_bills, prs, receipts, today)
+
+
+def build_scorecards(db, business_id: str, clients: list, *,
+                     today: _dt.date | None = None) -> dict:
+    """build_scorecard for many parties at once: 3 queries (plus one name
+    fallback) instead of 3 per party. Same result per party. {client_id: card}."""
+    today = today or _today()
+    ids = [c.get("id") for c in clients if c.get("id")]
+    if not ids:
+        return {}
+    bills = _rows(lambda: (db.table("bills").select("client_id, outstanding, invoice_date, due_date")
+                           .eq("business_id", business_id).in_("client_id", ids)
+                           .in_("status", _OPEN).execute()).data)
+    prs = _rows(lambda: (db.table("payment_promises").select("client_id, status")
+                         .eq("business_id", business_id).in_("client_id", ids).execute()).data)
+    recs = _rows(lambda: (db.table("tally_receipts").select("client_id, party_name, amount, receipt_date")
+                          .eq("business_id", business_id).in_("client_id", ids)
+                          .order("receipt_date", desc=True).execute()).data)
+    by = lambda rows, key: {k: [r for r in rows if r.get(key) == k] for k in {r.get(key) for r in rows}}
+    bills_by, prs_by, recs_by = by(bills, "client_id"), by(prs, "client_id"), by(recs, "client_id")
+    ledger_of = {c["id"]: (c.get("tally_ledger_name") or c.get("name")) for c in clients if c.get("id")}
+    need_name = [ledger_of[i] for i in ids if not recs_by.get(i) and ledger_of.get(i)]
+    by_name = {}
+    if need_name:
+        named = _rows(lambda: (db.table("tally_receipts").select("party_name, amount, receipt_date")
+                               .eq("business_id", business_id).in_("party_name", need_name)
+                               .order("receipt_date", desc=True).execute()).data)
+        by_name = by(named, "party_name")
+    out = {}
+    for i in ids:
+        r = recs_by.get(i) or by_name.get(ledger_of.get(i)) or []
+        out[i] = _score(bills_by.get(i, []), prs_by.get(i, []), r, today)
+    return out
 
 
 def scorecard_text(sc: dict, name: str, *, en: bool = True) -> str:

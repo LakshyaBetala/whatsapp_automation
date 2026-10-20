@@ -119,3 +119,45 @@ def test_scorecard_text_is_cleanly_spaced():
     txt = scorecard.scorecard_text(sc, "Ramesh")
     assert "Ramesh" in txt and "Slow payer" in txt
     assert "\n\n" in txt                    # blank line between blocks, not congested
+
+
+# ── batched scorecards (the Today page's chase list: 3 queries, not 3 per party) ──
+class _FilterQ:
+    """Applies eq/in_ filters so a batched query returns only matching rows."""
+    def __init__(self, rows, log, name): self.rows, self.log, self.name = list(rows), log, name
+    def select(self, *a, **k): return self
+    def eq(self, k, v): self.rows = [r for r in self.rows if r.get(k, v) == v]; return self
+    def in_(self, k, vs):
+        if k in ("client_id", "party_name"):
+            self.rows = [r for r in self.rows if r.get(k) in vs]
+        return self
+    def order(self, *a, **k): return self
+    def execute(self):
+        self.log.append(self.name); return type("R", (), {"data": self.rows})()
+
+
+class FilterDB:
+    def __init__(self, tables): self.tables, self.log = tables, []
+    def table(self, name): return _FilterQ(self.tables.get(name, []), self.log, name)
+
+
+def test_batched_scorecards_match_one_by_one_and_use_three_queries():
+    tables = {
+        "bills": [
+            {"client_id": "a", "outstanding": 5000, "invoice_date": "2026-05-01", "due_date": "2026-06-01"},
+            {"client_id": "b", "outstanding": 800, "invoice_date": "2026-08-05", "due_date": "2026-09-05"},
+        ],
+        "payment_promises": [{"client_id": "b", "status": "kept"}, {"client_id": "a", "status": "broken"}],
+        "tally_receipts": [
+            {"client_id": "b", "party_name": "B", "amount": 1000, "receipt_date": "2026-08-01"},
+            {"client_id": None, "party_name": "C", "amount": 500, "receipt_date": "2026-07-01"},
+        ],
+    }
+    clients = [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}, {"id": "c", "name": "C"}]
+    db = FilterDB(tables)
+    batched = scorecard.build_scorecards(db, "biz", clients, today=TODAY)
+    assert len([q for q in db.log]) <= 4           # bills, promises, receipts (+ name fallback)
+    for c in clients:
+        one = scorecard.build_scorecard(FilterDB(tables), "biz", c, today=TODAY)
+        assert batched[c["id"]] == one, c["id"]
+    assert batched["c"]["payments_count"] == 1      # name-fallback receipt still counted
