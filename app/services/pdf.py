@@ -1,7 +1,8 @@
 """PDF invoice generation via WeasyPrint.
 
-Renders the Jinja2 HTML template, converts to PDF, uploads to Supabase
-Storage, and returns a public URL for AiSensy to attach.
+Renders the Jinja2 HTML template, converts to PDF, uploads to the PRIVATE
+Supabase Storage bucket, and returns a short-lived signed URL (never a
+permanent public link: invoices carry customer names and amounts).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 BUCKET_NAME = "invoices"
+SIGNED_URL_SECONDS = 3600   # long enough to fetch and send; never a permanent link
 
 _jinja_env = Environment(
     loader=FileSystemLoader(str(TEMPLATE_DIR)),
@@ -36,7 +38,7 @@ def _ensure_bucket() -> None:
         try:
             db.storage.create_bucket(
                 BUCKET_NAME,
-                options={"public": True, "file_size_limit": 5 * 1024 * 1024},
+                options={"public": False, "file_size_limit": 5 * 1024 * 1024},
             )
             log.info("Created Supabase Storage bucket: %s", BUCKET_NAME)
         except Exception as exc:
@@ -44,9 +46,16 @@ def _ensure_bucket() -> None:
             log.warning("Bucket create returned: %s", exc)
 
 
+def _signed_url(db, file_path: str) -> str:
+    res = db.storage.from_(BUCKET_NAME).create_signed_url(file_path, SIGNED_URL_SECONDS)
+    res = res or {}
+    return res.get("signedURL") or res.get("signedUrl") or ""
+
+
 async def upload_pdf_base64(bill_id: str, invoice_number: str, pdf_b64: str) -> str:
     """Upload a ready PDF (e.g. Tally's own exported invoice) to Storage and
-    return its public URL. Used when the agent attaches the real Tally PDF."""
+    return a short-lived signed URL. Used when the agent attaches the real
+    Tally PDF."""
     import base64 as _b64
     pdf_bytes = _b64.b64decode(pdf_b64)
     _ensure_bucket()
@@ -56,7 +65,7 @@ async def upload_pdf_base64(bill_id: str, invoice_number: str, pdf_b64: str) -> 
         file_path, pdf_bytes,
         file_options={"content-type": "application/pdf", "upsert": "true"},
     )
-    return db.storage.from_(BUCKET_NAME).get_public_url(file_path)
+    return _signed_url(db, file_path)
 
 
 def delete_pdf(bill_id: str, invoice_number: str) -> None:
@@ -159,6 +168,6 @@ async def generate_invoice_pdf(
         log.error("PDF upload failed for %s: %s", invoice_number, exc)
         raise
 
-    public_url = db.storage.from_(BUCKET_NAME).get_public_url(file_path)
-    log.info("Invoice PDF uploaded: %s", public_url)
-    return public_url
+    url = _signed_url(db, file_path)
+    log.info("Invoice PDF uploaded: %s", file_path)
+    return url
