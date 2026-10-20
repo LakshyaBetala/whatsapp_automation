@@ -205,7 +205,6 @@ async def send_message(
             openwa_message_id = resp_data.get("messageId", "openwa-sent")
             log.info("WhatsApp sent to %s via OpenWA", to_number)
     except Exception as exc:
-        log.error("OpenWA send failed for %s: %s", to_number, exc)
         delivery_status = "failed"
         # Classify WHY so the bot can tell the owner something actionable
         # instead of a silent/anonymous failure.
@@ -218,6 +217,11 @@ async def send_message(
             fail_reason = "not_on_whatsapp"      # number has no WhatsApp account
         else:
             fail_reason = "send_failed"
+        # Known states already have their own alert (bot_wa_down / wa_down) or are
+        # the customer's fact; logging them as errors made errorlog raise one
+        # app_error per send (41 in two weeks for one unlinked bot).
+        (log.error if fail_reason == "send_failed" else log.warning)(
+            "OpenWA send failed for %s (%s): %s", to_number, fail_reason, exc)
 
     # ── 3. Log to messages table ──────────────────────────────────────
     msg_row = (

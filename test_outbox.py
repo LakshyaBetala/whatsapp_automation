@@ -112,6 +112,24 @@ def test_platform_channel_still_sends_directly(monkeypatch):
     assert result["reason"] in ("wa_service_down", "send_failed")
 
 
+def test_known_send_failure_is_not_logged_as_error(monkeypatch, caplog):
+    """A down/unlinked WhatsApp already has its own alert; logging each send as
+    ERROR made errorlog raise one app_error per message."""
+    import logging
+    from app.services import whatsapp
+    fake = FakeDB(tables={"businesses": [{"plan_expires_on": None}]})
+    monkeypatch.setattr(whatsapp, "require_db", lambda: fake)
+    monkeypatch.setattr(whatsapp.settings, "openwa_url", "http://127.0.0.1:9")
+    monkeypatch.setattr(whatsapp.settings, "platform_wa_url", "")
+    with caplog.at_level(logging.WARNING, logger="app.services.whatsapp"):
+        result = _run(whatsapp.send_message(
+            business_id="biz1", to_number="919444294894",
+            message_text="digest", channel="platform"))
+    assert result["reason"] == "wa_service_down"
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("wa_service_down" in r.getMessage() for r in caplog.records)
+
+
 def test_outbox_sweep_keeps_queue_when_shop_wa_offline(monkeypatch):
     """Shop laptop off/WhatsApp down = transient: the row STAYS queued."""
     from app.jobs import outbox_sweep

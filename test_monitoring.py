@@ -125,13 +125,20 @@ def test_evaluate_flags_problems():
             {"id": "s", "name": "Susp", "status": "suspended", "online": False,
              "last_seen_min": 999, "wa_ready": False, "queued": 99,
              "queue_oldest_min": 0, "sent_today": 0, "failed_today": 0, "blocked_today": 0},
+            {"id": "g", "name": "Gamma", "status": "active", "online": True,
+             "last_seen_min": 1, "wa_ready": False, "queued": 0,
+             "queue_oldest_min": 0, "sent_today": 0, "failed_today": 0, "blocked_today": 0},
         ],
     }
-    kinds = {p["kind"] for p in monitoring.evaluate(health)}
+    problems = monitoring.evaluate(health)
+    kinds = {p["kind"] for p in problems}
     assert "bot_wa_down" in kinds
     assert "job_stale:reminder_sweep" in kinds
-    assert "shop_offline" in kinds and "wa_down" in kinds
-    assert "outbox_stuck" in kinds and "high_failrate" in kinds
+    assert "shop_offline" in kinds and "outbox_stuck" in kinds and "high_failrate" in kinds
+    # laptop off: its last WhatsApp state is stale, so no "re-scan" alert ...
+    assert not any(p["kind"] == "wa_down" and p["business_id"] == "b" for p in problems)
+    # ... but a laptop that is ON with WhatsApp down is a real re-scan case
+    assert any(p["kind"] == "wa_down" and p["business_id"] == "g" for p in problems)
     # suspended shop raises NO alerts (expected state)
     assert not any(p.get("business_id") == "s" for p in monitoring.evaluate(health))
 

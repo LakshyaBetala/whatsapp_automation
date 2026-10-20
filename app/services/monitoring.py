@@ -248,7 +248,10 @@ def evaluate(health: dict) -> list[dict]:
                              "title": f"{name}: agent offline",
                              "body": f"No contact for {ago}. Tally push and queued sends are "
                                      f"paused until the shop laptop is back on."})
-        if r.get("wa_ready") is False:
+        # wa_ready is last reported by the laptop; while it is off that value is
+        # stale, and shop_offline already says why nothing sends. Telling the
+        # owner to re-scan a WhatsApp that is merely asleep is wrong.
+        if r["online"] and r.get("wa_ready") is False:
             problems.append({"kind": "wa_down", "business_id": r["id"], "severity": "critical",
                              "title": f"{name}: WhatsApp disconnected",
                              "body": "The shop's WhatsApp is not connected, so bills and "
