@@ -103,13 +103,14 @@ def _patch(monkeypatch, tables):
     return fake
 
 
-def test_bot_channel_invites_strangers_as_leads(monkeypatch):
-    """A non-owner on the BOT number is a PROSPECT off the marketing poster, not a
-    stranger to bounce. Every message gets an invite (never customer self-service,
-    never the old owner-only bounce), and a YES routes to human follow-up."""
+def test_bot_channel_invites_only_people_who_ask_for_asva(monkeypatch):
+    """The bot number is also the founder's own WhatsApp: a non-owner's ordinary
+    message gets NO automated reply; asking for ASVA gets the invite, and a YES
+    after it routes to the team."""
     _patch(monkeypatch, {"businesses": [], "clients": []})
     from app.services import bot
-    invite = _run(bot.handle("910000000000", "kya hai ye", channel="bot"))
+    assert _run(bot.handle("910000000000", "kya hai ye", channel="bot")) == ""
+    invite = _run(bot.handle("910000000000", "I want to try ASVA", channel="bot"))
     assert "ASVA" in invite and "YES" in invite and "free" in invite.lower()
     assert "registered" not in invite.lower()      # never the old bounce
     yes = _run(bot.handle("910000000000", "YES", channel="bot"))

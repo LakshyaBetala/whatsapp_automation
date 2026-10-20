@@ -79,13 +79,19 @@ def _handover_active(lead: dict | None) -> bool:
         return False
 
 
-def decide_prospect(db, from_number: str, is_yes: bool) -> str:
-    """The smart decision for a message from a non-owner on the bot number:
-      - a live hand-over window  -> SILENT (a human is on it)
-      - the lead says YES        -> HANDOVER (warm hand-off + start the window)
-      - not pitched yet          -> PITCH (the one and only pitch)
-      - already pitched          -> SILENT (never re-pitch / talk over them)
-    Records only status + timestamps; never message content.
+def decide_prospect(db, from_number: str, is_yes: bool, wants: bool = False) -> str:
+    """The decision for a message from a non-owner on the bot number.
+
+    The bot number is ALSO the founder's own WhatsApp, so a non-owner is usually
+    a personal chat, not a lead. Only someone who clearly asks about ASVA
+    (`wants`) enters the funnel:
+      - a live hand-over window          -> SILENT (a human is on it)
+      - not pitched, asks about ASVA     -> PITCH (the one and only pitch)
+      - not pitched, anything else       -> SILENT (nothing recorded either)
+      - pitched, says YES or asks again  -> HANDOVER (warm hand-off + window)
+      - pitched, anything else           -> SILENT (never talk over a chat)
+    Records only status + timestamps, and only for people who asked; never
+    message content.
     """
     lead = _get_lead(db, from_number)
 
@@ -93,14 +99,16 @@ def decide_prospect(db, from_number: str, is_yes: bool) -> str:
         _bump(db, from_number, lead, status="handover")
         return SILENT
 
-    if is_yes:
-        _set_handover(db, from_number, lead)
-        return HANDOVER
-
     already_pitched = bool(lead and lead.get("pitched_at"))
     if not already_pitched:
-        _mark_pitched(db, from_number, lead)
-        return PITCH
+        if wants:
+            _mark_pitched(db, from_number, lead)
+            return PITCH
+        return SILENT
+
+    if is_yes or wants:
+        _set_handover(db, from_number, lead)
+        return HANDOVER
 
     _bump(db, from_number, lead, status=lead.get("status") or "pitched")
     return SILENT

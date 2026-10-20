@@ -1,10 +1,11 @@
-"""Non-owner -> smart join funnel (bot._prospect_reply + assistant.decide_prospect).
+"""Non-owner -> ASVA join funnel (bot._prospect_reply + assistant.decide_prospect).
 
-The ASVA marketing number IS the assistant/bot number, so a non-owner messaging
-it (off the poster) is a lead, not a stranger. SMART funnel: pitch exactly ONCE
-(English, with a YES call-to-action), then stay quiet so the bot never talks over
-a live sales chat; a YES routes to the human follow-up. Never bounce a prospect
-on the first touch; never use em/en dashes.
+The ASVA bot number is ALSO the founder's own WhatsApp, so most messages from
+non-owners are personal chats, not leads. Rule: stay silent unless the person
+clearly asks about ASVA ("I want to try ASVA", "ASVA demo", "ASVA price"...).
+Then pitch once (free till 31 December 2026, YES to start); a YES after the
+pitch hands over to the team; everything else stays silent. A bare "yes" from
+someone who was never pitched is just a chat and gets nothing. No em/en dashes.
 """
 import sys
 from unittest.mock import MagicMock
@@ -61,57 +62,70 @@ def _reply(db, num, text):
     return bot._prospect_reply(db, num, text, text.upper().strip())
 
 
-def test_first_inquiry_gets_english_invite_with_cta():
-    # Each a fresh number so it is a first touch.
-    for i, msg in enumerate(("hi", "hello", "kya hai ye?", "poster dekha")):
-        r = _reply(_DB(), f"9190000000{i}", msg)
-        assert "ASVA" in r
-        assert "YES" in r                        # clear call to action
-        assert "free" in r.lower() and "September" in r
+def test_personal_chats_get_no_automated_reply():
+    for i, msg in enumerate(("hi", "hello", "kya hai ye?", "random text", "yes", "ok",
+                             "bhai kal milte hai", "call me", "sent the photos")):
+        assert _reply(_DB(), f"9190000000{i}", msg) == "", msg
 
 
-def test_yes_on_first_touch_routes_to_followup():
-    for i, word in enumerate(("YES", "haan", "Ha", "JOIN", "interested", "chahiye", "signup")):
-        r = _reply(_DB(), f"9191111111{i}", word)
-        assert "team" in r.lower() and "free" in r.lower(), word
+def test_asking_for_asva_starts_the_funnel():
+    for i, msg in enumerate(("I want to try ASVA", "asva demo chahiye", "ASVA price?",
+                             "Hi ASVA", "how does asva work", "asva kaise use kare",
+                             "interested in ASVA for my shop")):
+        r = _reply(_DB(), f"9191111111{i}", msg)
+        assert "ASVA" in r and "YES" in r, msg
+        assert "31 December 2026" in r, msg
 
 
-def test_interested_within_a_sentence():
-    r = _reply(_DB(), "919222222222", "yes please i want it")
-    assert "team" in r.lower() and "free" in r.lower()
+def test_mentioning_asva_without_wanting_it_stays_silent():
+    assert _reply(_DB(), "919222222220", "my nephew Asva has his exam tomorrow morning") == ""
 
 
-def test_pitches_only_once_then_stays_silent():
+def test_yes_after_the_pitch_hands_over():
     db, num = _DB(), "919333333333"
-    first = _reply(db, num, "what is this")
-    assert "ASVA" in first                       # first touch pitches
-    # Every later non-YES message stays silent - never talks over a real chat.
-    assert _reply(db, num, "tell me more") == ""
-    assert _reply(db, num, "hmm ok") == ""
-    # ...but a YES still hands over.
-    assert "team" in _reply(db, num, "YES").lower()
+    assert "YES" in _reply(db, num, "I want to try ASVA")
+    for word in ("hmm ok", "tell me later"):
+        assert _reply(db, num, word) == ""          # never talks over a real chat
+    r = _reply(db, num, "YES")
+    assert "team" in r.lower() and "31 December 2026" in r
+    assert _reply(db, num, "thanks") == ""          # a human is on it now
+
+
+def test_yes_words_hand_over_only_after_a_pitch():
+    for i, word in enumerate(("YES", "haan", "Ha", "JOIN", "interested", "chahiye", "signup")):
+        assert _reply(_DB(), f"9194444444{i}", word) == "", word
+        db, num = _DB(), f"9194444445{i}"
+        _reply(db, num, "I want to try ASVA")
+        assert "team" in _reply(db, num, word).lower(), word
+
+
+def test_asking_again_after_the_pitch_counts_as_interest():
+    db, num = _DB(), "919555555555"
+    _reply(db, num, "ASVA details please")
+    assert "team" in _reply(db, num, "what is the asva price").lower()
 
 
 def test_global_switch_off_silences_everything():
     from app.services import assistant
     db = _DB()
     assistant.set_assistant_enabled(db, False)
-    assert _reply(db, "919444444444", "hi") == ""
+    assert _reply(db, "919666666666", "I want to try ASVA") == ""
 
 
-def test_english_only_no_hinglish():
-    for i, msg in enumerate(("hi", "YES")):
-        low = _reply(_DB(), f"9195555555{i}", msg).lower()
-        for h in ("bhejein", "karta hai", "aapke", "humari", "bhasha"):
-            assert h not in low, (msg, h)
-
-
-def test_never_bounces_a_first_touch_prospect():
-    for i, msg in enumerate(("YES", "kya hai", "random text", "hello")):
-        assert "registered" not in _reply(_DB(), f"9196666666{i}", msg).lower()
-
-
-def test_no_em_or_en_dashes():
-    for i, msg in enumerate(("hello", "YES")):
-        r = _reply(_DB(), f"9197777777{i}", msg)
+def test_copy_is_english_and_has_no_dashes():
+    db, num = _DB(), "919777777777"
+    for r in (_reply(db, num, "I want to try ASVA"), _reply(db, num, "YES")):
         assert "—" not in r and "–" not in r
+        for h in ("bhejein", "karta hai", "aapke", "humari"):
+            assert h not in r.lower()
+
+
+# ── Owners: commands work, personal chat is left to the founder ───────────
+def test_owner_free_text_gets_no_automated_reply():
+    for msg in ("hello sir", "kal milte hai", "thank you for the help", "ok"):
+        assert bot._owner_fallback(msg, "english") == "", msg
+
+
+def test_owner_mistyped_command_still_gets_help():
+    r = bot._owner_fallback("chek ramesh", "english")
+    assert "CHECK ramesh" in r and "LIST" in r

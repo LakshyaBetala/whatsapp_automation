@@ -64,6 +64,9 @@ _GREETING = ("HI", "HELLO", "HELP", "MENU", "START", "?", "HEY", "NAMASTE")
 # A non-owner who messages the ASVA marketing number (from the poster) saying any
 # of these is a warm lead ready to sign up.
 _JOIN_WORDS = {"YES", "HAAN", "HAA", "HA", "JOIN", "INTERESTED", "CHAHIYE", "SIGNUP"}
+# Everyday chat openers: never read as a mistyped command.
+_CHAT_WORDS = {"HELLO", "HI", "HEY", "HII", "HIII", "THANKS", "THANK", "THANKU", "OK", "OKAY",
+               "OKK", "SIR", "BHAI", "NAMASTE", "GOOD", "GM", "YES", "NO", "HAAN", "JI"}
 
 # Hindi/Hinglish first-word aliases so an owner types the way he speaks
 # ("BAND Ramesh", "SOOCHI", "CHALU Ramesh"). Only unambiguous verbs, and NONE
@@ -107,7 +110,11 @@ def _suggest_command(text: str, lang: str) -> str:
     first = parts[0].upper()
     if first in _KNOWN_CMDS:               # spelled right (arg problem, not the verb)
         return ""
-    match = difflib.get_close_matches(first, _KNOWN_CMDS, n=1, cutoff=0.6)
+    if first.strip("!.,?") in _CHAT_WORDS:  # "hello sir" is a greeting, not a typo of HELP
+        return ""
+    # 0.75: real typos score high (CHEK 0.89, PAI 0.86, REMIDN 0.83); chat words
+    # like HELLO (0.67 to HELP) do not.
+    match = difflib.get_close_matches(first, _KNOWN_CMDS, n=1, cutoff=0.75)
     if not match:
         return ""
     cmd = match[0]
@@ -118,40 +125,73 @@ def _suggest_command(text: str, lang: str) -> str:
     return f"Did you mean *{example}*? Send that.\n\n"
 
 
-# ── Lead funnel (non-owner messages the ASVA marketing/bot number) ────────────
-# English only, no language step: a prospect off the poster gets a clear, warm
-# invite with a YES call-to-action, and a YES routes to the human follow-up.
+# ── Lead funnel (non-owner messages the ASVA bot number) ─────────────────────
+# The bot number is also the founder's own WhatsApp, so only someone who clearly
+# asks about ASVA gets an automated message. English only, one pitch with a YES
+# call-to-action; a YES after it routes to the team.
+FREE_UNTIL_TEXT = "31 December 2026"
+
+# "Asks about ASVA": the word ASVA plus a reason to want it, or a short message
+# that is mostly "ASVA" ("Hi ASVA", "ASVA?"). The website's WhatsApp button
+# prefills "I want to try ASVA".
+_ASVA_WORD = re.compile(r"\basva\b", re.IGNORECASE)
+_ASVA_INTENT = re.compile(
+    r"\b(try|trial|want|wanted|interested|demo|start|join|setup|set up|install|know|"
+    r"details?|info|information|price|pricing|cost|charges?|free|use|using|need|"
+    r"chahiye|karna|lena|kaise|how|plans?|register|sign ?up|buy|work|works)\b",
+    re.IGNORECASE)
+
+
+def _wants_asva(text: str) -> bool:
+    t = text or ""
+    if not _ASVA_WORD.search(t):
+        return False
+    if len(re.findall(r"[A-Za-z]+", t)) <= 3:
+        return True
+    return bool(_ASVA_INTENT.search(t))
+
+
+def _owner_fallback(text: str, lang: str) -> str:
+    """An owner's message that is not a command. The bot number is also the
+    founder's own WhatsApp, where owners chat with him personally, so plain
+    chat ("hello sir", "kal milte hai") gets NO automated reply. Only a
+    mistyped command ("chek ramesh") gets the suggestion and the menu."""
+    hint = _suggest_command(text, lang)
+    return hint + i18n.t(lang, "help") if hint else ""
+
+
 def _lead_pitch() -> str:
-    return ("Hello! I am ASVA. 🙏\n"
-            "I help shops get their outstanding money back, automatically.\n\n"
-            "ASVA works from your own WhatsApp number, connected to your Tally:\n\n"
-            "- Sends your customers their bill and polite payment reminders\n"
-            "- Tells you every day who to chase\n"
-            "- You stay in control: ASVA never messages anyone without you\n\n"
-            "The pilot is free till 15 September. Reply *YES* and our team will "
-            "set you up in a few minutes.")
+    return ("Hello! Thank you for your interest in ASVA. 🙏\n\n"
+            "ASVA gets your outstanding payments back, automatically, from your own "
+            "WhatsApp number, connected to your Tally:\n\n"
+            "- Sends your customers their bills and polite payment reminders\n"
+            "- Reads their replies and tells you who paid and who to chase\n"
+            "- Puts payments back into Tally for you\n\n"
+            f"ASVA is free till {FREE_UNTIL_TEXT}. Reply *YES* and our team will set it "
+            "up for you in a few minutes.\n"
+            "See how it works: https://tryasva.com")
 
 
 def _lead_interested() -> str:
-    return ("Perfect. Our team will contact you shortly to set up ASVA. "
-            "The pilot is free till 15 September. Welcome aboard!")
+    return ("Thank you! Our team will message you shortly to set up ASVA. "
+            f"It is free till {FREE_UNTIL_TEXT}.")
 
 
 def _prospect_reply(db, from_number: str, text: str, upper: str) -> str:
-    """A non-owner messaged the ASVA marketing/bot number (off the poster).
+    """A non-owner messaged the ASVA bot number (also the founder's own number).
 
-    SMART and non-spammy (this is what stops the bot talking over a live sales
-    chat): pitch exactly ONCE, then stay quiet. The moment the lead says YES we
-    hand over to a human and go silent for a window, so the founder's own
-    conversation is never interrupted. The founder's global switch can also mute
-    the auto-pitch entirely.
+    Silent unless they clearly ask about ASVA (_wants_asva). Then pitch exactly
+    once; a YES (or asking again) hands over to the team and the bot goes quiet
+    for a window, so a real conversation is never interrupted. A bare "yes" from
+    someone who was never pitched is a personal chat and gets nothing. The
+    founder's global switch can mute the funnel entirely.
     """
     from app.services import assistant
     if not assistant.assistant_enabled(db):
         return ""                                   # founder muted the auto-pitch
     tokens = set(re.findall(r"[A-Z]+", upper))
     is_yes = bool(tokens & _JOIN_WORDS)
-    decision = assistant.decide_prospect(db, from_number, is_yes)
+    decision = assistant.decide_prospect(db, from_number, is_yes, wants=_wants_asva(text))
     if decision == assistant.PITCH:
         log.info("ASVA lead (first pitch): %s", text[:80])
         return _lead_pitch()
@@ -635,10 +675,7 @@ async def handle(
             if _sync_state(db, business_id) == "never":
                 return _first_sync_help(lang)
             return i18n.t(lang, "help")
-        # A mistyped command ("PAI ramesh", "chek ramesh") -> gently suggest the
-        # right one with a ready-to-use example, then show the full menu.
-        hint = _suggest_command(text, lang)
-        return (hint or i18n.t(lang, "unknown_prefix")) + i18n.t(lang, "help")
+        return _owner_fallback(text, lang)
 
     # ── Customer message (not owner) ──────────────────────────────────
     # Look up which business this customer belongs to (format-agnostic match)
