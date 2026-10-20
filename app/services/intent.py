@@ -27,13 +27,16 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-2.5-flash"
+# Flash-Lite with thinking off: classification needs no reasoning trace, and
+# thinking made each reply take 2.4-4 s and cost extra output tokens.
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
 )
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
-INTENTS = {"paid_claim", "promise", "dispute", "chatter", "unclear"}
+INTENTS = {"paid_claim", "promise", "dispute", "balance_query", "statement_request",
+           "bill_request", "payment_info", "order", "auto_greeting", "chatter", "unclear"}
 # Transient statuses worth a retry. 429 = free-tier rate limit (a burst of
 # replies hits this); 5xx = Gemini hiccup. Everything else (400 bad request,
 # 403 bad key) is not retried - it will not fix itself.
@@ -43,8 +46,7 @@ _MAX_ATTEMPTS = 3
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "intent": {"type": "STRING",
-                   "enum": ["paid_claim", "promise", "dispute", "chatter", "unclear"]},
+        "intent": {"type": "STRING", "enum": sorted(INTENTS)},
         "amount": {"type": "NUMBER", "nullable": True},
         "promise_date": {"type": "STRING", "nullable": True},
         "confidence": {"type": "NUMBER"},
@@ -59,18 +61,27 @@ def _today_ist() -> _dt.date:
 
 def _prompt(today: _dt.date) -> str:
     return (
-        "You classify a customer's WhatsApp reply to a payment reminder from an "
-        "Indian wholesale shop. The customer may write in English, Hindi, Hinglish, "
-        f"Gujarati or Marathi, often romanised. Today is {today.isoformat()} "
-        "(Asia/Kolkata).\n\n"
+        "You classify a customer's WhatsApp message to an Indian wholesale shop that "
+        "sends them payment reminders. The customer may write in English, Hindi, "
+        "Hinglish, Tamil, Tanglish (Tamil in Latin letters), Gujarati or Marathi, "
+        f"often romanised. Today is {today.isoformat()} (Asia/Kolkata).\n\n"
         "Return:\n"
         "- intent, one of:\n"
         "  paid_claim = says they have already paid or are paying now "
-        "(paid, done, sent, paisa bhej diya, kar diya, ho gaya)\n"
+        "(paid, done, sent, paisa bhej diya, kar diya, ho gaya, kattiten, anupitten)\n"
         "  promise = says they will pay at a FUTURE time "
-        "(kal, 5 tareek ko, next week, Monday, 3 din me, agle hafte)\n"
-        "  dispute = disagrees, says the bill or amount is wrong, or refuses\n"
-        "  chatter = greeting, thanks, or anything not about payment\n"
+        "(kal, 5 tareek ko, next week, Monday, agle hafte, naalaiku, adutha vaaram)\n"
+        "  dispute = says the amount or bill is wrong, says nothing is due, or refuses "
+        "(\"Nill balance\", \"not ours pls check\", \"bill galat hai\")\n"
+        "  balance_query = asks how much is due (kitna baki hai, evlo balance)\n"
+        "  statement_request = asks for a statement, ledger or hisab\n"
+        "  bill_request = asks for a copy of a bill or invoice\n"
+        "  payment_info = asks for the UPI ID, bank or account details, a QR, or how to pay\n"
+        "  order = wants to buy goods, or asks about stock, rates or delivery "
+        "(\"10 box wire bhejo\", \"rate kya hai\")\n"
+        "  auto_greeting = an automatic reply from their own WhatsApp Business "
+        "(\"Welcome to X\", \"Thanks for contacting\", an away message)\n"
+        "  chatter = greeting, thanks, ok, or anything else not about payment\n"
         "  unclear = about payment but you cannot tell which\n"
         "- amount: the rupee number they mention if any (numeric only), else null\n"
         "- promise_date: for a promise, resolve the date they mean to an absolute "
@@ -79,6 +90,18 @@ def _prompt(today: _dt.date) -> str:
         "Never guess an amount or date that is not implied. If unsure, use unclear "
         "with low confidence."
     )
+
+
+def _payload(text: str, today: _dt.date) -> dict:
+    return {
+        "contents": [{"parts": [{"text": _prompt(today) + "\n\nMessage:\n" + text}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": RESPONSE_SCHEMA,
+            "temperature": 0,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
 
 
 def is_configured() -> bool:
@@ -146,14 +169,7 @@ async def classify(text: str) -> dict | None:
     if not is_configured() or not (text or "").strip():
         return None
     today = _today_ist()
-    payload = {
-        "contents": [{"parts": [{"text": _prompt(today) + "\n\nMessage:\n" + text}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": RESPONSE_SCHEMA,
-            "temperature": 0,
-        },
-    }
+    payload = _payload(text, today)
     # Retry transient failures (rate limit / hiccup) with a short backoff so a
     # burst of replies does not silently degrade. A non-transient error (bad key,
     # bad request) stops immediately; after all attempts we degrade to None and

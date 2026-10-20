@@ -150,3 +150,23 @@ def test_network_exception_is_retried(monkeypatch):
     _wire(monkeypatch, client)
     v = asyncio.run(intent.classify("good morning"))
     assert v["intent"] == "chatter" and client.calls == 2
+
+
+# ── October 2026: Flash-Lite, no thinking, wider intents, Tamil ───────────
+def test_new_intents_are_accepted():
+    for it in ("balance_query", "statement_request", "bill_request", "payment_info",
+               "order", "auto_greeting"):
+        v = intent._parse(_gem({"intent": it, "confidence": 0.9}), TODAY)
+        assert v["intent"] == it
+
+
+def test_payload_uses_flash_lite_without_thinking():
+    assert intent.GEMINI_MODEL == "gemini-2.5-flash-lite"
+    cfg = intent._payload("hello", TODAY)["generationConfig"]
+    assert cfg["thinkingConfig"] == {"thinkingBudget": 0}
+    assert sorted(cfg["responseSchema"]["properties"]["intent"]["enum"]) == sorted(intent.INTENTS)
+
+
+def test_prompt_covers_tamil_disputes_and_orders():
+    p = intent._prompt(TODAY)
+    assert "Tamil" in p and "Nill balance" in p and "order" in p

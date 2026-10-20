@@ -36,6 +36,16 @@ GOLDEN = [
     ("maal kharab nikla, itne paise nahi dunga", "dispute"),
     ("good morning ji", "chatter"),
     ("dhanyavaad bhai", "chatter"),
+    # October 2026: real replies from the field + Tamil
+    ("Nill balance", "dispute"),
+    ("not our pls check", "dispute"),
+    ("kitna baki hai bhai", "balance_query"),
+    ("evlo balance pending", "balance_query"),
+    ("bill copy anupunga", "bill_request"),
+    ("UPI number kya hai", "payment_info"),
+    ("10 box wire bhejo kal", "order"),
+    ("naalaiku pay panren", "promise"),
+    ("kattiten sir", "paid_claim"),
 ]
 
 pytestmark = pytest.mark.skipif(
