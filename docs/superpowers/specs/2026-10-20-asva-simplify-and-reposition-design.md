@@ -55,11 +55,13 @@ scan, a test reminder arrives, and a backup verifies.
 
 | Plan | DB value | Price/month | Active debtors | Messages/month | Daily cap | Features |
 |---|---|---|---|---|---|---|
-| Lite | `starter` | ₹699 | 100 | 800 | 50 | Everything in Collect |
-| Collect | `growth` | ₹999 | 300 | 2,400 | 100 | Bill on WhatsApp, reminders, batches, pay link, payment reconciliation to Tally |
+| Lite | `starter` | ₹699 | 150 | 1,200 | 50 | Everything in Collect |
+| Collect | `growth` | ₹999 | 400 | 3,200 | 100 | Bill on WhatsApp, reminders, batches, pay link, payment reconciliation to Tally |
 | Recover | `pro` | ₹1,499 | 1,000 | 8,000 | 150 | Collect + AI replies, promise follow-up, Recovery file, multi-company |
 | Custom | `max` | quoted | 5,000 | 40,000 | 300 | Recover, priced per shop |
 
+- Lite and Collect have identical features; only the debtor count differs
+  ("same features, more customers"). Recover is the only feature step up.
 - Keep the existing Postgres enum values; only labels, prices, limits and
   feature flags change. No enum migration.
 - Feature flags in `PLAN_LIMITS` (app/models.py): `ai_replies`, `recovery_file`,
