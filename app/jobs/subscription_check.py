@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 
 from app.db import require_db
+from app.models import PLAN_LABELS, PLAN_LIMITS, recommend_plan
 from app.services import subscription as subs
 from app.services import whatsapp
+from app.services.license import active_debtor_count
 
 log = logging.getLogger(__name__)
 
@@ -43,12 +45,28 @@ async def run() -> None:
             pay = subs.renewal_payment_line(biz.get("plan"))
             tail = ("\n\n" + pay) if pay else ""
 
-            # Heads-up 5 days before expiry (fires exactly once - equality)
-            if live in ("trial", "active") and left == 5:
+            # Free trial: on day 5 and day 7 name the plan this shop's debtor
+            # count needs, with its price and the pay link (fires once each -
+            # equality on days left).
+            if stored == "trial" and left in (2, 0):
+                n = active_debtor_count(db, biz["id"])
+                rec = recommend_plan(n)
+                price = PLAN_LIMITS[rec].get("price", 0)
+                when = "today" if left == 0 else "in 2 days"
+                plan_line = (f"your plan is {PLAN_LABELS[rec]} at Rs {price:,} a month "
+                             f"(covers {PLAN_LIMITS[rec]['debtors']:,} debtors)"
+                             if price else "message us for a Custom plan")
+                rec_pay = subs.renewal_payment_line(rec.value)
                 await whatsapp.notify_owner(
                     biz["id"],
-                    f"{name}: your ASVA plan ends in 5 days. Renew to keep "
-                    f"reminders and bills running." + tail)
+                    f"{name}: your ASVA free trial ends {when}. You have {n:,} active "
+                    f"debtors, so {plan_line}." + (("\n\n" + rec_pay) if rec_pay else ""))
+            # Paid plan: heads-up 7, 3 and 1 days before expiry.
+            elif live in ("trial", "active") and left in (7, 3, 1):
+                await whatsapp.notify_owner(
+                    biz["id"],
+                    f"{name}: your ASVA plan ends in {left} day{'s' if left != 1 else ''}. "
+                    f"Renew to keep reminders and bills running." + tail)
 
             if live == stored or (live == "active" and stored in ("trial", "active")):
                 continue

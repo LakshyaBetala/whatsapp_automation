@@ -166,7 +166,7 @@ class CreateBizPayload(BaseModel):
     whatsapp_number: str
     business_name: Optional[str] = None
     plan: str = "starter"
-    months: float = 1                 # first paid cycle length (30-day cycles)
+    months: float = 0                 # 0 = 7-day free trial; N = N paid 30-day cycles
 
 
 @router.post("/create-business")

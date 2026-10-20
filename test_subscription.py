@@ -88,3 +88,43 @@ def test_renewal_payment_line_team_only_is_clickable(monkeypatch):
     monkeypatch.setattr(subs.settings, "product_team_number", "919344110272")
     line = subs.renewal_payment_line("pro")
     assert "https://wa.me/919344110272" in line and "upi://" not in line
+
+
+def _sc_setup(monkeypatch, biz, left, live="active", debtors=320):
+    from app.jobs import subscription_check as sc
+    sent = []
+    async def fake_notify(bid, text): sent.append(text)
+    monkeypatch.setattr(sc.whatsapp, "notify_owner", fake_notify)
+    monkeypatch.setattr(sc.subs, "free_pilot_active", lambda: False)
+    monkeypatch.setattr(sc.subs, "days_left", lambda exp, today=None: left)
+    monkeypatch.setattr(sc.subs, "effective_status", lambda exp, today=None: live)
+    monkeypatch.setattr(sc, "active_debtor_count", lambda db, bid: debtors)
+
+    class Q:
+        def select(self, *a): return self
+        def update(self, *a): return self
+        def eq(self, *a): return self
+        def execute(self): return type("R", (), {"data": [biz]})()
+    monkeypatch.setattr(sc, "require_db", lambda: type("DB", (), {"table": lambda s, n: Q()})())
+    return sc, sent
+
+
+def test_trial_notice_names_the_plan_by_debtors(monkeypatch):
+    import asyncio
+    biz = {"id": "b1", "business_name": "Ram Traders", "plan": "pro",
+           "subscription_status": "trial", "plan_expires_on": "2026-10-22"}
+    sc, sent = _sc_setup(monkeypatch, biz, left=2)
+    asyncio.run(sc.run())
+    assert sent and "trial" in sent[0] and "Collect" in sent[0]
+    assert "999" in sent[0] and "320" in sent[0]
+    assert "—" not in sent[0] and "–" not in sent[0]
+
+
+def test_paid_renew_notice_at_7_3_1_days(monkeypatch):
+    import asyncio
+    biz = {"id": "b1", "business_name": "Ram Traders", "plan": "growth",
+           "subscription_status": "active", "plan_expires_on": "2026-10-27"}
+    for left, expect in ((7, True), (3, True), (1, True), (5, False)):
+        sc, sent = _sc_setup(monkeypatch, biz, left=left)
+        asyncio.run(sc.run())
+        assert bool(sent) is expect, left

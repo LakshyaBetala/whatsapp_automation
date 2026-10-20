@@ -51,9 +51,12 @@ def create_business(db, *, owner_name: str, whatsapp_number: str,
                     business_name: Optional[str] = None, plan: str = "starter",
                     months: float = 1, today: Optional[_dt.date] = None) -> dict:
     """Onboard a new shop from the Command Center: insert the business row and
-    mint its agent_token + licence key + first paid cycle. Returns the created
-    row (including the secret agent_token, shown ONCE to the operator so it can
-    be dropped into the new shop's config.json).
+    mint its agent_token + licence key + first cycle. months=0 is the free
+    trial: full features (Recover) for settings.trial_days; the trial-end
+    notice then names the plan the shop's debtor count needs. months=N>0 is
+    N paid 30-day cycles on `plan`. Returns the created row (including the
+    secret agent_token, shown ONCE to the operator so it can be dropped into the
+    new shop's config.json).
 
     Raises ValueError for bad input; lets a DB unique-violation propagate so the
     caller can turn a duplicate WhatsApp number into a clean 409."""
@@ -65,17 +68,20 @@ def create_business(db, *, owner_name: str, whatsapp_number: str,
         plan_v = Plan(plan).value
     except ValueError:
         raise ValueError("Unknown plan. Use starter/growth/pro/max.")
-    if months <= 0 or months > 60:
-        raise ValueError("months must be between 0 and 60.")
+    if months < 0 or months > 60:
+        raise ValueError("months must be between 0 (free trial) and 60.")
+    trial = months == 0
 
     row = {
         "owner_name": (owner_name or "").strip() or "Owner",
         "business_name": (business_name or "").strip() or None,
         "whatsapp_number": wa,
-        "plan": plan_v,
+        "plan": Plan.pro.value if trial else plan_v,
         "agent_token": generate_agent_token(),
         "license_key": generate_license_key(),
-        "plan_expires_on": renew_expiry(None, months, today).isoformat(),
+        "plan_expires_on": ((today + _dt.timedelta(days=settings.trial_days)) if trial
+                            else renew_expiry(None, months, today)).isoformat(),
+        "subscription_status": "trial" if trial else "active",
         "onboarding_status": "active",
     }
     res = db.table("businesses").insert(row).execute()

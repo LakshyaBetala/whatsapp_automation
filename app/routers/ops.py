@@ -629,7 +629,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <div class="fld"><label>WhatsApp number (10-digit)</label><input id="f_wa" inputmode="numeric" placeholder="9876543210"></div>
   <div class="row2">
    <div class="fld"><label>Plan</label><select id="f_plan"></select></div>
-   <div class="fld"><label>Paid months</label><input id="f_months" type="number" min="1" max="60" value="1"></div>
+   <div class="fld"><label>Paid months (0 = 7-day free trial)</label><input id="f_months" type="number" min="0" max="60" value="0"></div>
   </div>
   <div class="err" id="addErr"></div>
   <button class="go" id="addGo" onclick="doAdd()">Create business</button>
@@ -927,7 +927,7 @@ function openAdd(){
     PLANS.map(p=>'<option value="'+p+'">'+PLABEL[p]+'</option>').join('');
   document.getElementById('addErr').textContent='';
   ['f_biz','f_owner','f_wa'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('f_months').value='1';
+  document.getElementById('f_months').value='0';
   document.getElementById('addCard').style.display='';
   document.getElementById('addResult').style.display='none';
   document.getElementById('addModal').classList.add('show');
@@ -941,7 +941,7 @@ async function doAdd(){
     business_name:document.getElementById('f_biz').value.trim(),
     whatsapp_number:wa,
     plan:document.getElementById('f_plan').value,
-    months:parseFloat(document.getElementById('f_months').value)||1};
+    months:(v=>Number.isFinite(v)&&v>=0?v:0)(parseFloat(document.getElementById('f_months').value))};
   if(!body.business_name){document.getElementById('addErr').textContent='Enter a shop name.';return;}
   if(wa.length<10){document.getElementById('addErr').textContent='Enter a 10-digit WhatsApp number.';return;}
   const btn=document.getElementById('addGo');btn.disabled=true;btn.textContent='Creating...';

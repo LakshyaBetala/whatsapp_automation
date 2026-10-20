@@ -233,7 +233,9 @@ def test_create_business_rejects_bad_input():
     db = _InsertDB()
     for bad in (lambda: lic.create_business(db, owner_name="x", whatsapp_number="123"),
                 lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", plan="ultra"),
-                lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", months=0)):
+                lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", months=-1),
+                lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", months=61)):
+        # months=0 is valid since Oct 2026: it is the 7-day free trial.
         try:
             bad()
             assert False, "should have raised"
@@ -289,3 +291,33 @@ def test_new_plan_table():
     assert all(plan_has_bot(p) for p in Plan)
     assert recommend_plan(150) == Plan.starter and recommend_plan(151) == Plan.growth
     assert recommend_plan(401) == Plan.pro and recommend_plan(1001) == Plan.max
+
+
+def test_months_zero_creates_a_seven_day_trial_on_full_features():
+    import datetime as dt
+    rows = []
+
+    class Q:
+        def insert(self, row): rows.append(row); return self
+        def execute(self): return type("R", (), {"data": [rows[-1]]})()
+
+    db = type("DB", (), {"table": lambda self, n: Q()})()
+    biz = lic.create_business(db, owner_name="A", whatsapp_number="9876543210",
+                              business_name="X", plan="starter", months=0,
+                              today=dt.date(2026, 10, 20))
+    assert biz["plan"] == "pro" and biz["subscription_status"] == "trial"
+    assert biz["plan_expires_on"] == "2026-10-27"
+
+
+def test_paid_months_still_create_an_active_paid_cycle():
+    import datetime as dt
+    rows = []
+
+    class Q:
+        def insert(self, row): rows.append(row); return self
+        def execute(self): return type("R", (), {"data": [rows[-1]]})()
+
+    db = type("DB", (), {"table": lambda self, n: Q()})()
+    biz = lic.create_business(db, owner_name="A", whatsapp_number="9876543210",
+                              plan="growth", months=1, today=dt.date(2026, 10, 20))
+    assert biz["plan"] == "growth" and biz["subscription_status"] == "active"

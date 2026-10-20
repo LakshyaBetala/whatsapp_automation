@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     # is suspended. Like a paid app: pay -> access continues; lapse -> a short
     # grace, then cut off. Max 3.
     subscription_grace_days: int = 3
+    trial_days: int = 7              # new shops: full features for this many days
     # Free pilot: while today <= this date (YYYY-MM-DD), EVERY business is treated
     # as active on the Pro tier - no suspension, no plan-limit block, no renewal
     # nagging. Matches the public "free pilot till 30 Sep 2026" promise. Set to ""
