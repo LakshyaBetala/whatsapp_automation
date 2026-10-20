@@ -113,8 +113,8 @@ def test_bot_channel_invites_only_people_who_ask_for_asva(monkeypatch):
     invite = _run(bot.handle("910000000000", "I want to try ASVA", channel="bot"))
     assert "ASVA" in invite and "YES" in invite and "free" in invite.lower()
     assert "registered" not in invite.lower()      # never the old bounce
-    yes = _run(bot.handle("910000000000", "YES", channel="bot"))
-    assert "team" in yes.lower() and "free" in yes.lower()   # routed to follow-up
+    # (YES after the pitch -> team hand-over needs lead state across messages;
+    # covered with a stateful fake in test_prospect.py.)
 
 
 def test_owner_gets_menu_on_bot_channel(monkeypatch):
