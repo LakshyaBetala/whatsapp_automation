@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.1.3.\n\nToday, rebuilt: one screen to run the day. Money expected at the top (customers who tapped Pay on your link), then who to chase, then the few things only you can decide. Numbers and aging sit to the side.\n\nYou are told when money may be coming: a Windows notification the moment a customer taps Pay on your payment link, with the amount and the bill. The tray shows how many payments are expected. Nothing is ever marked paid until you post it.\n\nParty page: the whole story on one line, newest first. Bills, reminders, link opened, tapped Pay, promises, receipts.\n\nPay link for your customers: pick bills, pay 25%, 50%, full or any amount; the page suggests the top-up that clears the next bill; large amounts route to your bank details.\n\nSmoother start: services start one after another so other apps are not slowed; screens no longer go blank after a sync; typing is never interrupted by a background refresh.\n\nFree for every shop until 30 September 2026."
+      "releaseNotes": "ASVA 2.2.0.\n\nA calmer, simpler ASVA. Five places on the left: Today, Parties, Payments, Reminders and Settings. WhatsApp and Reports sit at the bottom of the left bar.\n\nOne language menu at the top. ASVA is in English unless you pick Hinglish or Hindi, and customer messages stay in English unless you set a batch to Hinglish.\n\nTour, Phone app, update check and dark mode are under More, so the top bar stays clear.\n\nNew look: clean paper-and-blue screens, easier to read. Nothing about your data or reminders changes."
     },
     "files": [
       "main.js",
