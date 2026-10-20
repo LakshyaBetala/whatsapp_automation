@@ -14,7 +14,9 @@ file), which stays valid.
 | Promises | Pause reminders and tell the owner; no reply to the customer |
 | AI provider | Rules first, Gemini 2.5 Flash-Lite on Vertex AI (trial credit), AI Studio free key as fallback |
 | Renewal | Manual UPI stays, with stronger reminders and one-tap renew for the founder |
-| New bills | Sent 5-10 minutes after sync, merged per customer, quiet hours, daily cap |
+| New bills | Sent 5-10 minutes after sync, merged per customer, quiet hours; no daily cap, at most one bill message per customer per 30 minutes |
+| AI use | Preset rules answer the common requests with no AI call; AI only reads what the rules cannot place |
+| Trial and plans | 7-day free trial on full features, then Lite Rs 699 / Collect Rs 999 / Recover Rs 1,499 chosen by active debtors; limits enforced |
 | Server | GCP e2-medium (4 GB) during the trial; no 6 GB; Kamatera around day 80 |
 
 ## Order
@@ -66,9 +68,26 @@ Each step gets its own implementation plan and ships on its own.
 - Prompt covers English, Hindi, Hinglish, **Tamil and Tanglish**, Gujarati,
   Marathi, with examples: "Nill balance", "not ours pls check" = dispute;
   "kitna baki hai" = balance_query; "10 box bhejo" = order.
-- Rules before the model (no AI call): `PAID...`, `STOP`, business auto-greetings
-  (starts with "Welcome to", "Thank you for contacting", "Thanks for reaching
-  out", or a `*Bold Name*` greeting with "how can we help").
+- Rules before the model (no AI call), `app/services/reply_rules.py`, a pure
+  function returning the same verdict shape as the model, multilingual
+  (English, Hindi, Hinglish, Tamil, Tanglish, Gujarati, Marathi, in Latin and
+  native scripts):
+  - `paid_claim`: PAID, paid, payment done, sent, transferred, paisa bhej diya,
+    kar diya, ho gaya, anupitten, kattiten, GPay/PhonePe/Paytm success texts.
+  - `balance_query`: how much, balance, baki, kitna, bakaya, outstanding, evvalavu,
+    meethi, ketla baki.
+  - `statement_request`: statement, ledger, hisab, khata, account copy.
+  - `bill_request`: bill bhejo, send bill, invoice copy, bill copy, bill anuppu.
+  - `payment_info`: UPI, account number, bank details, QR, GPay number, kaise pay.
+  - `opt_out`: STOP, band karo, mat bhejo, venda, unsubscribe.
+  - `auto_greeting`: business auto-replies ("Welcome to", "Thank you for
+    contacting", "Thanks for reaching out", a `*Bold Name*` greeting with "how
+    can we help", away messages).
+  - `chatter`: ok, okay, thanks, thank you, noted, sari, theek hai, haan, 👍.
+  - A rule fires only on a short, single-purpose message (12 words or fewer)
+    with no conflicting rule; anything longer, mixed, or with a date or amount
+    goes to the model.
+  - Measure: the share of replies the rules settle is logged; target above 60%.
 - Routing in step 1 (before auto-replies exist): dispute -> owner alert, no pause
   (today "Nill balance" wrongly pauses); balance / statement / bill /
   payment_info -> owner nudge "X asked for ..."; order, auto_greeting, chatter ->
@@ -100,6 +119,22 @@ Each step gets its own implementation plan and ships on its own.
   8,000 / 150; Custom `max` unchanged. Labels shown as Lite / Collect / Recover.
 - Existing shops keep their limits until `plan_expires_on`; the founder reviews
   a mapping list before any shop's plan changes.
+- 7-day free trial: a new shop is created on `pro` (all features) with
+  `plan_expires_on = today + 7` and `subscription_status = 'trial'`. On day 5
+  and day 7 the owner gets "You have N active debtors, so your plan is
+  Lite / Collect / Recover at Rs X a month", with the pay link. After the
+  trial (plus the existing 3-day grace) sends stop until renewed; Tally sync
+  and the dashboard keep working.
+- Limits enforced on every plan:
+  - Active debtors (parties with a number and an outstanding): each month
+    reminders and bill notices go to the plan's cap of debtors, chosen by the
+    existing priority (amount x age). The rest are not messaged; the owner
+    sees "You have 520 debtors; Collect covers 400. 120 were not reminded.
+    Recover covers 1,000" on Today and in the digest.
+  - Messages per month: the existing atomic limit stops sends at the cap;
+    the owner is told at 80% and at 100%.
+  - Daily cap (50 / 100 / 150) as today.
+  - Owner bot replies and owner alerts never count against the limits.
 - Website: remove every "free till 30 September" line in `app/site.py`; pricing
   page shows the three plans and "Custom: talk to us"; guide stops promising a
   PDF with every bill and lists Tamil.
@@ -239,7 +274,8 @@ an owner voice note "Ramesh ka kitna baki hai" returns Ramesh's balance.
   `send_after` to that bill + 10 min, never later than the first bill + 30 min;
   one message lists all of them.
 - Quiet hours 22:00-08:00 IST: `send_after` becomes 08:00.
-- At most 3 bill messages per customer per day; more are folded into the next.
+- No daily cap on bills. At most one bill message per customer per 30 minutes;
+  bills inside that window join the same message. Every bill is sent.
 - Message: invoice number(s), date, amount, due date, total, pay link; the PDF
   attached when the agent supplied one. Goes through the outbox, so the ban
   guardrails and the server transport apply.
@@ -250,6 +286,26 @@ an owner voice note "Ramesh ka kitna baki hai" returns Ramesh's balance.
 
 Done when: a bill made at 20:00 reaches the customer by 20:10; three bills in
 five minutes arrive as one message; a bill made at 23:00 goes at 08:00.
+
+## Worst-case cost per shop per month
+
+Assumptions: Recover shop, 1,000 debtors, every debtor replies 3 times a month
+(3,000 replies), rules settle 60%, 1,200 AI calls of about 1,200 input and 150
+output tokens; 300 owner voice notes; 300 screenshots; 500 drafts. Flash-Lite
+at about $0.10 / $0.40 per million tokens, Rs 85 per dollar.
+
+| Item | 5 shops | 13 shops | 50 shops |
+|---|---|---|---|
+| Server (Kamatera 4 GB, about Rs 1,600 shared) | Rs 320 | Rs 123 | Rs 32 |
+| AI (replies, voice, screenshots, drafts) | Rs 30 | Rs 30 | Rs 30 |
+| Supabase (free; Pro Rs 2,100 shared once needed) | Rs 0 / 420 | Rs 0 / 162 | Rs 0 / 42 |
+| WhatsApp (Baileys) | Rs 0 | Rs 0 | Rs 0 |
+| **Worst case** | **Rs 350-770** | **Rs 153-315** | **Rs 62-104** |
+
+Against Lite Rs 699 the worst case at 13 shops leaves 55-78% margin; Recover
+Rs 1,499 leaves 79-90%. The official WhatsApp API, if a shop ever moves to it,
+adds about Rs 0.115 per message (Rs 920 at the full 8,000 Recover messages),
+so Recover keeps a fair-use limit.
 
 ## Step 5. Renewal reminders and one-tap renew
 
