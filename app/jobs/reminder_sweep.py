@@ -104,6 +104,22 @@ def _marker_row(biz_id: str, client_id: str, bill_id: str, day: int, *,
     return row
 
 
+def _covered_parties(ordered: list, caps: dict) -> set:
+    """The plan's debtor cap: per business, the first `cap` parties of the
+    priority order (biggest x oldest first). Parties beyond the cap are not
+    messaged; the owner is told in the digest (license.debtor_cap_notice).
+    cap <= 0 means no cap."""
+    seen: dict = {}
+    covered = set()
+    for (biz_id, client_id), _p in ordered:
+        n = seen.get(biz_id, 0)
+        cap = caps.get(biz_id, 0)
+        if cap <= 0 or n < cap:
+            covered.add((biz_id, client_id))
+        seen[biz_id] = n + 1
+    return covered
+
+
 def _party_priority(bills: list, today: date) -> float:
     """Urgency score for the drip queue: outstanding x (days since oldest bill).
     Bigger, older debts get today's limited send slots first; the rest carry to
@@ -451,6 +467,16 @@ async def run() -> None:
         parties.items(),
         key=lambda kv: (kv[0][0], -_party_priority(kv[1]["bills"], today)),
     )
+    # Plan debtor cap: only the plan's top-N parties (same priority order) are
+    # reminded; the digest tells the owner how many were left out and which
+    # plan covers them.
+    debtor_caps: dict[str, int] = {}
+    for bid, b in businesses.items():
+        try:
+            debtor_caps[bid] = int(PLAN_LIMITS[Plan(b.get("plan") or "starter")]["debtors"])
+        except (ValueError, KeyError):
+            debtor_caps[bid] = int(PLAN_LIMITS[Plan.starter]["debtors"])
+    covered = _covered_parties(ordered, debtor_caps)
 
     for (biz_id, client_id), p in ordered:
         try:
@@ -468,6 +494,9 @@ async def run() -> None:
                 continue
             if cap > 0 and sent_per_biz.get(biz_id, 0) >= cap:
                 skipped += 1
+                continue
+            if (biz_id, client_id) not in covered:
+                skipped += 1               # beyond the plan's debtor cap
                 continue
             if not client.get("reminders_enabled", True):
                 skipped += 1

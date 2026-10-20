@@ -243,6 +243,20 @@ async def _build_digest(business_id: str, business: dict) -> dict | None:
     except Exception:
         log.exception("Cash-in forecast failed - digest continues")
 
+    # ── Plan debtor cap: say plainly when some debtors are not being reminded ─
+    try:
+        from app.models import Plan
+        from app.services.license import active_debtor_count, debtor_cap_notice
+        try:
+            plan = Plan(business.get("plan") or "starter")
+        except ValueError:
+            plan = Plan.starter
+        note = debtor_cap_notice(active_debtor_count(db, business_id), plan)
+        if note:
+            action_lines += "\n\n" + note
+    except Exception:
+        log.exception("Debtor cap note failed - digest continues")
+
     # ── Month-end (last day of the month): the full Recovery Report Card ─
     if _is_month_end(today):
         try:

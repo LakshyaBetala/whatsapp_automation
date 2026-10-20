@@ -137,3 +137,17 @@ def test_marker_row_for_a_direct_send():
     from app.jobs.reminder_sweep import _marker_row
     row = _marker_row("b1", "c1", "bill1", 15, parent_id=None, queued=False)
     assert row["delivery_status"] == "sent" and "parent_message_id" not in row
+
+
+# ── debtor cap: the plan covers the top-N parties by priority ─────────────
+def test_covered_parties_takes_top_n_per_business():
+    from app.jobs.reminder_sweep import _covered_parties
+    ordered = [(("a", "c1"), {}), (("a", "c2"), {}), (("a", "c3"), {}),
+               (("b", "d1"), {}), (("b", "d2"), {})]
+    covered = _covered_parties(ordered, {"a": 2, "b": 5})
+    assert covered == {("a", "c1"), ("a", "c2"), ("b", "d1"), ("b", "d2")}
+
+
+def test_zero_cap_means_no_cap():
+    from app.jobs.reminder_sweep import _covered_parties
+    assert _covered_parties([(("a", "c1"), {}), (("a", "c2"), {})], {"a": 0}) == {("a", "c1"), ("a", "c2")}

@@ -321,3 +321,13 @@ def test_paid_months_still_create_an_active_paid_cycle():
     biz = lic.create_business(db, owner_name="A", whatsapp_number="9876543210",
                               plan="growth", months=1, today=dt.date(2026, 10, 20))
     assert biz["plan"] == "growth" and biz["subscription_status"] == "active"
+
+
+def test_debtor_cap_notice():
+    from app.models import Plan
+    from app.services.license import debtor_cap_notice
+    assert debtor_cap_notice(380, Plan.growth) is None
+    msg = debtor_cap_notice(520, Plan.growth)
+    assert "520" in msg and "400" in msg and "120" in msg and "Recover" in msg
+    assert "—" not in msg and "–" not in msg
+    assert "Custom" in debtor_cap_notice(1500, Plan.pro)

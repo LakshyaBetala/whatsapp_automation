@@ -17,7 +17,7 @@ import secrets
 from typing import Optional
 
 from app.config import settings
-from app.models import PLAN_LABELS, PLAN_LIMITS, Plan
+from app.models import PLAN_LABELS, PLAN_LIMITS, Plan, recommend_plan
 from app.services import i18n
 from app.services import subscription as subs
 
@@ -150,6 +150,22 @@ def _plan_of(biz: dict) -> Plan:
         return Plan(biz.get("plan") or "starter")
     except ValueError:
         return Plan.starter
+
+
+def debtor_cap_notice(active: int, plan: Plan) -> Optional[str]:
+    """Owner-facing line when the shop has more active debtors than its plan
+    covers (the reminder sweep messages only the top `cap` by priority).
+    None when within the cap."""
+    cap = int(PLAN_LIMITS[plan]["debtors"])
+    if active <= cap:
+        return None
+    nxt = recommend_plan(active)
+    if nxt != plan and PLAN_LIMITS[nxt].get("price"):
+        tail = f" {PLAN_LABELS[nxt]} covers {int(PLAN_LIMITS[nxt]['debtors']):,}."
+    else:
+        tail = " Message us for a Custom plan."
+    return (f"You have {active:,} active debtors; your {PLAN_LABELS[plan]} plan covers "
+            f"{cap:,}, so {active - cap:,} were not reminded.{tail}")
 
 
 def active_debtor_count(db, business_id: str) -> int:
