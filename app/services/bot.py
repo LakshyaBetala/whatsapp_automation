@@ -431,11 +431,11 @@ async def handle(
         # bouncing them - every bounced message is a lost sale.
         return _prospect_reply(db, from_number, text, upper)
 
-    # ── Bot assistant is a paid feature (Basic plan does NOT include it) ──
+    # ── Bot assistant: on every plan; a Custom deal can switch it off ──
     if channel == "bot" and is_owner and not plan_has_bot(business.get("plan")):
-        return ("The ASVA assistant is available on the Growth plan and above.\n"
-                "Your bills and reminders keep working. To turn on the assistant "
-                "(LIST, BILL, photo bills, digest), upgrade your plan.")
+        return ("The ASVA assistant is not on your plan.\n"
+                "Your bills and reminders keep working. Message us to add the "
+                "assistant (LIST, BILL, photo bills, digest).")
 
     if is_owner:
         business_id = business["id"]

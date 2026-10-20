@@ -50,7 +50,7 @@ def test_heartbeat_active_business(monkeypatch):
     hb = lic.build_heartbeat(db=None, biz=biz, today=today)
 
     assert hb["status"] == "active"
-    assert hb["plan"] == "pro" and hb["plan_label"] == "Pro" and hb["price"] == 1999
+    assert hb["plan"] == "pro" and hb["plan_label"] == "Recover" and hb["price"] == 1499
     assert hb["days_left"] == 24
     assert hb["messages_used"] == 270 and hb["messages_limit"] == 8000
     assert hb["messages_remaining"] == 8000 - 270
@@ -71,7 +71,7 @@ def test_heartbeat_suspended_blocks_paid_features(monkeypatch):
     assert hb["features"]["send"] is False
     assert hb["features"]["sync"] is True
     assert hb["over_debtor_cap"] is True             # 1200 > 300 starter cap
-    assert hb["messages_remaining"] == 0             # 9000 used > 2400 limit
+    assert hb["messages_remaining"] == 0             # 9000 used > 1200 limit
 
 
 def test_heartbeat_grace_still_sends(monkeypatch):
@@ -277,3 +277,15 @@ def test_renew_endpoint_admin_gate(monkeypatch):
         assert False, "should have refused"
     except HTTPException as e:
         assert e.status_code == 401
+
+
+def test_new_plan_table():
+    from app.models import PLAN_LIMITS, PLAN_LABELS, Plan, recommend_plan, plan_has_bot
+    trio = (Plan.starter, Plan.growth, Plan.pro)
+    assert [PLAN_LIMITS[p]["price"] for p in trio] == [699, 999, 1499]
+    assert [PLAN_LIMITS[p]["debtors"] for p in trio] == [150, 400, 1000]
+    assert [PLAN_LIMITS[p]["messages"] for p in trio] == [1200, 3200, 8000]
+    assert [PLAN_LABELS[p] for p in trio] == ["Lite", "Collect", "Recover"]
+    assert all(plan_has_bot(p) for p in Plan)
+    assert recommend_plan(150) == Plan.starter and recommend_plan(151) == Plan.growth
+    assert recommend_plan(401) == Plan.pro and recommend_plan(1001) == Plan.max

@@ -742,7 +742,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 const KEY = new URLSearchParams(location.search).get('key') || '';
 const inr = n => (n||0).toLocaleString('en-IN');
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
-const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Basic',growth:'Growth',pro:'Pro',max:'Custom'};
+const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Lite',growth:'Collect',pro:'Recover',max:'Custom'};
 let PUBLIC_URL='';
 let PAIR_BID='', ADD_BID='';
 // Send the drafted welcome + setup code to the owner on WhatsApp (bot number).

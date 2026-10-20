@@ -72,21 +72,23 @@ class SyncType(str, Enum):
 # "messages" is a SILENT anti-abuse ceiling (debtors x 8), set well above real
 # use so it never throttles reminders inside a tier. "clients" is uncapped in
 # practice so a full Tally import is never blocked.
-# "bot" = access to the ASVA owner assistant (LIST/BILL/photo/digest on WhatsApp).
-# Basic does NOT include it; everything above does.
-#   Basic   Rs699   -> 300 active debtors,  NO bot assistant
-#   Growth  Rs1099  -> 500 active debtors,  bot assistant
-#   Pro     Rs1999  -> 1000 active debtors, bot assistant
-#   Custom  -> larger shops, bot assistant, priced on request (price 0 = "contact us")
+# Plans (October 2026): a 7-day free trial on full features, then priced by
+# ACTIVE DEBTORS (parties with a WhatsApp number and an open bill):
+#   Lite     Rs699   -> 150 active debtors
+#   Collect  Rs999   -> 400 active debtors   (same features as Lite)
+#   Recover  Rs1499  -> 1000 active debtors  (+ AI replies, Recovery file, multi-company)
+#   Custom   -> above 1000, priced on request (price 0 = "contact us")
+# "bot" = the ASVA owner assistant (LIST/BILL/photo/digest on WhatsApp); every
+# plan includes it, along with the pay link and payment reconciliation.
 # "daily_cap" = how many customer reminders this plan may send PER DAY. It is a
 # SAFETY drip (not a paywall the shop feels): on Baileys an over-sending number
 # gets throttled/banned, so we spread a big backlog over days, most-urgent first
 # (see reminder_sweep priority drip). A new number is warmed up UNDER this (ramp
 # over ~7 days). Higher tiers clear a large debtor book faster.
 PLAN_LIMITS: dict[Plan, dict[str, int]] = {
-    Plan.starter: {"debtors": 300, "messages": 2400, "clients": 1000000, "price": 699, "bot": 0, "daily_cap": 50},
-    Plan.growth: {"debtors": 500, "messages": 4000, "clients": 1000000, "price": 1099, "bot": 1, "daily_cap": 100},
-    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1999, "bot": 1, "daily_cap": 150},
+    Plan.starter: {"debtors": 150, "messages": 1200, "clients": 1000000, "price": 699, "bot": 1, "daily_cap": 50},
+    Plan.growth: {"debtors": 400, "messages": 3200, "clients": 1000000, "price": 999, "bot": 1, "daily_cap": 100},
+    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1499, "bot": 1, "daily_cap": 150},
     Plan.max: {"debtors": 5000, "messages": 40000, "clients": 1000000, "price": 0, "bot": 1, "daily_cap": 300},
 }
 
@@ -144,15 +146,16 @@ def resolve_default_credit_days(business: dict | None) -> int:
 
 # Owner-facing plan labels (the enum values stay stable in the DB).
 PLAN_LABELS: dict[Plan, str] = {
-    Plan.starter: "Basic",
-    Plan.growth: "Growth",
-    Plan.pro: "Pro",
+    Plan.starter: "Lite",
+    Plan.growth: "Collect",
+    Plan.pro: "Recover",
     Plan.max: "Custom",
 }
 
 
 def plan_has_bot(plan_value) -> bool:
-    """Does this plan include the ASVA owner assistant (bot)? Basic does not."""
+    """Does this plan include the ASVA owner assistant (bot)? Every current plan
+    does; the flag stays so a Custom deal can switch it off."""
     try:
         p = plan_value if isinstance(plan_value, Plan) else Plan(plan_value or "starter")
     except ValueError:

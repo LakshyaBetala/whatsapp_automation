@@ -44,7 +44,7 @@ def test_renewal_payment_line_with_upi(monkeypatch):
     monkeypatch.setattr(subs.settings, "product_team_number", "919344110272")
     monkeypatch.setattr(subs.settings, "public_base_url", "https://app.tryasva.com")
     line = subs.renewal_payment_line("pro")
-    assert "1,999" in line                      # pro price, formatted
+    assert "1,499" in line                      # pro (Recover) price, formatted
     assert "laksh@okhdfc" in line               # UPI id as copyable text
     assert "https://app.tryasva.com/pay?plan=pro" in line  # tappable UPI pay link
     assert "https://wa.me/919344110272" in line  # a CLICKABLE https contact link
