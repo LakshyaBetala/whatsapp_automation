@@ -1541,7 +1541,7 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
     # Customer-facing: strip any Tally FY/date suffix so the message reads
     # "from ACME TRADERS", never "from ACME TRADERS - (from 1-Apr-2019)".
     biz_name = names.clean_business(business.get("business_name", ""))
-    # Professional copy in the party's reminder-batch language (Hinglish default).
+    # Professional copy in the party's reminder-batch language (English unless Hinglish was chosen).
     from app.services.batches import resolve_batch
     batch = resolve_batch(business, client.get("reminder_batch"))
     en = batch["lang"] == "english"

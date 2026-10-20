@@ -193,8 +193,53 @@ def _tally_status(dt: Optional[_dt.datetime]) -> tuple[str, str]:
 # a broken page). Applied longest-phrase-first so specifics beat generics.
 def _ui_translate(html: str, lang: str) -> str:
     """Rewrite a Hinglish-authored admin page into the chosen locale
-    (english / hinglish / hindi). Delegates to app.services.i18n."""
-    return i18n.translate_html(html, lang)
+    (english / hinglish / hindi), then dress it in the Ledger design."""
+    return _ledger_skin(i18n.translate_html(html, lang))
+
+
+# ── Ledger design (design.md): every admin page passes through here ───────
+# The pages were written against an older warm-grey + green palette in many
+# separate style blocks. Rather than rewrite 5,000 lines of markup, map each old
+# colour onto its Ledger token and add one small sheet after the page's own CSS.
+_LEDGER_REMAP = (
+    ("#0a7d33", "#2454b3"), ("%230a7d33", "%232454b3"), ("#086b2b", "#0f3f9c"),
+    ("#f7f6f3", "#f7fafe"), ("#fbfbfa", "#f7fafe"), ("#fafaf8", "#f7fafe"), ("#f6f6f4", "#f7fafe"),
+    ("#f4f4f1", "#eff3f8"), ("#f2f1ee", "#eff3f8"), ("#ededea", "#e5eaf0"), ("#f0efec", "#eff3f8"),
+    ("#eaeaea", "#dfe3ea"), ("#e2e2e0", "#cbd2da"),
+    ("#2f3437", "#121b28"), ("#787774", "#626a75"), ("#b5b5b0", "#8a929c"), ("#9a9a94", "#626a75"),
+    ("#346538", "#10703a"), ("#edf3ec", "#e0f5e5"),
+    ("#9f2f2d", "#a82e29"), ("#fdebec", "#ffeae7"), ("#c0392b", "#a82e29"),
+    ("#956400", "#8a5600"), ("#fbf3db", "#fdefd2"), ("#7a5c12", "#8a5600"), ("#7d5a0a", "#8a5600"),
+    ("#c77b0a", "#8a5600"),
+    ("#1f6c9f", "#2454b3"), ("#e1f3fe", "#e8effb"), ("#bfe2f7", "#c9d6f2"),
+)
+_LEDGER_RE = re.compile("|".join(re.escape(a) for a, _ in _LEDGER_REMAP), re.IGNORECASE)
+_LEDGER_MAP = {a.lower(): b for a, b in _LEDGER_REMAP}
+_LEDGER_HEAD = (
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?family=Anek+Latin:wdth,wght@75..125,400..800'
+    '&family=Anek+Devanagari:wght@400..800&display=swap" rel="stylesheet">'
+    '<style>'
+    ':root{--color-paper:#f7fafe;--color-paper-2:#eff3f8;--color-paper-3:#e5eaf0;--color-ink:#121b28;'
+    '--color-ink-2:#3a4350;--color-muted:#626a75;--color-rule:#cbd2da;--color-rule-2:#dfe3ea;'
+    '--color-accent:#2454b3;--color-accent-2:#0f3f9c;--color-focus:#1f5ed9;--color-paid:#10703a;'
+    '--color-paid-bg:#e0f5e5;--color-due:#8a5600;--color-due-bg:#fdefd2;--color-late:#a82e29;--color-late-bg:#ffeae7}'
+    'body,button,input,select,textarea{font-family:"Anek Latin","Anek Devanagari",system-ui,"Segoe UI",sans-serif !important}'
+    'body{background:var(--color-paper);color:var(--color-ink);-webkit-font-smoothing:antialiased}'
+    'h1,h2,h3{font-style:normal;color:var(--color-ink);letter-spacing:-.01em}'
+    'h1{font-weight:680}'
+    'th,label,.kpi .l,.hcard .l{text-transform:none !important;letter-spacing:0 !important}'
+    'td,.amt,.camt,.n,.kpi .n,.hcard .n{font-variant-numeric:tabular-nums}'
+    'button,a.op,.cacts a,.cacts button{border-radius:9px}'
+    ':focus-visible{outline:2px solid var(--color-focus) !important;outline-offset:2px}'
+    '@media(prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}'
+    '</style>')
+
+
+def _ledger_skin(html: str) -> str:
+    html = _LEDGER_RE.sub(lambda m: _LEDGER_MAP[m.group(0).lower()], html)
+    i = html.find("</style>")
+    return html[:i + 8] + _LEDGER_HEAD + html[i + 8:] if i >= 0 else _LEDGER_HEAD + html
 
 
 def _is_en(lang: str) -> bool:
@@ -1201,7 +1246,7 @@ async def admin_reminders(token: str = Query(...), lang: str = Query("english"))
     # Batch editor JS kept as a plain string (single braces) and interpolated, so
     # it needs no f-string brace-doubling.
     batch_js = r"""
-var LANGS=[['hinglish','Hindi'],['english','English']];
+var LANGS=[['english','English'],['hinglish','Hinglish']];
 function besc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
 function bopts(list,val){return list.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('');}
 // Only offer hours the sender will actually honour. Customer sends drain
@@ -1270,7 +1315,7 @@ function collectBatches(){
       disc:parseFloat(r.querySelector('.bdisc').value)||0};
   });
 }
-function addBatch(){ if(BATCHES.length>=5){return;} BATCHES=collectBatches(); var dh=(BATCHES[0]&&BATCHES[0].hour!=null)?BATCHES[0].hour:11; BATCHES.push({name:'Batch '+(BATCHES.length+1),lang:'hinglish',upi:'',hour:dh,disc:0}); renderBatches(); }
+function addBatch(){ if(BATCHES.length>=5){return;} BATCHES=collectBatches(); var dh=(BATCHES[0]&&BATCHES[0].hour!=null)?BATCHES[0].hour:11; BATCHES.push({name:'Batch '+(BATCHES.length+1),lang:'english',upi:'',hour:dh,disc:0}); renderBatches(); }
 removeBatch = function(i){ BATCHES=collectBatches(); BATCHES.splice(i,1); renderBatches(); }
 function saveBatches(){
   var msg=document.getElementById('batchmsg'); msg.textContent='Saving...';
@@ -2025,7 +2070,7 @@ def admin_settings(payload: SettingsPayload):
 def admin_preview(
     token: str = Query(...),
     style: str = Query("standard"),
-    language: str = Query("hinglish"),
+    language: str = Query("english"),
     custom_line: str = Query(""),
     discount_pct: float = Query(0.0),
     upi: str = Query(""),
@@ -2037,7 +2082,7 @@ def admin_preview(
     from app.services.templates import apply_discount, inr, render
 
     biz = _biz_by_token(token)
-    lang = (language or "hinglish").lower()
+    lang = (language or "english").lower()
     style_v = (style or "standard").lower()
     if style_v not in STYLE_CADENCE:
         style_v = "standard"
@@ -4351,8 +4396,8 @@ async def admin_setup(token: str = Query(...), lang: str = Query("english")):
  <input id="upi" value="{upi_cur}" placeholder="e.g. yourshop@okhdfcbank">
  <label>3. Message language</label>
  <div class="seg" id="lang" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
-   <button type="button" data-v="hinglish" class="on" style="border:0;padding:9px 16px;cursor:pointer">Hinglish</button>
-   <button type="button" data-v="english" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">English</button>
+   <button type="button" data-v="english" class="on" style="border:0;padding:9px 16px;cursor:pointer">English</button>
+   <button type="button" data-v="hinglish" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">Hinglish</button>
  </div>
  <label style="margin-top:16px">4. Reminder tone</label>
  <div class="seg" id="tone" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
@@ -4390,7 +4435,7 @@ function _asvaBusy(){{
 }}
 setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
 
-let LANG = 'hinglish', TONE = 'standard';
+let LANG = 'english', TONE = 'standard';
 document.querySelectorAll('#lang button').forEach(b => b.onclick = () => {{
   LANG = b.dataset.v; document.querySelectorAll('#lang button').forEach(x => x.classList.toggle('on', x===b)); }});
 document.querySelectorAll('#tone button').forEach(b => b.onclick = () => {{
