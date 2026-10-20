@@ -229,7 +229,7 @@ Environment=PORT=3002
 Environment=WA_CHANNEL=bot
 Environment=SESSION_ID=bot
 Environment=BACKEND_URL=http://localhost:8000
-ExecStart=/usr/bin/npm start
+ExecStart=/usr/bin/node index.js
 Restart=always
 RestartSec=6
 
