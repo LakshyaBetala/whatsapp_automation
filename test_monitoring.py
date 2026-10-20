@@ -216,3 +216,16 @@ def test_cadence_markers_are_not_counted_as_sent():
     h = monitoring.build_health(db)
     assert h["totals"]["sent_today"] == 1
     assert h["traffic"][-1]["sent"] == 1
+
+
+def test_server_shop_whatsapp_down_alerts_even_with_the_laptop_off():
+    """Its WhatsApp runs on ASVA's server, so the laptop being off says nothing
+    about it: a down server WhatsApp is a real outage."""
+    health = {"businesses": [
+        {"id": "s", "name": "ServerShop", "status": "active", "online": False,
+         "last_seen_min": 900, "wa_ready": False, "wa_transport": "server", "queued": 0,
+         "queue_oldest_min": 0, "sent_today": 0, "failed_today": 0, "blocked_today": 0},
+    ]}
+    problems = monitoring.evaluate(health)
+    wa = [p for p in problems if p["kind"] == "wa_down"]
+    assert wa and "server" in wa[0]["body"].lower()

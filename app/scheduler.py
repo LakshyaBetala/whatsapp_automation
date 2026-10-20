@@ -17,7 +17,7 @@ from app.config import settings
 from app.db import get_client
 from app.jobs import (eod_digest, keepalive, monitor, onboarding_nudge,
                       outbox_sweep, promise_followup, reminder_checkpoint,
-                      reminder_sweep, subscription_check)
+                      reminder_sweep, server_outbox, subscription_check)
 from app.services import monitoring
 
 log = logging.getLogger(__name__)
@@ -152,6 +152,20 @@ def start() -> AsyncIOScheduler:
             coalesce=True,
             misfire_grace_time=300,
         )
+
+    # Shop WhatsApp on the server: deliver the queue of shops whose WhatsApp
+    # runs here (wa_service/manager.js), exactly as a laptop would, plus an
+    # hourly cap per number. Every minute; never two runs at once (double-send
+    # risk). A no-op when no shop has moved to the server.
+    sched.add_job(
+        _tracked("server_outbox", server_outbox.run),
+        IntervalTrigger(seconds=60),
+        id="server_outbox",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=55,
+    )
 
     # Onboarding nudge: chase paired-but-never-synced shops to finish setup before
     # their code lapses. Owner-facing (goes from the bot number), so it rides with

@@ -33,6 +33,7 @@ _JOB_MAX_QUIET_MIN = {
     "subscription_check": 1500,  # daily -> quiet > ~25h
     "monitor": 20,               # every few min
     "outbox_sweep": 8,           # every minute
+    "server_outbox": 45,         # every minute, but a run with send gaps can take minutes
 }
 
 
@@ -113,7 +114,7 @@ def build_health(db) -> dict:
 
     bizes = _paged(lambda: db.table("businesses").select(
         "id, business_name, plan, plan_expires_on, last_seen, agent_version, "
-        "whatsapp_number, wa_ready, wa_checked_at, outbox_pending"))
+        "whatsapp_number, wa_ready, wa_checked_at, outbox_pending, wa_transport"))
     biz_by_id = {b["id"]: b for b in bizes}
 
     # Today's messages -> per business + totals, bucketed by outcome.
@@ -194,6 +195,7 @@ def build_health(db) -> dict:
             "sent_today": sent_today, "failed_today": drop_t.get(bid, 0),
             "blocked_today": block_t.get(bid, 0),
             "queued": q_count.get(bid, 0), "queue_oldest_min": q_oldest.get(bid, 0),
+            "wa_transport": b.get("wa_transport") or "laptop",
         })
         tot["businesses"] += 1
         tot["online"] += 1 if online else 0
@@ -256,7 +258,14 @@ def evaluate(health: dict) -> list[dict]:
         # wa_ready is last reported by the laptop; while it is off that value is
         # stale, and shop_offline already says why nothing sends. Telling the
         # owner to re-scan a WhatsApp that is merely asleep is wrong.
-        if r["online"] and r.get("wa_ready") is False:
+        on_server = r.get("wa_transport") == "server"
+        if on_server and r.get("wa_ready") is False:
+            problems.append({"kind": "wa_down", "business_id": r["id"], "severity": "critical",
+                             "title": f"{name}: WhatsApp disconnected",
+                             "body": "The shop's WhatsApp on ASVA's server is not connected, so "
+                                     "bills and reminders cannot go out. Have the owner re-scan "
+                                     "the QR in ASVA (WhatsApp page)."})
+        elif r["online"] and r.get("wa_ready") is False:
             problems.append({"kind": "wa_down", "business_id": r["id"], "severity": "critical",
                              "title": f"{name}: WhatsApp disconnected",
                              "body": "The shop's WhatsApp is not connected, so bills and "
