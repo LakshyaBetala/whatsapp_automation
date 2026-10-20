@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
 from app.db import require_db
 from app.routers.bills import _generate_and_deliver
+from app.services import bill_notices
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/tally", tags=["tally"])
@@ -665,6 +666,7 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
             if v.voucher_type.lower() == "sales":
                 existing_bill = bills_by_voucher.get(v.voucher_number)
                 invoice_date = date.fromisoformat(v.date)
+                is_new_bill = not existing_bill
                 if not existing_bill:
                     # New bill insert - due_date = invoice_date + client credit period
                     # (Tally BillCreditPeriod, else the shop's trade-category default).
@@ -747,6 +749,13 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
                         _generate_and_deliver, bill_row["id"], v.pdf_base64,
                         f"Invoice_{v.voucher_number}.pdf")
                     delivered.append(v.voucher_number)
+                elif (not v.pdf_base64 and is_new_bill and client.get("whatsapp_number")
+                      and bill_notices.is_fresh(invoice_date, date.today())):
+                    # No exported PDF (the usual case): the bill still reaches the
+                    # customer as a short text 5-10 minutes after this sync, merged
+                    # with their other new bills (bill_notices). Fresh bills only, so
+                    # the first sync's full-year replay messages nobody.
+                    bill_notices.schedule(db, biz, client_id, bill_row["id"])
 
             elif v.voucher_type.lower() == "receipt":
                 # Idempotency: every sync sends the full FY (Tally ignores

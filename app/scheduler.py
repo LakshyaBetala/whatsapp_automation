@@ -17,7 +17,8 @@ from app.config import settings
 from app.db import get_client
 from app.jobs import (eod_digest, keepalive, monitor, onboarding_nudge,
                       outbox_sweep, promise_followup, reminder_checkpoint,
-                      reminder_sweep, server_outbox, subscription_check)
+                      reminder_sweep, server_outbox, subscription_check,
+                      bill_notice_sweep)
 from app.services import monitoring
 
 log = logging.getLogger(__name__)
@@ -161,6 +162,18 @@ def start() -> AsyncIOScheduler:
         _tracked("server_outbox", server_outbox.run),
         IntervalTrigger(seconds=60),
         id="server_outbox",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=55,
+    )
+
+    # New bills to customers 5-10 minutes after sync (merged per customer, quiet
+    # at night): every minute, never two runs at once.
+    sched.add_job(
+        _tracked("bill_notices", bill_notice_sweep.run),
+        IntervalTrigger(seconds=60),
+        id="bill_notices",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

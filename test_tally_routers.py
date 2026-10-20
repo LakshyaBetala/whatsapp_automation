@@ -365,3 +365,30 @@ def test_agent_token_mismatch(fake_db):
     resp = client.post("/tally/import", json=payload)
     assert resp.status_code == 401
     assert resp.json()["detail"] == "Invalid agent_token"
+
+
+def test_sync_new_fresh_bill_schedules_a_customer_notice(fake_db, monkeypatch):
+    """No exported PDF (the usual case): a brand-new, fresh bill for a customer
+    with a number is queued as a WhatsApp bill notice; an old replayed bill and a
+    duplicate are not."""
+    from datetime import date, timedelta
+    from app.routers import tally as tally_router
+    scheduled = []
+    monkeypatch.setattr(tally_router.bill_notices, "schedule",
+                        lambda db, biz, cid, bid, now=None: scheduled.append((cid, bid)))
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
+    fake_db.storage["clients"] = [{"id": "client_1", "business_id": biz_id, "whatsapp_number": "919876543210",
+                                   "credit_days": 30, "tally_ledger_name": "Test Party"}]
+    today = date.today().isoformat()
+    old = (date.today() - timedelta(days=40)).isoformat()
+    payload = {
+        "business_id": biz_id, "agent_token": "valid_token", "company_name": "TEST", "sync_date": today,
+        "vouchers": [
+            {"voucher_number": "NEW-1", "voucher_type": "Sales", "party_name": "Test Party", "amount": 500.0, "date": today},
+            {"voucher_number": "OLD-1", "voucher_type": "Sales", "party_name": "Test Party", "amount": 900.0, "date": old},
+        ]}
+    with patch("app.routers.tally.BackgroundTasks.add_task"):
+        resp = client.post("/tally/sync", json=payload)
+    assert resp.status_code == 200
+    assert len(scheduled) == 1 and scheduled[0][0] == "client_1"
