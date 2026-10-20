@@ -32,6 +32,7 @@ import httpx
 
 from app.config import settings
 from app.db import require_db
+from app.services import markers
 from app.services import pdf as pdf_service
 from app.services import whatsapp
 
@@ -92,6 +93,7 @@ async def expire_stale() -> None:
             if r.get("message_db_id"):
                 db.table("messages").update({"delivery_status": "expired"}).eq(
                     "id", r["message_db_id"]).execute()
+            markers.settle(db, r.get("message_db_id"), delivered=False)
         except Exception:
             log.warning("could not expire outbox row %s", r.get("id"), exc_info=True)
     if rows:
@@ -179,6 +181,8 @@ def _mark(db, row: dict, status: str, attempts: int, error: str | None) -> None:
                 "id", row["message_db_id"]).execute()
         except Exception:
             log.warning("Could not update messages row for outbox %s", row["id"])
+    if status in ("sent", "failed"):
+        markers.settle(db, row.get("message_db_id"), delivered=status == "sent")
     if status == "sent" and row.get("message_db_id"):
         _cleanup_pdf(db, row["message_db_id"])
 

@@ -51,3 +51,74 @@ def test_db_error_never_raises():
     class Boom:
         def table(self, name): raise RuntimeError("down")
     markers.settle(Boom(), "m1", delivered=True)   # must not raise
+
+
+# ── wiring: every final outbox state settles its markers ──────────────────
+class _Upd:
+    """Fake for outbox._mark: update(...).eq(...).eq(...).execute() returns the row."""
+    def __init__(self, row): self.row = row
+    def update(self, patch): return self
+    def eq(self, *a): return self
+    def select(self, *a): return self
+    def lt(self, *a): return self
+    def limit(self, *a): return self
+    def execute(self): return type("R", (), {"data": [self.row]})()
+
+
+class OutboxDB:
+    def __init__(self, row): self.row = row
+    def table(self, name): return _Upd(self.row)
+
+
+def _record(monkeypatch):
+    seen = []
+    monkeypatch.setattr(markers, "settle", lambda db, mid, delivered: seen.append((mid, delivered)))
+    return seen
+
+
+def test_laptop_ack_sent_settles_delivered(monkeypatch):
+    from app.services import outbox
+    seen = _record(monkeypatch)
+    monkeypatch.setattr(outbox, "_cleanup_pdf", lambda db, mid: None)
+    outbox.ack(OutboxDB({"id": "o1", "message_db_id": "m1"}), "b1", "o1", "sent")
+    assert seen == [("m1", True)]
+
+
+def test_laptop_ack_failed_settles_not_delivered(monkeypatch):
+    from app.services import outbox
+    seen = _record(monkeypatch)
+    outbox.ack(OutboxDB({"id": "o1", "message_db_id": "m1"}), "b1", "o1", "failed")
+    assert seen == [("m1", False)]
+
+
+def test_laptop_ack_still_queued_settles_nothing(monkeypatch):
+    from app.services import outbox
+    seen = _record(monkeypatch)
+    outbox.ack(OutboxDB({"id": "o1", "message_db_id": "m1"}), "b1", "o1", "queued")
+    assert seen == []
+
+
+def test_held_reminder_releases_its_markers(monkeypatch):
+    from app.services import outbox
+    seen = _record(monkeypatch)
+    outbox._hold(OutboxDB({}), "b1", "o1", "m1")
+    assert seen == [("m1", False)]
+
+
+def test_server_sweep_mark_settles(monkeypatch):
+    from app.jobs import outbox_sweep
+    seen = _record(monkeypatch)
+    monkeypatch.setattr(outbox_sweep, "_cleanup_pdf", lambda db, mid: None)
+    db = OutboxDB({})
+    outbox_sweep._mark(db, {"id": "o1", "message_db_id": "m1"}, "sent", 1, None)
+    outbox_sweep._mark(db, {"id": "o2", "message_db_id": "m2"}, "failed", 3, "x")
+    assert seen == [("m1", True), ("m2", False)]
+
+
+def test_stale_expiry_releases_markers(monkeypatch):
+    from app.jobs import outbox_sweep
+    seen = _record(monkeypatch)
+    row = {"id": "o1", "business_id": "b1", "message_db_id": "m1", "attempts": 0}
+    monkeypatch.setattr("app.db.get_client", lambda: OutboxDB(row))
+    asyncio.run(outbox_sweep.expire_stale())
+    assert ("m1", False) in seen

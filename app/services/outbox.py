@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app.jobs.outbox_sweep import EXPIRE_HOURS, _cleanup_pdf, within_send_window
-from app.services import promises
+from app.services import markers, promises
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ def _hold(db, business_id: str, row_id: str, message_db_id: str | None) -> None:
         if message_db_id:
             db.table("messages").update({"delivery_status": "held"}).eq(
                 "id", message_db_id).execute()
+        markers.settle(db, message_db_id, delivered=False)
     except Exception:
         log.warning("Could not hold outbox row %s", row_id, exc_info=True)
 
@@ -129,6 +130,8 @@ def _mark(db, business_id: str, row_id: str, status: str,
                 "id", row["message_db_id"]).execute()
         except Exception:
             log.warning("Could not mirror outbox %s to messages", row_id)
+    if status in ("sent", "failed"):
+        markers.settle(db, row.get("message_db_id"), delivered=status == "sent")
     if status == "sent" and row.get("message_db_id"):
         _cleanup_pdf(db, row["message_db_id"])
     return True
