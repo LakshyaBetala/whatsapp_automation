@@ -629,7 +629,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   <div class="fld"><label>WhatsApp number (10-digit)</label><input id="f_wa" inputmode="numeric" placeholder="9876543210"></div>
   <div class="row2">
    <div class="fld"><label>Plan</label><select id="f_plan"></select></div>
-   <div class="fld"><label>Paid months (0 = 7-day free trial)</label><input id="f_months" type="number" min="0" max="60" value="0"></div>
+   <div class="fld"><label>Paid months (0 = 14-day free trial)</label><input id="f_months" type="number" min="0" max="60" value="0"></div>
   </div>
   <div class="err" id="addErr"></div>
   <button class="go" id="addGo" onclick="doAdd()">Create business</button>

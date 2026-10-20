@@ -17,7 +17,7 @@ def test_no_expired_pilot_dates_anywhere():
 
 def test_pricing_shows_the_three_plans_and_the_trial():
     for s in ("Lite", "Collect", "Recover", "Rs 699", "Rs 999", "Rs 1,499",
-              "7-day free trial", "150 active debtors", "400 active debtors",
+              "14-day free trial", "150 active debtors", "400 active debtors",
               "1,000 active debtors"):
         assert s in SRC, s
 

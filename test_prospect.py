@@ -3,7 +3,7 @@
 The ASVA bot number is ALSO the founder's own WhatsApp, so most messages from
 non-owners are personal chats, not leads. Rule: stay silent unless the person
 clearly asks about ASVA ("I want to try ASVA", "ASVA demo", "ASVA price"...).
-Then pitch once (free till 31 December 2026, YES to start); a YES after the
+Then pitch once (14 days free from the day they start, YES to start); a YES after the
 pitch hands over to the team; everything else stays silent. A bare "yes" from
 someone who was never pitched is just a chat and gets nothing. No em/en dashes.
 """
@@ -74,7 +74,7 @@ def test_asking_for_asva_starts_the_funnel():
                              "interested in ASVA for my shop")):
         r = _reply(_DB(), f"9191111111{i}", msg)
         assert "ASVA" in r and "YES" in r, msg
-        assert "31 December 2026" in r, msg
+        assert "14 days" in r, msg
 
 
 def test_mentioning_asva_without_wanting_it_stays_silent():
@@ -87,7 +87,7 @@ def test_yes_after_the_pitch_hands_over():
     for word in ("hmm ok", "tell me later"):
         assert _reply(db, num, word) == ""          # never talks over a real chat
     r = _reply(db, num, "YES")
-    assert "team" in r.lower() and "31 December 2026" in r
+    assert "team" in r.lower() and "14 days" in r
     assert _reply(db, num, "thanks") == ""          # a human is on it now
 
 

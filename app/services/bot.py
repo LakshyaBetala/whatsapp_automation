@@ -129,7 +129,7 @@ def _suggest_command(text: str, lang: str) -> str:
 # The bot number is also the founder's own WhatsApp, so only someone who clearly
 # asks about ASVA gets an automated message. English only, one pitch with a YES
 # call-to-action; a YES after it routes to the team.
-FREE_UNTIL_TEXT = "31 December 2026"
+FREE_TRIAL_TEXT = "free for 14 days from the day you start"
 
 # "Asks about ASVA": the word ASVA plus a reason to want it, or a short message
 # that is mostly "ASVA" ("Hi ASVA", "ASVA?"). The website's WhatsApp button
@@ -167,14 +167,14 @@ def _lead_pitch() -> str:
             "- Sends your customers their bills and polite payment reminders\n"
             "- Reads their replies and tells you who paid and who to chase\n"
             "- Puts payments back into Tally for you\n\n"
-            f"ASVA is free till {FREE_UNTIL_TEXT}. Reply *YES* and our team will set it "
+            f"ASVA is {FREE_TRIAL_TEXT}. Reply *YES* and our team will set it "
             "up for you in a few minutes.\n"
             "See how it works: https://tryasva.com")
 
 
 def _lead_interested() -> str:
     return ("Thank you! Our team will message you shortly to set up ASVA. "
-            f"It is free till {FREE_UNTIL_TEXT}.")
+            "The first 14 days are free.")
 
 
 def _prospect_reply(db, from_number: str, text: str, upper: str) -> str:

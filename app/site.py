@@ -471,8 +471,8 @@ def _nav(active: str) -> str:
         f'<a class="hidem{" on" if p == active else ""}" href="{p}">{label}</a>'
         for p, label in NAV)
     return f"""<a class="promo" href="/pricing">
-  <span class="wrap"><span class="tag">7-day free trial</span>
-  Try the full ASVA free for 7 days, then from <b>Rs 699 a month</b>.
+  <span class="wrap"><span class="tag">14-day free trial</span>
+  Try the full ASVA free for 14 days, then from <b>Rs 699 a month</b>.
   <span class="go">See plans &rarr;</span></span></a>
 <header class="nav"><div class="wrap"><div class="row">
   <a class="logo" href="/"><img class="mark" src="/logo.png" alt="ASVA logo" width="30" height="30">ASVA</a>
@@ -612,7 +612,7 @@ def _stats_bar() -> str:
         ("&#8377;43L+", "receivables in the first live pilot"),
         ("1,966", "debtors handled in one Tally test"),
         ("30-160", "days of credit distributors carry"),
-        ("7 days", "free trial, then from Rs 699 a month"),
+        ("14 days", "free trial, then from Rs 699 a month"),
     ]
     cells = "".join(f'<div class="s"><div class="n">{n}</div><div class="l">{l}</div></div>'
                     for n, l in stats)
@@ -742,11 +742,11 @@ def _home() -> str:
 
  <section>
   <div class="sechead"><span class="eyebrow">Pricing</span>
-   <h2>Free for 7 days, then from Rs 699 a month</h2>
+   <h2>Free for 14 days, then from Rs 699 a month</h2>
    <p>Every plan has bills and reminders on your own WhatsApp, the pay link and payments
      back into Tally. You choose the plan by how many customers owe you.</p></div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
-    <a class="btn btn-p" href="/download">Start your 7-day free trial</a>
+    <a class="btn btn-p" href="/download">Start your 14-day free trial</a>
     <a class="btn" href="/pricing">See plans</a>
   </div>
  </section>
@@ -772,7 +772,7 @@ def _home() -> str:
          "description": "ASVA is a small Windows desktop app installed next to TallyPrime. It automatically sends bills and payment reminders on WhatsApp from the shop's own number and reconciles payments back to Tally, for Indian distributors selling on credit.",
          "offers": {"@type": "AggregateOffer", "lowPrice": "699", "highPrice": "1499",
                     "priceCurrency": "INR",
-                    "description": "7-day free trial, then Lite Rs 699, Collect Rs 999 or Recover Rs 1,499 a month"},
+                    "description": "14-day free trial, then Lite Rs 699, Collect Rs 999 or Recover Rs 1,499 a month"},
          "featureList": ["Tally sync", "WhatsApp bills and reminders",
                          "WhatsApp owner assistant", "UPI pay links",
                          "End-of-day digest", "Photo-bill capture"]},
@@ -780,7 +780,7 @@ def _home() -> str:
     return page_shell(
         path="/",
         title="ASVA - Windows app that collects your Tally payments on WhatsApp",
-        description="ASVA is a small Windows app that runs next to TallyPrime and sends your bills and payment reminders on WhatsApp from your own number. Get paid faster, chase no one. 7-day free trial, then from Rs 699 a month.",
+        description="ASVA is a small Windows app that runs next to TallyPrime and sends your bills and payment reminders on WhatsApp from your own number. Get paid faster, chase no one. 14-day free trial, then from Rs 699 a month.",
         keywords="Tally WhatsApp reminder, WhatsApp billing software India, automatic payment reminder, accounts receivable automation India, TallyPrime add on, collect outstanding payments, ASVA, Windows app for Tally",
         body=body, jsonld=graph)
 
@@ -1000,7 +1000,7 @@ def _pricing() -> str:
  <section class="page-hero reveal">
   <span class="eyebrow">Pricing</span>
   <h1>Pay for the customers you chase, <span class="hl">not for features</span></h1>
-  <p class="lede">Start with a 7-day free trial on the full ASVA. After that, pick the plan
+  <p class="lede">Start with a 14-day free trial on the full ASVA, counted from the day you start. After that, pick the plan
     that covers your active debtors: customers with a WhatsApp number who still owe you.</p>
   <div class="plans" style="display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:26px">
    <div class="panel"><h3>Lite</h3><p class="price"><b>Rs 699</b> a month</p>
@@ -1012,7 +1012,7 @@ def _pricing() -> str:
   </div>
   <p class="undernote" style="margin-top:14px">More than 1,000 debtors? Message us for a Custom plan. No setup fee.</p>
   <div style="margin-top:22px;display:flex;gap:12px;flex-wrap:wrap">
-    <a class="btn btn-p" href="/download">Start your 7-day free trial</a>
+    <a class="btn btn-p" href="/download">Start your 14-day free trial</a>
     <a class="btn" href="{WA_TRY}">Talk to us on WhatsApp</a>
   </div>
  </section>
@@ -1023,7 +1023,7 @@ def _pricing() -> str:
  </section>
 </div>
 {_band("Want ASVA set up for your shop?",
-       "Message us on WhatsApp and we will get you live in about five minutes. The first 7 days are free.")}"""
+       "Message us on WhatsApp and we will get you live in about five minutes. The first 14 days are free.")}"""
     faq_ld = json.dumps({
         "@context": "https://schema.org", "@type": "FAQPage",
         "mainEntity": [{"@type": "Question", "name": q,
@@ -1032,8 +1032,8 @@ def _pricing() -> str:
     })
     return page_shell(
         path="/pricing",
-        title="ASVA pricing | 7-day free trial, then from Rs 699 a month",
-        description="ASVA plans: Lite Rs 699 (150 active debtors), Collect Rs 999 (400), Recover Rs 1,499 (1,000). 7-day free trial, no setup fee. WhatsApp bills and payment reminders from your TallyPrime.",
+        title="ASVA pricing | 14-day free trial, then from Rs 699 a month",
+        description="ASVA plans: Lite Rs 699 (150 active debtors), Collect Rs 999 (400), Recover Rs 1,499 (1,000). 14-day free trial, no setup fee. WhatsApp bills and payment reminders from your TallyPrime.",
         keywords="ASVA pricing, ASVA free trial, Tally WhatsApp reminder price, payment reminder software India price, receivables software for Tally",
         body=body, jsonld=faq_ld)
 
@@ -1108,7 +1108,7 @@ def _download() -> str:
  <section class="page-hero reveal">
   <span class="badge"><span class="d"></span> Windows 10 or 11 &middot; version {DOWNLOAD_VERSION}</span>
   <h1 style="margin-top:16px">Download ASVA <span class="hl">for Windows.</span></h1>
-  <p class="lede"><strong>7-day free trial, then from Rs 699 a month.</strong> One installer for the computer
+  <p class="lede"><strong>14-day free trial, then from Rs 699 a month.</strong> One installer for the computer
     where you run TallyPrime. It reads your Tally and sends bills and payment reminders on WhatsApp from your
     own number. You need Windows 10 or 11, TallyPrime, and the short setup code we give you. Nothing else to install.</p>
   <div class="cta-row">
@@ -1118,7 +1118,7 @@ def _download() -> str:
   <div class="panel" style="margin-top:22px;max-width:640px">
     <b>The app needs a one-time setup code to activate.</b> We set up each shop personally, so the
     code is given on WhatsApp. Message us, we send your code and walk you through the 5-minute setup.
-    Your first 7 days are free, and the download is safe to install now.
+    Your first 14 days are free, and the download is safe to install now.
   </div>
   <div class="undernote">Already have ASVA? Running the installer updates it on top, your data and WhatsApp stay connected.</div>
  </section>
@@ -1369,7 +1369,7 @@ line with WhatsApp's policies and applicable law. Misuse (spam, messaging people
 shop's customers, or harassment) is not permitted and may lead to suspension.</p>
 
 <h2>Plans and availability</h2>
-<p>ASVA is a monthly subscription with a 7-day free trial. We aim for high availability but do not guarantee
+<p>ASVA is a monthly subscription with a 14-day free trial. We aim for high availability but do not guarantee
 uninterrupted service. Reminders depend on the shop's computer, internet, WhatsApp connection, and
 Tally being available.</p>
 
@@ -1562,7 +1562,7 @@ ASVA is a Windows desktop application (Windows 10 or 11) that you install on the
 Distributors and wholesalers selling on credit in India: electrical, hardware, chemical, steel, paint, and pipe trades running TallyPrime on Windows, typically carrying 30 to 160 days of credit.
 
 ## Pricing
-7-day free trial on the full product, then priced by active debtors (customers with a
+14-day free trial on the full product, then priced by active debtors (customers with a
 WhatsApp number who still owe money): Lite Rs 699 a month (150 active debtors), Collect
 Rs 999 (400), Recover Rs 1,499 (1,000, adds automatic customer replies, promise
 follow-up and multi-company). Custom pricing above 1,000. No setup fee.

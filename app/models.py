@@ -72,7 +72,7 @@ class SyncType(str, Enum):
 # "messages" is a SILENT anti-abuse ceiling (debtors x 8), set well above real
 # use so it never throttles reminders inside a tier. "clients" is uncapped in
 # practice so a full Tally import is never blocked.
-# Plans (October 2026): a 7-day free trial on full features, then priced by
+# Plans (October 2026): a 14-day free trial on full features, then priced by
 # ACTIVE DEBTORS (parties with a WhatsApp number and an open bill):
 #   Lite     Rs699   -> 150 active debtors
 #   Collect  Rs999   -> 400 active debtors   (same features as Lite)

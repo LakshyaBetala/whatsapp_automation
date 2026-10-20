@@ -235,7 +235,7 @@ def test_create_business_rejects_bad_input():
                 lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", plan="ultra"),
                 lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", months=-1),
                 lambda: lic.create_business(db, owner_name="x", whatsapp_number="9876543210", months=61)):
-        # months=0 is valid since Oct 2026: it is the 7-day free trial.
+        # months=0 is valid since Oct 2026: it is the 14-day free trial.
         try:
             bad()
             assert False, "should have raised"
@@ -293,7 +293,7 @@ def test_new_plan_table():
     assert recommend_plan(401) == Plan.pro and recommend_plan(1001) == Plan.max
 
 
-def test_months_zero_creates_a_seven_day_trial_on_full_features():
+def test_months_zero_creates_a_fourteen_day_trial_on_full_features():
     import datetime as dt
     rows = []
 
@@ -306,7 +306,7 @@ def test_months_zero_creates_a_seven_day_trial_on_full_features():
                               business_name="X", plan="starter", months=0,
                               today=dt.date(2026, 10, 20))
     assert biz["plan"] == "pro" and biz["subscription_status"] == "trial"
-    assert biz["plan_expires_on"] == "2026-10-27"
+    assert biz["plan_expires_on"] == "2026-11-03"
 
 
 def test_paid_months_still_create_an_active_paid_cycle():
