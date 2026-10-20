@@ -160,3 +160,16 @@ fail2ban with the Tailscale range ignored, ufw default-deny with only 22 +
 Tailscale open (8000/3002 reachable only via localhost and Tailscale), bot
 secrets in a 0600 env file rather than the unit, `.baileys_auth` `go-rwx`, and
 the nightly `pg_dump` timer at 02:30.
+
+## Backups off the box, and the outage alarm
+
+- The server dumps the whole database nightly at 02:30 UTC (`asva-backup.timer`)
+  into `/home/server-asva/asva/backups/`, keeping 14 days.
+- The laptop keeps its own copies: `deploy/pull_backups.ps1` copies the newest
+  dump over Tailscale into `Documents\ASVA-backups` and keeps the last 14. Run it
+  by hand, or schedule it once:
+  `schtasks /Create /TN "ASVA backup pull" /SC DAILY /ST 10:00 /F /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\laksh\whatsapp-tally-saas\deploy\pull_backups.ps1"`
+- Outage alarm (UptimeRobot, free, 5-minute checks): `https://app.tryasva.com/health`
+  expects 200; `https://link.tryasva.com/api/wa/status` expects 401. Alerts by email
+  and the UptimeRobot phone app. The server's own alert emails cannot report its
+  own death; this can.
