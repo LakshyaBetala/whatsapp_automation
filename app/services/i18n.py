@@ -39,6 +39,30 @@ _CATALOG: dict[str, dict[str, str]] = {
     },
     "help": {
         ENGLISH: (
+            "*ASVA* collects your payments. Send:\n\n"
+            "*LIST*  who owes you\n"
+            "*CHECK Ramesh*  one party's balance\n"
+            "*REMIND Ramesh*  remind them now\n"
+            "*PAID Ramesh 5000*  record a payment\n"
+            "*BILL Ramesh 12500*  add a bill, or send its photo\n"
+            "*DIGEST*  today's summary\n\n"
+            "Or just ask, like: _Ramesh ka kitna baki hai?_\n"
+            "Send *MORE* for every command, or *TEAM* with your message for help."
+        ),
+        HINGLISH: (
+            "*ASVA* aapke paise wapas laata hai. Bhejein:\n\n"
+            "*LIST*  kis kis par paisa baaki hai\n"
+            "*CHECK Ramesh*  ek party ka balance\n"
+            "*REMIND Ramesh*  abhi reminder bhejein\n"
+            "*PAID Ramesh 5000*  payment darj karein\n"
+            "*BILL Ramesh 12500*  bill jodein, ya photo bhejein\n"
+            "*DIGEST*  aaj ka summary\n\n"
+            "Ya seedha poochhein: _Ramesh ka kitna baki hai?_\n"
+            "Saari commands ke liye *MORE*, madad ke liye *TEAM* aur apna message bhejein."
+        ),
+    },
+    "help_more": {
+        ENGLISH: (
             "*ASVA*, your collection helper.\n"
             "Send a command with a party's name. Ramesh below is only an example.\n\n"
             "*SEE YOUR MONEY*\n"

@@ -671,10 +671,20 @@ async def handle(
             # Phase-aware: a paired owner who has not synced yet cannot use any of
             # the data commands, so answering with the full menu just confuses. Send
             # the ONE next step (open ASVA + Refresh) until their data is loaded;
-            # after that, the normal menu.
+            # after that, the short everyday menu.
             if _sync_state(db, business_id) == "never":
                 return _first_sync_help(lang)
             return i18n.t(lang, "help")
+        if upper in ("MORE", "ALL", "COMMANDS", "SAB"):
+            return i18n.t(lang, "help_more")
+        # Plain words: "Ramesh ka kitna baki hai?" -> CHECK Ramesh. Only a message
+        # that reads like a question to the bot reaches the AI, and only READ-ONLY
+        # commands are ever run this way (owner_intent).
+        from app.services import owner_intent
+        if owner_intent.looks_like_question(text):
+            routed = await owner_intent.route(text)
+            if routed:
+                return await handle(from_number, routed, channel=channel)
         return _owner_fallback(text, lang)
 
     # ── Customer message (not owner) ──────────────────────────────────

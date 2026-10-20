@@ -236,3 +236,20 @@ def test_shop_channel_two_parties_same_number_does_not_crash(monkeypatch):
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_owner_plain_question_is_answered_and_chat_is_left_alone(monkeypatch):
+    _patch(monkeypatch, {"businesses": [BIZ], "clients": []})
+    from app.services import bot, owner_intent
+    monkeypatch.setattr(bot, "_sync_state", lambda db, bid: "fresh")
+    seen = []
+    async def fake_route(text):
+        seen.append(text)
+        return "LIST"
+    monkeypatch.setattr(owner_intent, "route", fake_route)
+    # plain chat: no AI call, no reply (the founder answers personally)
+    assert _run(bot.handle(OWNER, "hello sir, kal milte hai", channel="bot")) == ""
+    assert seen == []
+    # a question to the bot: routed to the read-only command and answered
+    reply = _run(bot.handle(OWNER, "kis kis par paisa baaki hai?", channel="bot"))
+    assert seen == ["kis kis par paisa baaki hai?"] and reply != ""

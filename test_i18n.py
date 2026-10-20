@@ -32,14 +32,17 @@ def test_norm_lang_defaults_and_junk():
 
 # ── t() ──────────────────────────────────────────────────────────────────────
 def test_t_returns_each_language():
-    en = i18n.t("english", "help")
-    hi = i18n.t("hinglish", "help")
-    assert en != hi
-    assert "SEE YOUR MONEY" in en                    # pure English
-    assert "APNA PAISA DEKHEIN" in hi                # Hinglish
+    # The short everyday menu (HELP) and the full one (MORE), in both languages.
+    en, hi = i18n.t("english", "help"), i18n.t("hinglish", "help")
+    assert en != hi and "MORE" in en and "MORE" in hi
+    for cmd in ("LIST", "CHECK", "REMIND", "PAID", "BILL", "DIGEST"):
+        assert cmd in en and cmd in hi
+    en_all, hi_all = i18n.t("english", "help_more"), i18n.t("hinglish", "help_more")
+    assert "SEE YOUR MONEY" in en_all                # pure English
+    assert "APNA PAISA DEKHEIN" in hi_all            # Hinglish
     # every command name stays literal in both (owner types the same word)
     for cmd in ("LIST", "PAID", "STOP", "CHASE", "REMIND"):
-        assert cmd in en and cmd in hi
+        assert cmd in en_all and cmd in hi_all
 
 
 def test_t_formats_kwargs_in_both():
@@ -57,7 +60,7 @@ def test_t_unknown_key_and_lang_are_safe():
 
 def test_no_em_or_en_dashes_in_owner_copy():
     # House rule: no em/en dashes anywhere in ASVA owner-facing copy.
-    for key in ("help", "unknown_prefix", "which_one", "no_match", "stopped", "started"):
+    for key in ("help", "help_more", "unknown_prefix", "which_one", "no_match", "stopped", "started"):
         for lang in ("english", "hinglish"):
             s = i18n.t(lang, key)
             assert "—" not in s and "–" not in s, (key, lang)
