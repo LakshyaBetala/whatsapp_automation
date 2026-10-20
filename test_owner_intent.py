@@ -28,15 +28,24 @@ def _llm(monkeypatch, answer):
 
 def test_route_maps_to_a_read_only_command(monkeypatch):
     _llm(monkeypatch, {"command": "CHECK", "party": "Ramesh", "confidence": 0.93})
-    assert asyncio.run(oi.route("Ramesh ka kitna baki hai?")) == "CHECK Ramesh"
+    assert asyncio.run(oi.route("Ramesh ka kitna baki hai?")) == ("run", "CHECK Ramesh")
     _llm(monkeypatch, {"command": "SENT", "party": "", "confidence": 0.9})
-    assert asyncio.run(oi.route("aaj kisko reminder gaya")) == "SENT"
+    assert asyncio.run(oi.route("aaj kisko reminder gaya")) == ("run", "SENT")
 
 
 def test_route_never_runs_an_action_command(monkeypatch):
-    for cmd in ("PAID", "REMIND", "STOP", "BILL", "EXCLUDE", "LETTER"):
+    for cmd in ("EXCLUDE", "LETTER", "DELETE"):
         _llm(monkeypatch, {"command": cmd, "party": "Ramesh", "confidence": 0.99})
         assert asyncio.run(oi.route("Ramesh ne paise de diye")) is None, cmd
+
+
+def test_action_requests_get_the_exact_command_to_send(monkeypatch):
+    _llm(monkeypatch, {"command": "PAID", "party": "Ramesh", "amount": 5000, "confidence": 0.95})
+    assert asyncio.run(oi.route("Ramesh ne 5000 de diye")) == ("suggest", "PAID Ramesh 5000")
+    _llm(monkeypatch, {"command": "REMIND", "party": "Suresh", "confidence": 0.9})
+    assert asyncio.run(oi.route("Suresh ko yaad dilao")) == ("suggest", "REMIND Suresh")
+    _llm(monkeypatch, {"command": "PAID", "party": "", "confidence": 0.95})
+    assert asyncio.run(oi.route("paid ho gaya")) is None   # no party, nothing useful to suggest
 
 
 def test_route_needs_confidence_and_degrades_quietly(monkeypatch):

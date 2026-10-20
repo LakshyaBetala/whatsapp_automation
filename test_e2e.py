@@ -245,7 +245,7 @@ def test_owner_plain_question_is_answered_and_chat_is_left_alone(monkeypatch):
     seen = []
     async def fake_route(text):
         seen.append(text)
-        return "LIST"
+        return ("run", "LIST")
     monkeypatch.setattr(owner_intent, "route", fake_route)
     # plain chat: no AI call, no reply (the founder answers personally)
     assert _run(bot.handle(OWNER, "hello sir, kal milte hai", channel="bot")) == ""

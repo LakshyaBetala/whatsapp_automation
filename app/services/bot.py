@@ -683,8 +683,14 @@ async def handle(
         from app.services import owner_intent
         if owner_intent.looks_like_question(text):
             routed = await owner_intent.route(text)
-            if routed:
-                return await handle(from_number, routed, channel=channel)
+            if routed and routed[0] == "run":
+                return await handle(from_number, routed[1], channel=channel)
+            if routed and routed[0] == "suggest":
+                # Actions (payment, reminder, stop, bill) are never run from a guess:
+                # hand the owner the exact command to send.
+                return (f"To do that, send exactly:\n*{routed[1]}*"
+                        if lang == "english" else
+                        f"Iske liye bilkul yeh bhejein:\n*{routed[1]}*")
         return _owner_fallback(text, lang)
 
     # ── Customer message (not owner) ──────────────────────────────────
