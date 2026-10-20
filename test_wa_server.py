@@ -75,3 +75,12 @@ def test_internal_guard_needs_localhost_key_and_no_tunnel_headers(monkeypatch):
     assert ok("127.0.0.1", {"x-asva-key": "secret", "cf-connecting-ip": "1.2.3.4"}) is False
     monkeypatch.setattr(wa_server.settings, "wa_api_key", "")
     assert ok("127.0.0.1", {"x-asva-key": ""}) is False
+
+
+def test_internal_route_hides_from_the_public(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    monkeypatch.setattr(wa_server.settings, "wa_api_key", "secret")
+    c = TestClient(app)
+    # TestClient's client host is "testclient", i.e. not localhost -> 404
+    assert c.get("/internal/wa-shops", headers={"x-asva-key": "secret"}).status_code == 404

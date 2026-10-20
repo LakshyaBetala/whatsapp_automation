@@ -24,7 +24,18 @@ log = logging.getLogger(__name__)
 PULL_LIMIT = 15
 
 
-def pull(db, business_id: str, limit: int = PULL_LIMIT) -> list[dict]:
+def _transport(db, business_id: str) -> str:
+    """'server' when ASVA's server runs this shop's WhatsApp, else 'laptop'.
+    Missing column (pre-056) or any read error -> 'laptop' (old behaviour)."""
+    try:
+        r = (db.table("businesses").select("wa_transport")
+             .eq("id", business_id).limit(1).execute()).data
+        return ((r or [{}])[0] or {}).get("wa_transport") or "laptop"
+    except Exception:
+        return "laptop"
+
+
+def pull(db, business_id: str, limit: int = PULL_LIMIT, *, caller: str = "laptop") -> list[dict]:
     """The queued customer sends this shop should deliver right now.
 
     Returns [] outside shop hours, so a laptop that comes online at midnight
@@ -36,7 +47,13 @@ def pull(db, business_id: str, limit: int = PULL_LIMIT) -> list[dict]:
     laptop was off, so both the reply and the queued send land together on
     reconnect). We check the hold ONE more time here, at the moment of handing
     the message over, and quietly hold any reminder whose party is now on a
-    promise pause - so we never chase someone who just promised."""
+    promise pause - so we never chase someone who just promised.
+
+    caller="server" is the server delivering for a shop whose WhatsApp runs on
+    ASVA's server. Such a shop's laptop (any desktop version) is handed nothing,
+    so the same message can never go out twice."""
+    if caller == "laptop" and _transport(db, business_id) == "server":
+        return []
     # Outside shop hours we still deliver PRIORITY rows - a bill the owner just
     # made, or a Send Now they explicitly pressed - but hold ordinary reminders
     # until morning. Inside the window, everything flows.

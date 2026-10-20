@@ -244,3 +244,45 @@ def test_cleanup_pdf_noop_when_message_has_no_bill(monkeypatch):
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# ── server WhatsApp: an old desktop must never deliver for a server shop ──
+class _TransportDB:
+    def __init__(self, transport):
+        self.transport, self.outbox_queried = transport, False
+
+    def table(self, name):
+        db = self
+
+        class Q:
+            def select(self, *a, **k): return self
+            def eq(self, *a, **k): return self
+            def order(self, *a, **k): return self
+            def limit(self, *a, **k): return self
+            def in_(self, *a, **k): return self
+            def execute(self):
+                if name == "businesses":
+                    return _Result([{"wa_transport": db.transport}])
+                if name == "wa_outbox":
+                    db.outbox_queried = True
+                return _Result([])
+        return Q()
+
+
+def test_laptop_pull_returns_nothing_for_a_server_shop(monkeypatch):
+    from app.services import outbox
+    monkeypatch.setattr(outbox, "within_send_window", lambda: True)
+    db = _TransportDB("server")
+    assert outbox.pull(db, "b1") == []
+    assert db.outbox_queried is False
+
+
+def test_server_caller_and_laptop_shops_still_pull(monkeypatch):
+    from app.services import outbox
+    monkeypatch.setattr(outbox, "within_send_window", lambda: True)
+    db = _TransportDB("server")
+    outbox.pull(db, "b1", caller="server")
+    assert db.outbox_queried is True
+    db2 = _TransportDB("laptop")
+    outbox.pull(db2, "b1")
+    assert db2.outbox_queried is True

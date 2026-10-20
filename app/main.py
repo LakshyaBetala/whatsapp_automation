@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from app import scheduler
 from app.config import settings
 from app import site
-from app.routers import (admin, bills, businesses, clients, downloads, eod,
+from app.routers import (admin, internal, bills, businesses, clients, downloads, eod,
                          health, license, mobile, ops, pay, tally, webhooks)
 
 logging.basicConfig(
@@ -80,6 +80,7 @@ app.include_router(ops.router)                # /ops - operator command center (
 app.include_router(mobile.router)             # /m - read-only mobile companion (PWA)
 app.include_router(pay.router)                # /pay/<token> - the customer's payment page
 app.include_router(downloads.router)          # /download - public software download page
+app.include_router(internal.router)            # /internal/* - localhost-only (WhatsApp manager)
 app.include_router(site.router)               # public marketing site: / , /how-it-works, /features, /pricing, /use-cases, sitemap, robots
 
 
