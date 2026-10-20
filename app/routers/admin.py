@@ -3005,15 +3005,19 @@ def _party_timeline(db, business_id: str, client_id: str, bills: list, receipts:
         except Exception:
             continue
     try:
-        msgs = (db.table("messages").select("type, created_at, delivery_status, reminder_day")
+        msgs = (db.table("messages").select("type, created_at, delivery_status, reminder_day, template_name")
                 .eq("business_id", business_id).eq("client_id", client_id)
                 .neq("type", "bot_reply").order("created_at", desc=True).limit(60).execute()).data or []
+        # Cadence markers are bookkeeping (one per bill), not messages the customer got.
+        msgs = [m for m in msgs if m.get("template_name") != "cadence_marker"]
         for m in msgs:
             t = m.get("type") or "message"
             st = m.get("delivery_status") or ""
             label = {"reminder": "Reminder sent", "invoice": "Invoice sent",
                      "owner_alert": "Letter sent", "balance_confirm": "Balance confirmation sent"}.get(t, t.replace("_", " ").capitalize())
-            tick = " (not delivered)" if st in ("failed", "limit_reached") else ""
+            tick = (" (not delivered)" if st in ("failed", "limit_reached", "expired", "suspended")
+                    else " (waiting to send)" if st == "queued"
+                    else " (paused: customer promised)" if st == "held" else "")
             add(m.get("created_at"), "msg", label + tick)
     except Exception:
         pass

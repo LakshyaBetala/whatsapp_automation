@@ -17,6 +17,7 @@ from collections import Counter, defaultdict
 from app.config import settings
 from app.models import PLAN_LABELS, PLAN_LIMITS, Plan
 from app.services import subscription as subs
+from app.services.markers import MARKER
 
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 
@@ -117,8 +118,10 @@ def build_health(db) -> dict:
 
     # Today's messages -> per business + totals, bucketed by outcome.
     sent_t = Counter(); drop_t = Counter(); block_t = Counter(); queued_t = Counter()
-    for m in _paged(lambda: db.table("messages").select("business_id, delivery_status")
+    for m in _paged(lambda: db.table("messages").select("business_id, delivery_status, template_name")
                     .gte("created_at", day_start.isoformat())):
+        if m.get("template_name") == MARKER:
+            continue                        # bookkeeping row, not a WhatsApp message
         bid, st = m.get("business_id"), m.get("delivery_status")
         if st in SENT: sent_t[bid] += 1
         elif st in DROP: drop_t[bid] += 1
@@ -127,8 +130,10 @@ def build_health(db) -> dict:
 
     # 14-day traffic (all shops) -> daily sent / failed for the sparkline.
     daily = defaultdict(lambda: {"sent": 0, "failed": 0, "blocked": 0})
-    for m in _paged(lambda: db.table("messages").select("created_at, delivery_status")
+    for m in _paged(lambda: db.table("messages").select("created_at, delivery_status, template_name")
                     .gte("created_at", span_start.isoformat())):
+        if m.get("template_name") == MARKER:
+            continue
         d = _parse_ts(m.get("created_at"))
         if not d:
             continue

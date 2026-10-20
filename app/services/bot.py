@@ -1874,7 +1874,7 @@ async def _handle_sent_today(business_id: str) -> str:
     db = require_db()
     rows = (
         db.table("messages")
-        .select("client_id, delivery_status, clients(name)")
+        .select("client_id, delivery_status, template_name, clients(name)")
         .eq("business_id", business_id)
         .eq("type", MessageType.reminder.value)
         .gte("created_at", _day_start_utc_iso())
@@ -1885,6 +1885,9 @@ async def _handle_sent_today(business_id: str) -> str:
     queued = 0
     failed = 0
     for r in rows:
+        if r.get("template_name") == "cadence_marker":
+            continue                       # bookkeeping row, not a message
+
         name = (r.get("clients") or {}).get("name") or "Unknown"
         status = r.get("delivery_status")
         if status in ("sent", "delivered"):

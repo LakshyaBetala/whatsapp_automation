@@ -193,3 +193,26 @@ def test_reconcile_opens_dedups_resolves():
     assert alerts.reconcile(db, [])["resolved"] == 1       # cleared -> resolved
     assert alerts.reconcile(db, p)["opened"] == 1          # recurs -> new alert
     assert len([r for r in db.rows if r["resolved_at"] is None]) == 1
+
+
+def test_cadence_markers_are_not_counted_as_sent():
+    """Markers are bookkeeping rows (one per bill), not WhatsApp messages; they
+    used to inflate every 'sent' count about four-fold."""
+    now = _now_iso()
+    exp = (_dt.date.today() + _dt.timedelta(days=20)).isoformat()
+    db = _DB({
+        "businesses": [{"id": "a", "business_name": "Alpha", "plan": "pro",
+                        "plan_expires_on": exp, "last_seen": now,
+                        "wa_ready": True, "wa_checked_at": now}],
+        "messages": [
+            {"business_id": "a", "delivery_status": "sent", "created_at": now,
+             "template_name": "manual_remind_hi"},
+            {"business_id": "a", "delivery_status": "sent", "created_at": now,
+             "template_name": "cadence_marker"},
+            {"business_id": "a", "delivery_status": "sent", "created_at": now,
+             "template_name": "cadence_marker"},
+        ],
+    })
+    h = monitoring.build_health(db)
+    assert h["totals"]["sent_today"] == 1
+    assert h["traffic"][-1]["sent"] == 1
