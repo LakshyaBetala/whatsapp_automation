@@ -261,8 +261,14 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     # 3. Preset rules first (no AI call), then Gemini for the rest (multilingual).
     verdict = reply_rules.match(text) or await intent.classify(text)
     if verdict is None:
-        # Gemini off or failed: do not guess and do not reply. Fall through.
-        return False
+        # AI off, rate-limited or failing: never guess, never pause, never reply
+        # to the customer - but show the owner the exact words so the reply is
+        # not silently lost.
+        await _notify_owner(business_id,
+            f'{name} replied: "{text[:300]}". ASVA could not read it automatically '
+            f"right now, so reminders are unchanged. Message {name} yourself, or reply "
+            f"CHASE {name} / STOP {name}.")
+        return True
 
     kind = verdict["intent"]
     conf = verdict["confidence"]

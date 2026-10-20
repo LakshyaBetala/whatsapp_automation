@@ -143,10 +143,15 @@ def test_chatter_falls_through(monkeypatch):
     assert rec.created == [] and rec.owner == []
 
 
-def test_gemini_off_degrades_to_silent(monkeypatch):
+def test_ai_down_still_shows_the_owner_the_reply(monkeypatch):
+    """AI off, rate-limited (429) or failing: nothing is paused and nothing goes
+    to the customer, but the owner sees the customer's exact words, so a
+    reply is never silently lost."""
     rec = _setup(monkeypatch, verdict=None)      # classify returns None
-    assert _run("some random message") is False  # not PAID -> nothing to act on
+    assert _run("aapka hisab galat hai sir 2000 kam hai") is True
     assert rec.created == []
+    assert rec.owner and "2000 kam hai" in rec.owner[0]
+    assert "could not read" in rec.owner[0]
 
 
 # ── screenshot ──────────────────────────────────────────────────────────────
