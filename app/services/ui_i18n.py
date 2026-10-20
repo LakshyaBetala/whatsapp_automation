@@ -35,15 +35,13 @@ NATIVE = {"english": "English", "hinglish": "Hinglish", "hindi": "हिंद�
 
 def norm(lang: str | None) -> str:
     """Any input -> one of LOCALES. 'hi'/'hindi'/Devanagari map to hindi;
-    'hinglish' stays hinglish; 'en'/'english' -> english; else hinglish."""
+    'hinglish' stays hinglish; anything else (blank, unknown) -> english."""
     s = (lang or "").strip().lower()
     if s == "hinglish":
         return "hinglish"
     if s in ("hindi", "hi") or s.startswith("hin"):
         return "hindi"
-    if s.startswith("eng") or s == "en":
-        return "english"
-    return "hinglish"
+    return "english"
 
 
 def is_en(lang: str | None) -> bool:
@@ -308,6 +306,43 @@ UI: list[tuple[str, str, str]] = [
     ("Nahi mila", "Not found", "नहीं मिला"),
     (" din", " days", " दिन"),
     ("Baaki", "Balance", "बकाया"),
+    # ---- Strings that used to stay Hinglish in English mode ----
+    ("Tally se abhi tak sync nahi", "Not synced with Tally yet", "टैली से अभी तक सिंक नहीं"),
+    ("Tally sync ho raha hai...", "Tally is syncing...", "टैली सिंक हो रहा है..."),
+    ("Tally se contact nahi (Tally/laptop check karein)", "No contact with Tally (check Tally and the computer)",
+     "टैली से संपर्क नहीं (टैली/कंप्यूटर जांचें)"),
+    ("abhi tak nahi", "not yet", "अभी तक नहीं"),
+    ("abhi abhi", "just now", "अभी अभी"),
+    (" min pehle", " min ago", " मिनट पहले"),
+    (" ghante pehle", " hours ago", " घंटे पहले"),
+    ("Update download karein", "Download the update", "अपडेट डाउनलोड करें"),
+    ("Abhi tak koi payment record nahi. Upar &ldquo;Record payment&rdquo; se daalein.",
+     "No payments recorded yet. Add one with &ldquo;Record payment&rdquo; above.",
+     "अभी तक कोई पेमेंट दर्ज नहीं। ऊपर &ldquo;Record payment&rdquo; से डालें।"),
+    (" ko do-not-chase list me daalein? Reminders band ho jayenge.",
+     ": put on the do-not-chase list? Reminders will stop.",
+     " को डू-नॉट-चेज़ लिस्ट में डालें? रिमाइंडर बंद हो जाएंगे।"),
+    (" ko wapas laayein? Woh phir se chase list me aa jayega.",
+     ": bring back? They go back on the chase list.",
+     " को वापस लाएं? वे फिर से चेज़ लिस्ट में आ जाएंगे।"),
+    (" ko wapas chase list me laayein?", ": bring back to the chase list?", " को वापस चेज़ लिस्ट में लाएं?"),
+    ("' parties ko Batch '", "' parties: move to Batch '", "' पार्टियों को बैच '"),
+    ("' me daalein?'", "'?'", "' में डालें?'"),
+    ("UPI ID 1 (Default - reminder me QR + link isi ka jayega)",
+     "UPI ID 1 (default: reminders carry this QR and link)",
+     "UPI ID 1 (डिफ़ॉल्ट - रिमाइंडर में इसी का QR + लिंक जाएगा)"),
+    ("(reminder me QR + link isi ka jayega)", "(reminders carry this QR and link)",
+     "(रिमाइंडर में इसी का QR + लिंक जाएगा)"),
+    ("1. Aap kis line me ho? (Your trade)", "1. Your trade", "1. आपका व्यापार"),
+    (" - chhote step, phir aap live.", ": a few short steps, then you are live.", " - छोटे स्टेप, फिर आप लाइव।"),
+    ("Isse un customers ke liye credit din set hote hain jinke Tally me credit period nahi hai. "
+     "Electricals = 60 din, aur bhi. Tally me jahan period hai wahan wahi chalega.",
+     "This sets credit days for customers with no credit period in Tally (for example, "
+     "electricals = 60 days). Where Tally has a period, Tally wins.",
+     "इससे उन ग्राहकों के क्रेडिट दिन तय होते हैं जिनका टैली में क्रेडिट पीरियड नहीं है "
+     "(जैसे इलेक्ट्रिकल्स = 60 दिन)। जहाँ टैली में पीरियड है, वहाँ वही चलेगा।"),
+    ("Tally party - naam aur number Tally se aate hain.", "Tally party: name and number come from Tally.",
+     "टैली पार्टी - नाम और नंबर टैली से आते हैं।"),
 ]
 
 # Longest-source-first so a short source never eats a longer one mid-replace.

@@ -703,15 +703,11 @@ async def handle(
         # everything else, so the bot never auto-replies to ordinary chatter
         # (which would be intrusive and risk the number being flagged).
         if upper in _GREETING:
-            # Unknown number, so we have no business/language context: answer in
-            # both English and Hinglish so nobody is stuck with the wrong one.
+            # Unknown number, so no language was chosen: English.
             return (
                 "Hello! I am this shop's WhatsApp assistant.\n"
                 "Send HISAB to see your balance, or PAID to report a payment.\n"
-                "Your number is not in our records yet. Send TEAM + your message to reach the shop.\n\n"
-                "Namaste! Main is dukaan ka assistant hoon.\n"
-                "HISAB bhejein apna baaki dekhne ke liye, ya PAID payment batane ke liye.\n"
-                "Dukaan se baat karni ho to TEAM likhkar bhejein."
+                "Your number is not in our records yet. Send TEAM + your message to reach the shop."
             )
         log.info("Message from unknown number %s: %s", from_number, text)
         return ""  # stay silent on non-greeting messages from unknown numbers
@@ -1027,7 +1023,7 @@ async def _confirm_photo_bill(business: dict) -> str:
         amount_fmt = inr(Decimal(str(pb["amount"])))
         vpa = business.get("upi_vpa")
         pay_link = upi.pay_page_url(business["id"], Decimal(str(pb["amount"])), invoice_number) if vpa else ""
-        english = str(business.get("msg_language") or "").lower() == "english"
+        english = str(business.get("msg_language") or "").lower() != "hinglish"
         body = _manual_bill_body(client["name"], business.get("business_name", ""),
                                  invoice_number, amount_fmt, pay_link, english, photo=True)
         result = await whatsapp.send_message(
@@ -1148,7 +1144,7 @@ async def _handle_text_bill(business: dict, rest: str) -> str:
     if phone:
         vpa = business.get("upi_vpa")
         pay_link = upi.pay_page_url(business["id"], amount, invoice_number) if vpa else ""
-        english = str(business.get("msg_language") or "").lower() == "english"
+        english = str(business.get("msg_language") or "").lower() != "hinglish"
         body = _manual_bill_body(client["name"], business.get("business_name", ""),
                                  invoice_number, amount_fmt, pay_link, english, photo=False)
         result = await whatsapp.send_message(
@@ -2162,13 +2158,13 @@ async def _handle_terms(business_id: str, client_name: str, days: int, *, lang: 
 
 
 def _biz_is_en(business_id: str) -> bool:
-    """Does this business message its customers in English?"""
+    """Does this business message its customers in English? (yes unless it chose Hinglish)"""
     try:
         r = (require_db().table("businesses").select("msg_language")
              .eq("id", business_id).limit(1).execute())
-        return bool(r.data) and (r.data[0].get("msg_language") or "") == "english"
+        return not (r.data and r.data[0].get("msg_language") == "hinglish")
     except Exception:
-        return False
+        return True
 
 
 async def _customer_statement(client: dict) -> str:

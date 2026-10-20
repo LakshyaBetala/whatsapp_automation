@@ -31,7 +31,7 @@ def default_batch(biz: dict) -> dict:
     """The implicit batch 0 for a business that has not configured batches."""
     return {
         "name": "All parties",
-        "lang": (biz.get("msg_language") or "hinglish"),
+        "lang": "hinglish" if biz.get("msg_language") == "hinglish" else "english",
         "disc": _num(biz.get("discount_pct")),
         "upi": "",   # blank = use the shop's default UPI (businesses.upi_vpa)
         "hour": _hour(biz.get("reminder_hour")),
@@ -113,7 +113,8 @@ def _hour(v, default: int = 11) -> int:
 
 
 def normalize_batch(b: dict, biz: dict | None = None) -> dict:
-    lang = "english" if str((b or {}).get("lang") or "").lower() == "english" else "hinglish"
+    # English unless the owner picked Hinglish for this batch.
+    lang = "hinglish" if str((b or {}).get("lang") or "").lower() == "hinglish" else "english"
     name = (str((b or {}).get("name") or "").strip() or "Batch")[:24]
     return {
         "name": name,

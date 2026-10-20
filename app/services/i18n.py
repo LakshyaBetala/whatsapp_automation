@@ -46,7 +46,7 @@ _CATALOG: dict[str, dict[str, str]] = {
             "*PAID Ramesh 5000*  record a payment\n"
             "*BILL Ramesh 12500*  add a bill, or send its photo\n"
             "*DIGEST*  today's summary\n\n"
-            "Or just ask, like: _Ramesh ka kitna baki hai?_\n"
+            "Or just ask, like: _How much does Ramesh owe?_\n"
             "Send *MORE* for every command, or *TEAM* with your message for help."
         ),
         HINGLISH: (

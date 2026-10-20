@@ -381,7 +381,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     multi_batch = len(batches) > 1
 
     def _batch_lbl(b: dict) -> str:
-        lang = "English" if b.get("lang") == "english" else "Hindi"
+        lang = "English" if b.get("lang") == "english" else "Hinglish"
         try:
             hh = f'{int(b.get("hour", 11)):02d}:00'
         except (TypeError, ValueError):
@@ -1062,7 +1062,7 @@ async function dueToday() {{
     h += '<br><br>' + d.parties.map(p =>
       '- ' + p.name + ': ' + inr(p.amount) + (p.kind === 'overdue' ? ' (overdue)' : '') +
       ' <button class="skipbtn" onclick="skipToday(\\'' + p.id + '\\', this)">Aaj skip</button>').join('<br>');
-    if (d.count > d.parties.length) h += '<br>... aur ' + (d.count - d.parties.length) + ' aur';
+    if (d.count > d.parties.length) h += '<br>+ ' + (d.count - d.parties.length) + ' more';
     box.innerHTML = h;
   }} catch (e) {{ box.textContent = 'Load nahi hua.'; }}
 }}
@@ -1605,7 +1605,7 @@ def admin_reload(payload: ReloadPayload):
         if elapsed < RELOAD_COOLDOWN_MIN * 60:
             wait = int((RELOAD_COOLDOWN_MIN * 60 - elapsed) // 60) + 1
             return {"ok": False, "cooldown": True, "wait_min": wait,
-                    "detail": f"Abhi {wait} min baad dobara Reload kar sakte hain."}
+                    "detail": f"You can reload again in {wait} min."}
 
     db.table("businesses").update({"refresh_requested_at": now.isoformat()}).eq("id", biz["id"]).execute()
     return {"ok": True, "requested_at": now.isoformat()}
@@ -2236,7 +2236,7 @@ async def admin_confirm_balance(payload: ConfirmBalancePayload):
     db = require_db()
     bid = biz["id"]
     cr = (db.table("clients")
-          .select("id, name, whatsapp_number, language, last_balance_confirm_at")
+          .select("id, name, whatsapp_number, reminder_batch, last_balance_confirm_at")
           .eq("id", payload.client_id).eq("business_id", bid).limit(1).execute())
     if not cr.data:
         raise HTTPException(status_code=404, detail="party not found")
@@ -2265,7 +2265,10 @@ async def admin_confirm_balance(payload: ConfirmBalancePayload):
         return {"ok": False, "reason": "nothing_due",
                 "detail": "This customer has no outstanding to confirm."}
 
-    en = _is_en(client.get("language") or biz.get("msg_language") or "hinglish")
+    # Same language as this party's reminders (clients.language is a legacy
+    # enum that is always 'hi', so it must not decide).
+    from app.services.batches import resolve_batch
+    en = resolve_batch(biz, client.get("reminder_batch"))["lang"] == "english"
     text = templates.balance_confirm_text(biz.get("business_name") or "", outstanding, en=en)
     try:
         res = await whatsapp.send_message(
@@ -3484,7 +3487,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
   </div>
   {'''<div class="remrow" style="margin-top:12px;padding-top:12px;border-top:1px solid #eee">
     <div>Confirm balance with customer
-      <div class="hint">Ask this customer to confirm their outstanding ("sahi hai?"). Sent once (not more than every 90 days), only when you press it. Their reply comes to you; ASVA does not auto-reply.</div></div>
+      <div class="hint">Ask this customer to confirm their outstanding. Sent once (not more than every 90 days), only when you press it. Their reply comes to you; ASVA does not auto-reply.</div></div>
     <button id="cfbal" class="ntbtn" onclick="confirmBalance()">Ask to confirm</button>
   </div>''' if phone else ''}
   {f'''<div class="remrow" style="margin-top:12px;padding-top:12px;border-top:1px solid #eee">

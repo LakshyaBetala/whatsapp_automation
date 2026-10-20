@@ -185,7 +185,7 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
             "Payment ho gaya ho to PAID reply karein. Dhanyavaad."
         ),
     },
-    # --- English variants (msg_language = 'english'); Hinglish is default ---
+    # --- English variants (msg_language = 'english', the default) ---
     ("reminder_en", Lang.hi): {
         "aisensy_name": "reminder_en",
         "body": (
