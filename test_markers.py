@@ -122,3 +122,18 @@ def test_stale_expiry_releases_markers(monkeypatch):
     monkeypatch.setattr("app.db.get_client", lambda: OutboxDB(row))
     asyncio.run(outbox_sweep.expire_stale())
     assert ("m1", False) in seen
+
+
+# ── the sweep links markers to the real message ───────────────────────────
+def test_marker_row_for_a_queued_message():
+    from app.jobs.reminder_sweep import _marker_row
+    row = _marker_row("b1", "c1", "bill1", 15, parent_id="m9", queued=True)
+    assert row["template_name"] == "cadence_marker"
+    assert row["delivery_status"] == "queued" and row["parent_message_id"] == "m9"
+    assert row["bill_id"] == "bill1" and row["reminder_day"] == 15 and row["type"] == "reminder"
+
+
+def test_marker_row_for_a_direct_send():
+    from app.jobs.reminder_sweep import _marker_row
+    row = _marker_row("b1", "c1", "bill1", 15, parent_id=None, queued=False)
+    assert row["delivery_status"] == "sent" and "parent_message_id" not in row

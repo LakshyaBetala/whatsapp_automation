@@ -1616,6 +1616,9 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
         image_filename="payment_qr.png",
         priority=priority,   # owner pressed Send Now / typed REMIND -> deliver now
     )
+    # The sweep links its cadence markers to the real message (markers.settle).
+    entry["db_id"] = result.get("db_id")
+    entry["queued"] = bool(result.get("queued"))
     if result.get("queued"):
         return True, f"{name}: {inr(total)} ({len(bills)} bills) - in queue, goes from your shop number"
     if result.get("sent"):

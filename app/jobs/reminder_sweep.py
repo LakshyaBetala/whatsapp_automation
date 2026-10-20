@@ -88,6 +88,22 @@ def _parties_sent_today(db, biz_ids: list, today: date) -> dict:
     return {bid: len(cids) for bid, cids in seen.items()}
 
 
+def _marker_row(biz_id: str, client_id: str, bill_id: str, day: int, *,
+                parent_id: str | None, queued: bool) -> dict:
+    """One cadence marker. A queued real message makes a 'queued' marker that
+    points at it; markers.settle() flips it to 'sent' on delivery or deletes it
+    on expiry, so a reminder that never went out is retried."""
+    row = {
+        "business_id": biz_id, "client_id": client_id, "bill_id": bill_id,
+        "type": MessageType.reminder.value, "reminder_day": day,
+        "template_name": "cadence_marker", "language": "hi",
+        "delivery_status": "queued" if queued else "sent", "cost": 0,
+    }
+    if parent_id and queued:
+        row["parent_message_id"] = parent_id
+    return row
+
+
 def _party_priority(bills: list, today: date) -> float:
     """Urgency score for the drip queue: outstanding x (days since oldest bill).
     Bigger, older debts get today's limited send slots first; the rest carry to
@@ -537,6 +553,7 @@ async def run() -> None:
             client_name = client.get("name", "Customer")
             biz_name = biz.get("business_name", "")
             escalate = any(k == "escalate" for _, _, k in triggers)
+            parent_id, queued = None, False
 
             if escalate:
                 # ── Window exhausted → ONE owner escalation for the party ──
@@ -570,6 +587,7 @@ async def run() -> None:
                 entry = {"client": client, "bills": entry_bills,
                          "total": total, "oldest_days": oldest_days}
                 ok, line = await bot_svc._send_consolidated_reminder(biz, entry)
+                parent_id, queued = entry.get("db_id"), entry.get("queued", False)
                 if not ok:
                     log.warning("Sweep send failed for %s: %s", client_name, line)
 
@@ -578,17 +596,9 @@ async def run() -> None:
                 # fires twice; a failed send marks nothing and retries next hour.
                 for bill, day, kind in triggers:
                     try:
-                        db.table("messages").insert({
-                            "business_id": biz_id,
-                            "client_id": client_id,
-                            "bill_id": bill["id"],
-                            "type": MessageType.reminder.value,
-                            "reminder_day": day,
-                            "template_name": "cadence_marker",
-                            "language": "hi",
-                            "delivery_status": "sent",
-                            "cost": 0,
-                        }).execute()
+                        db.table("messages").insert(_marker_row(
+                            biz_id, client_id, bill["id"], day,
+                            parent_id=parent_id, queued=queued)).execute()
                     except Exception:
                         log.exception("Marker insert failed for bill %s", bill["id"])
                 sent += 1
