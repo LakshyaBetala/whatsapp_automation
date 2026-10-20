@@ -16,14 +16,12 @@ function so the whole verdict-shaping (enum guarding, date validation, the
 """
 from __future__ import annotations
 
-import asyncio
 import datetime as _dt
 import json
 import logging
 
-import httpx
-
 from app.config import settings
+from app.services import llm
 
 log = logging.getLogger(__name__)
 
@@ -39,11 +37,6 @@ GEMINI_URL = (
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 INTENTS = {"paid_claim", "promise", "dispute", "balance_query", "statement_request",
            "bill_request", "payment_info", "order", "auto_greeting", "chatter", "unclear"}
-# Transient statuses worth a retry. 429 = free-tier rate limit (a burst of
-# replies hits this); 5xx = Gemini hiccup. Everything else (400 bad request,
-# 403 bad key) is not retried - it will not fix itself.
-_RETRY_STATUS = {429, 500, 502, 503, 504}
-_MAX_ATTEMPTS = 3
 
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -107,7 +100,7 @@ def _payload(text: str, today: _dt.date) -> dict:
 
 
 def is_configured() -> bool:
-    return bool(settings.gemini_api_key)
+    return llm.is_configured()
 
 
 def _clean_date(raw, today: _dt.date | None) -> str | None:
@@ -166,33 +159,12 @@ def _parse(data: dict, today: _dt.date | None = None) -> dict | None:
 
 
 async def classify(text: str) -> dict | None:
-    """Classify one reply. Returns the verdict dict, or None when Gemini is not
-    configured, the text is empty, or the call fails (caller then degrades)."""
+    """Classify one reply. Returns the verdict dict, or None when no AI is
+    configured, the text is empty, or every provider failed (the caller then
+    degrades: it tells the owner and never acts on a miss). Provider order,
+    retries and fallback live in llm.generate (Vertex AI, then the AI Studio key)."""
     if not is_configured() or not (text or "").strip():
         return None
     today = _today_ist()
-    payload = _payload(text, today)
-    # Retry transient failures (rate limit / hiccup) with a short backoff so a
-    # burst of replies does not silently degrade. A non-transient error (bad key,
-    # bad request) stops immediately; after all attempts we degrade to None and
-    # the caller forwards the reply to the owner - it never acts on a miss.
-    last_err = None
-    for attempt in range(_MAX_ATTEMPTS):
-        try:
-            async with httpx.AsyncClient(timeout=20) as http:
-                resp = await http.post(GEMINI_URL,
-                                       params={"key": settings.gemini_api_key},
-                                       json=payload)
-            if resp.status_code in _RETRY_STATUS:
-                last_err = f"HTTP {resp.status_code}"
-            elif resp.status_code >= 400:
-                log.warning("intent.classify non-retryable HTTP %s - degrading", resp.status_code)
-                return None
-            else:
-                return _parse(resp.json(), today)
-        except Exception as e:                     # timeout / network - transient
-            last_err = repr(e)
-        if attempt < _MAX_ATTEMPTS - 1:
-            await asyncio.sleep(0.6 * (attempt + 1))   # 0.6s, then 1.2s
-    log.warning("intent.classify failed after %d attempts (%s) - degrading", _MAX_ATTEMPTS, last_err)
-    return None
+    data = await llm.generate(_payload(text, today), timeout=20)
+    return _parse(data, today) if data is not None else None

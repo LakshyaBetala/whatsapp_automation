@@ -114,11 +114,14 @@ class _FakeClient:
 
 
 def _wire(monkeypatch, client):
-    monkeypatch.setattr(intent.settings, "gemini_api_key", "key")
-    monkeypatch.setattr(intent.httpx, "AsyncClient", lambda **k: client)
+    """Key only (no Vertex project): exercises llm.generate's retry on the key."""
+    from app.services import llm
+    monkeypatch.setattr(llm.settings, "gemini_api_key", "key")
+    monkeypatch.setattr(llm.settings, "vertex_project", "")
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **k: client)
     async def _no_sleep(_):    # do not actually wait during the test
         return None
-    monkeypatch.setattr(intent.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(llm.asyncio, "sleep", _no_sleep)
 
 
 def test_retry_recovers_after_rate_limit(monkeypatch):
@@ -134,7 +137,7 @@ def test_persistent_rate_limit_degrades_to_none(monkeypatch):
     client = _FakeClient([(429, {}), (429, {}), (429, {})])
     _wire(monkeypatch, client)
     assert asyncio.run(intent.classify("paisa bhej diya")) is None
-    assert client.calls == 3                          # tried all attempts
+    assert client.calls == 2                          # tried both attempts
 
 
 def test_bad_request_is_not_retried(monkeypatch):

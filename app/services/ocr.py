@@ -1,9 +1,9 @@
-"""Photo-bill OCR - extract party/phone/amount from a photographed bill.
+"""Photo-bill OCR and payment-screenshot reading.
 
-Uses Gemini (free tier) via the REST API with a JSON response schema, so
-no SDK dependency and no cost during the pilot. Requires GEMINI_API_KEY
-in .env (free key from aistudio.google.com). Without it the bot tells
-the owner the feature is not configured; everything else keeps working.
+Gemini with a JSON response schema, through llm.generate: Vertex AI first
+(billed to the Google Cloud account, keyless on the VM), the AI Studio key as
+fallback. With no AI configured the bot tells the owner the feature is off;
+everything else keeps working.
 """
 from __future__ import annotations
 
@@ -11,18 +11,15 @@ import json
 import logging
 from typing import Optional
 
-import httpx
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services import llm
 
 log = logging.getLogger(__name__)
 
+# Fallback model on the AI Studio key (Vertex uses settings.vertex_vision_model).
 GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent"
-)
 
 
 class BillExtract(BaseModel):
@@ -59,7 +56,7 @@ RESPONSE_SCHEMA = {
 
 
 def is_configured() -> bool:
-    return bool(settings.gemini_api_key)
+    return llm.is_configured()
 
 
 async def extract_bill(image_b64: str, media_type: str = "image/jpeg") -> Optional[BillExtract]:
@@ -79,19 +76,16 @@ async def extract_bill(image_b64: str, media_type: str = "image/jpeg") -> Option
             "temperature": 0,
         },
     }
+    data = await llm.generate(payload, vertex_model=settings.vertex_vision_model,
+                              studio_model=GEMINI_MODEL, timeout=60)
+    text = llm.text_of(data)
+    if not text:
+        log.warning("Bill OCR: no answer from any AI provider")
+        return None
     try:
-        async with httpx.AsyncClient(timeout=60) as http:
-            resp = await http.post(
-                GEMINI_URL,
-                params={"key": settings.gemini_api_key},
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
         return BillExtract(**json.loads(text))
     except Exception:
-        log.exception("Bill OCR failed")
+        log.exception("Bill OCR returned an unreadable answer")
         return None
 
 
@@ -160,12 +154,13 @@ async def extract_payment(image_b64: str, media_type: str = "image/jpeg") -> Opt
             "temperature": 0,
         },
     }
+    data = await llm.generate(payload, vertex_model=settings.vertex_vision_model,
+                              studio_model=GEMINI_MODEL, timeout=60)
+    text = llm.text_of(data)
+    if not text:
+        log.warning("Payment-screenshot OCR: no answer from any AI provider")
+        return None
     try:
-        async with httpx.AsyncClient(timeout=60) as http:
-            resp = await http.post(GEMINI_URL, params={"key": settings.gemini_api_key}, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
         raw = json.loads(text)
         is_pay = bool(raw.get("is_payment"))
         amt = raw.get("amount")

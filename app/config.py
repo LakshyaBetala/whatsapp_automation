@@ -187,8 +187,15 @@ class Settings(BaseSettings):
 
     # --- AI (optional) ---
     gemini_api_key: str = ""
-    # Reply classification model (thinking is switched off in the request).
+    # Reply classification model on the AI Studio key (thinking switched off in
+    # the request). The key is the FALLBACK: its free tier is 20 requests/day.
     gemini_intent_model: str = "gemini-2.5-flash"
+    # Vertex AI (primary): billed to the Google Cloud account, keyless on the
+    # GCP VM through its attached service account. Empty project = skip Vertex.
+    vertex_project: str = ""
+    vertex_location: str = "global"
+    vertex_model: str = "gemini-2.5-flash-lite"        # replies: fast, cheapest
+    vertex_vision_model: str = "gemini-2.5-flash"      # screenshots and bill photos
     anthropic_api_key: str = ""
 
     @property
