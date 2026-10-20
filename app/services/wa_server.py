@@ -72,6 +72,18 @@ async def status(port: int | None) -> dict | None:
         return None
 
 
+def status_sync(port: int | None) -> dict | None:
+    """status() for plain `def` route handlers (they run in FastAPI's thread
+    pool; an async handler doing sync DB calls would block the event loop)."""
+    if not port:
+        return None
+    try:
+        r = httpx.get(f"{child_url(port)}/api/wa/status", headers=_headers(), timeout=5)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
 def request_server(db, business_id: str) -> int:
     """The owner chose to run WhatsApp on the server: give the shop a port (once)
     and flag it so the manager starts its process within a minute."""

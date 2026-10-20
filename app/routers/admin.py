@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+from html import escape as _h
 import logging
 import re
 from collections import defaultdict
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import require_db
 from app.services import names
+from app.services import wa_server
 from app.services import ui_i18n as i18n
 from app.jobs.reminder_sweep import STYLE_CADENCE
 from app.models import (DEFAULT_CREDIT_DAYS, PLAN_LABELS, PLAN_LIMITS, Plan,
@@ -39,7 +41,8 @@ def _biz_by_token(token: str) -> dict:
                     "discount_pct, plan, upi_vpa, upi_vpa_2, upi_vpa_3, whatsapp_number, reminder_cadence, "
                     "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
                     "overdue_repeat_days, overdue_max_repeats, reminder_batches, plan_expires_on, "
-                    "catchup_date, catchup_action, wa_ready, wa_checked_at, setup_problem")
+                    "catchup_date, catchup_action, wa_ready, wa_checked_at, setup_problem, "
+                    "wa_transport")
             .eq("agent_token", token).limit(1).execute())
     if not resp.data:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -3967,7 +3970,14 @@ async def admin_today(token: str = Query(...), lang: str = Query("english")):
     biz = _biz_by_token(token)
     en = _is_en(lang)
     title = biz.get("business_name") or "ASVA"
-    body = """<div id="thead"><h1 class="hi">Loading...</h1></div>
+    # Shops whose WhatsApp still lives on this computer: one quiet line pointing
+    # at the server move (reminders then go out with the laptop off).
+    wa_banner = ("" if biz.get("wa_transport") == "server" else
+                 f'<a class="flash" style="display:block;text-decoration:none" '
+                 f'href="/admin/whatsapp?token={_h(token)}&lang={_h(lang)}">'
+                 f'Keep reminders going when this computer is off: move WhatsApp to '
+                 f'ASVA&#39;s server (2 minutes) &rarr;</a>')
+    body = wa_banner + """<div id="thead"><h1 class="hi">Loading...</h1></div>
 <div id="tflash" class="flash"></div>
 <div id="twrap"><div class="sk" style="margin-top:18px"><i></i><i></i><i></i></div></div>
 
@@ -4397,6 +4407,99 @@ async function finish() {{
     return HTMLResponse(_ui_translate(
         f'<!doctype html><meta charset="utf-8">'
         f'<title>ASVA - Setup</title>{_FAVICON}'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}</style><div class="wrap">{body}</div>', lang))
+
+
+# ── WhatsApp on ASVA's server ───────────────────────────────────────────────
+# The owner moves the shop's WhatsApp off this computer: a process on the
+# server (wa_service/manager.js) runs it, so reminders and bills go out and
+# replies are read while the laptop is off. The page polls /status, shows the
+# server's QR, and the first "connected" flips the shop to wa_transport=server
+# (from then on the laptop is handed nothing - no double sends).
+class TokenPayload(BaseModel):
+    token: str
+
+
+def _wa_biz(token: str) -> dict:
+    biz = _biz_by_token(token)
+    row = (require_db().table("businesses")
+           .select("wa_transport, wa_port, wa_server_requested_at, wa_linked_at")
+           .eq("id", biz["id"]).limit(1).execute()).data if not {
+               "wa_transport", "wa_port"} <= set(biz) else [biz]
+    return {**biz, **((row or [{}])[0] or {})}
+
+
+@router.post("/admin/whatsapp/start")
+def admin_whatsapp_start(payload: TokenPayload):
+    biz = _biz_by_token(payload.token)
+    port = wa_server.request_server(require_db(), biz["id"])
+    return {"ok": True, "port": port}
+
+
+@router.get("/admin/whatsapp/status")
+def admin_whatsapp_status(token: str = Query(...)):
+    biz = _wa_biz(token)
+    if not biz.get("wa_server_requested_at") or not biz.get("wa_port"):
+        return {"phase": "not_started", "transport": biz.get("wa_transport") or "laptop"}
+    st = wa_server.status_sync(biz["wa_port"])
+    ph = wa_server.phase(st)
+    if ph == "connected" and biz.get("wa_transport") != "server":
+        wa_server.mark_connected(require_db(), biz["id"],
+                                 already_linked=bool(biz.get("wa_linked_at")))
+    return {"phase": ph, "qr": (st or {}).get("qr") if ph == "qr" else None,
+            "transport": "server" if ph == "connected" else (biz.get("wa_transport") or "laptop")}
+
+
+@router.get("/admin/whatsapp", response_class=HTMLResponse)
+def admin_whatsapp(token: str = Query(...), lang: str = Query("english")):
+    biz = _biz_by_token(token)
+    tok = json.dumps(token)
+    body = f"""
+<h1>WhatsApp</h1>
+<div class="muted">{_h(biz.get('business_name') or 'Your shop')}</div>
+<div class="card" style="margin-top:20px;max-width:620px">
+ <p style="margin-top:0"><b>Run your shop's WhatsApp on ASVA's server.</b> Reminders and bills keep
+ going out even when this computer is off, and customer replies are read straight away.</p>
+ <p class="hint">Your phone and number stay the same. ASVA appears in WhatsApp under
+ <b>Linked devices</b>, and you can remove it there any time.</p>
+ <div id="wa_state" style="margin-top:16px">Checking...</div>
+</div>
+<script>
+const TOKEN = {tok};
+function el(h){{ document.getElementById('wa_state').innerHTML = h; }}
+async function start(){{
+  el('Starting your WhatsApp on the server. This takes about a minute...');
+  try {{ await fetch('/admin/whatsapp/start', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+         body: JSON.stringify({{token: TOKEN}})}}); }} catch(e) {{}}
+  poll();
+}}
+async function poll(){{
+  let s = null;
+  try {{ s = await (await fetch('/admin/whatsapp/status?token=' + encodeURIComponent(TOKEN))).json(); }} catch(e) {{}}
+  if (!s) {{ el('Could not reach ASVA. Check the internet and try again.'); return setTimeout(poll, 5000); }}
+  if (s.phase === 'not_started') {{
+    el('<button onclick="start()">Move WhatsApp to ASVA\\'s server</button>'
+     + '<div class="hint" style="margin-top:10px">About 2 minutes. Keep your phone ready.</div>');
+    return;
+  }}
+  if (s.phase === 'starting') {{ el('Starting your WhatsApp on the server. This takes about a minute...'); return setTimeout(poll, 3000); }}
+  if (s.phase === 'qr') {{
+    el('<p><b>Scan this with the shop phone:</b> WhatsApp, then the three dots, then '
+     + '<b>Linked devices</b>, then <b>Link a device</b>.</p>'
+     + '<img src="' + s.qr + '" width="280" height="280" alt="WhatsApp QR code">'
+     + '<div class="hint">The code changes every few seconds. Scan the one on screen.</div>');
+    return setTimeout(poll, 3000);
+  }}
+  el('<p><b>Connected.</b> Your reminders and bills now go from ASVA\\'s server, even when this computer is off.</p>'
+   + '<div class="hint">If WhatsApp shows an older ASVA entry under Linked devices, you can log it out. '
+   + 'ASVA now sends only from the server.</div>');
+}}
+poll();
+</script>"""
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<title>ASVA - WhatsApp</title>{_FAVICON}'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}</style><div class="wrap">{body}</div>', lang))
 

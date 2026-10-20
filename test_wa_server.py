@@ -84,3 +84,66 @@ def test_internal_route_hides_from_the_public(monkeypatch):
     c = TestClient(app)
     # TestClient's client host is "testclient", i.e. not localhost -> 404
     assert c.get("/internal/wa-shops", headers={"x-asva-key": "secret"}).status_code == 404
+
+
+# ── owner page: start, then QR, then connected ────────────────────────────
+def _admin(monkeypatch, biz, child_status):
+    from app.routers import admin
+    rec = {"requested": [], "connected": []}
+    monkeypatch.setattr(admin, "_biz_by_token", lambda token: dict(biz))
+    monkeypatch.setattr(admin, "require_db", lambda: object())
+    monkeypatch.setattr(admin.wa_server, "request_server",
+                        lambda db, bid: rec["requested"].append(bid) or 4101)
+    monkeypatch.setattr(admin.wa_server, "status_sync", lambda port: child_status)
+    monkeypatch.setattr(admin.wa_server, "mark_connected",
+                        lambda db, bid, already_linked: rec["connected"].append(bid))
+    return admin, rec
+
+
+BIZ = {"id": "b1", "business_name": "Ram Traders", "wa_transport": "laptop",
+       "wa_port": None, "wa_server_requested_at": None, "wa_linked_at": None}
+
+
+def test_status_before_start(monkeypatch):
+    admin, _ = _admin(monkeypatch, BIZ, None)
+    assert admin.admin_whatsapp_status(token="t")["phase"] == "not_started"
+
+
+def test_start_requests_a_server_process(monkeypatch):
+    admin, rec = _admin(monkeypatch, BIZ, None)
+    out = admin.admin_whatsapp_start(admin.TokenPayload(token="t"))
+    assert out["ok"] is True and rec["requested"] == ["b1"]
+
+
+def test_status_shows_qr_then_connects(monkeypatch):
+    started = dict(BIZ, wa_port=4101, wa_server_requested_at="x")
+    admin, rec = _admin(monkeypatch, started, {"ready": False, "qr": "data:image/png;base64,AAA"})
+    st = admin.admin_whatsapp_status(token="t")
+    assert st["phase"] == "qr" and st["qr"].startswith("data:image/png")
+    admin, rec = _admin(monkeypatch, started, {"ready": True, "qr": None})
+    st = admin.admin_whatsapp_status(token="t")
+    assert st["phase"] == "connected" and rec["connected"] == ["b1"]
+
+
+def test_page_renders_plain_words_without_dashes(monkeypatch):
+    admin, _ = _admin(monkeypatch, BIZ, None)
+    html = admin.admin_whatsapp(token="t", lang="english").body.decode()
+    assert "even when this computer is off" in html and "Linked devices" in html
+    assert "—" not in html and "–" not in html
+
+
+def test_whatsapp_page_script_is_valid_javascript(monkeypatch, tmp_path):
+    import re
+    import shutil
+    import subprocess
+    admin, _ = _admin(monkeypatch, BIZ, None)
+    html = admin.admin_whatsapp(token="t'x", lang="english").body.decode()
+    js = "\n;\n".join(re.findall(r"<script[^>]*>(.*?)</script>", html, re.S))
+    assert "const TOKEN = \"t'x\";" in js          # json.dumps, not repr
+    node = shutil.which("node")
+    if not node:
+        return
+    f = tmp_path / "wa.js"
+    f.write_text(js, encoding="utf-8")
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[:600]
