@@ -115,7 +115,7 @@ def test_confident_promise_holds_with_date(monkeypatch):
 def test_confident_paid_claim(monkeypatch):
     rec = _setup(monkeypatch, verdict={"intent": "paid_claim", "amount": 5000.0,
                                        "promise_date": None, "confidence": 0.85})
-    _run("paisa bhej diya")
+    _run("maine aaj subah sab bhej diya")       # not a preset phrase: the model decides
     assert rec.created[0]["kind"] == "paid_claim" and rec.created[0]["amount"] == 5000.0
 
 
@@ -249,3 +249,42 @@ def test_hold_is_capped(monkeypatch):
     hold = rec.created[0]["hold_until"]          # a timezone-aware datetime
     cap = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=replies.settings.promise_max_hold_days + 1)
     assert hold < cap                            # never silences longer than the cap
+
+
+# ── October 2026: rules first, new routing, intent stored ─────────────────
+def test_rule_settles_without_calling_the_model(monkeypatch):
+    rec = _setup(monkeypatch)
+    calls = []
+    async def spy(text):
+        calls.append(text)
+        return None
+    monkeypatch.setattr(replies.intent, "classify", spy)
+    assert _run("kitna baki hai bhai") is True
+    assert calls == []                       # the rule answered, no AI call
+    assert rec.owner and "their balance" in rec.owner[0]
+    assert rec.created == []                 # nothing paused
+
+
+def test_nill_balance_is_a_dispute_not_a_pause(monkeypatch):
+    rec = _setup(monkeypatch)
+    _run("Nill balance")
+    assert rec.created == []
+    assert rec.owner and "did NOT act" in rec.owner[0]
+
+
+def test_auto_greeting_and_order_are_silent(monkeypatch):
+    rec = _setup(monkeypatch, verdict={"intent": "order", "confidence": 0.95,
+                                       "amount": None, "promise_date": None})
+    assert _run("Welcome to *Shanti Group* How can we help?") is False
+    assert _run("10 box wire bhejo kal aur rate batao") is False
+    assert rec.owner == [] and rec.created == []
+
+
+def test_final_intent_is_stored(monkeypatch):
+    _setup(monkeypatch)
+    stored = []
+    monkeypatch.setattr(replies.conversations, "record", lambda *a, **k: "row1")
+    monkeypatch.setattr(replies.conversations, "set_intent",
+                        lambda db, rid, it: stored.append((rid, it)))
+    _run("statement bhejo")
+    assert stored == [("row1", "statement_request")]

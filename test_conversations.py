@@ -128,3 +128,19 @@ def test_capture_reply_records_image(monkeypatch):
     # An inbound image is recorded to the conversation (labelled generically until
     # it is classified). It is no longer pre-labelled "screenshot".
     assert any(r["intent"] == "image" for r in db.inserted)
+
+
+def test_record_returns_the_row_id_and_set_intent_updates():
+    from app.services import conversations
+
+    class Q:
+        def __init__(self): self.ops = []
+        def insert(self, row): self.ops.append(("insert", row)); return self
+        def update(self, p): self.ops.append(("update", p)); return self
+        def eq(self, *a): self.ops.append(("eq",) + a); return self
+        def execute(self): return type("R", (), {"data": [{"id": "r1"}]})()
+    q = Q()
+    db = type("DB", (), {"table": lambda self, n: q})()
+    assert conversations.record(db, "b1", "c1", "hi") == "r1"
+    conversations.set_intent(db, "r1", "chatter")
+    assert ("update", {"intent": "chatter"}) in q.ops and ("eq", "id", "r1") in q.ops

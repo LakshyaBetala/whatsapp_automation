@@ -30,7 +30,7 @@ import re
 from app.config import settings
 from app.db import require_db
 from app.models import Lang, MessageType, Plan
-from app.services import conversations, intent, names, promises, whatsapp
+from app.services import conversations, intent, names, promises, reply_rules, whatsapp
 from app.services import receipts_queue as rq
 from app.services.templates import inr
 
@@ -170,10 +170,11 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     # party's story on the tracker accrues. Images are labelled generically here;
     # only after classification (below) do we know if it was really a payment.
     _has_img = bool(media_b64) and len(text) < 4
+    row_id = None
     try:
-        conversations.record(require_db(), business_id, client_id,
-                             "[image]" if _has_img else text,
-                             intent="image" if _has_img else None)
+        row_id = conversations.record(require_db(), business_id, client_id,
+                                      "[image]" if _has_img else text,
+                                      intent="image" if _has_img else None)
     except Exception:
         pass
 
@@ -257,8 +258,8 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
             f"Reply CHASE {name} to resume reminders now.")
         return True
 
-    # 3. Understand natural free text with Gemini (multilingual).
-    verdict = await intent.classify(text)
+    # 3. Preset rules first (no AI call), then Gemini for the rest (multilingual).
+    verdict = reply_rules.match(text) or await intent.classify(text)
     if verdict is None:
         # Gemini off or failed: do not guess and do not reply. Fall through.
         return False
@@ -266,10 +267,25 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
     kind = verdict["intent"]
     conf = verdict["confidence"]
     amount = verdict.get("amount")
+    try:
+        conversations.set_intent(require_db(), row_id, kind)
+    except Exception:
+        pass
 
-    # Not about payment -> let the bot's menu/greeting handling take over.
-    if kind == "chatter":
+    # Not about money owed (greeting, order, a business auto-reply): nothing to
+    # do here; the owner sees it on their own phone.
+    if kind in ("chatter", "order", "auto_greeting"):
         return False
+
+    # Asking for facts: tell the owner (on Recover, step 3 answers these
+    # automatically with the exact figures).
+    asks = {"balance_query": "their balance", "statement_request": "a statement",
+            "bill_request": "a bill copy", "payment_info": "your payment details"}
+    if kind in asks and conf >= settings.promise_confidence_threshold:
+        await _notify_owner(business_id,
+            f'{name} is asking for {asks[kind]}: "{text[:200]}". Reply to them, or send '
+            f"REMIND {name} to send their full balance with the pay link.")
+        return True
 
     # 4. Confidence gate: dispute / unclear / low confidence -> owner decides, no pause.
     if kind in ("dispute", "unclear") or conf < settings.promise_confidence_threshold:
