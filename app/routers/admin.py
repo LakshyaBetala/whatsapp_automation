@@ -4207,7 +4207,7 @@ function render(){
         '<div class="mt">'+TT('tapped Pay')+' <span class="ago">'+ago(x.at)+'</span> \u00b7 '+TT('look for this amount in your bank or UPI app')+'</div></div>'+
       '<div class="camt">'+fmt(x.amount)+'</div>'+
       '<div class="cacts"><a class="rem" style="text-decoration:none" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'&focus='+encodeURIComponent(x.id)+'">'+TT('Received')+'</a>'+
-        '<button class="op" onclick=\'dismissTap('+JSON.stringify(x.id)+',this)\'>'+TT('Not received')+'</button></div></div>'
+        '<button class="op" onclick=\\'dismissTap('+JSON.stringify(x.id)+',this)\\'>'+TT('Not received')+'</button></div></div>'
     )).join('');
     let foot='';
     if(XM) foot += '<div class="xmore">'+XM+' '+TT('more on')+' <a href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Payments')+'</a></div>';
@@ -4219,7 +4219,7 @@ function render(){
   const D=t.decisions||[];
   const dRows = D.length ? D.map(d=>{
     let act='';
-    if(d.action==='promise') act='<button class="rem" onclick=\'remind('+JSON.stringify(d.display)+',this)\'>'+TT('Remind')+'</button><a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Enter payment')+'</a>';
+    if(d.action==='promise') act='<button class="rem" onclick=\\'remind('+JSON.stringify(d.display)+',this)\\'>'+TT('Remind')+'</button><a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Enter payment')+'</a>';
     else if(d.action==='payments') act='<a class="op" href="/admin/payments?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Review')+'</a>';
     else if(d.action==='numbers') act='<button class="op warn" onclick="openAddNum()">'+TT('Add numbers')+'</button>';
     else if(d.action==='setup') act='<a class="op" href="/admin/setup?token='+encodeURIComponent(TOKEN)+'&lang='+LANG+'">'+TT('Open setup')+'</a>';
@@ -4848,8 +4848,8 @@ function render(){{
         }}
         return '<div class="prow"><div class="pmain">'+what+'<div class="meta">'+when+' &middot; look for this amount in your bank or UPI app</div></div>'+
           '<div class="pacts">'+
-            '<button class="mini" onclick='enterTap('+JSON.stringify(x.id)+')'>Received, post to Tally</button>'+
-            '<button class="mini ghost" onclick='dismissTap('+JSON.stringify(x.id)+')'>Not received</button>'+
+            '<button class="mini" onclick=\\'enterTap('+JSON.stringify(x.id)+')\\'>Received, post to Tally</button>'+
+            '<button class="mini ghost" onclick=\\'dismissTap('+JSON.stringify(x.id)+')\\'>Not received</button>'+
           '</div></div>';
       }}).join('')+'</div>';
   }}

@@ -189,3 +189,71 @@ def test_dashboard_exposes_setup_problem_and_party_state():
     assert "const SETUP_PROBLEM =" in html
     assert "const HAS_PARTIES =" in html
     assert "No customers imported yet" in html
+
+
+# ── The emitted JavaScript must actually parse ────────────────────────────
+# Rendering 200 is not enough: these pages build their JS as Python strings, so
+# a quoting slip (a lone \' inside a non-raw block emits a bare ') ends the JS
+# string and kills the whole <script>. The page still returns 200 and still
+# renders its skeleton, but nothing loads and no button works. That is exactly
+# how Today stopped loading and the Payments "Add a payment" button went dead in
+# 2.2.0. These tests parse every inline script with node, in every language,
+# because the i18n pass rewrites text INSIDE those scripts too.
+import html as _html
+import re as _re
+import shutil as _shutil
+import subprocess as _subprocess
+import tempfile as _tempfile
+from pathlib import Path as _Path
+
+_NODE = _shutil.which("node")
+_SCRIPT_RE = _re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", _re.S)
+
+
+def _inline_scripts(page_text):
+    return [_html.unescape(m.group(1)) for m in _SCRIPT_RE.finditer(page_text)
+            if m.group(1).strip()]
+
+
+def _js_parses(js):
+    with _tempfile.TemporaryDirectory() as d:
+        f = _Path(d) / "page.js"
+        f.write_text(js, encoding="utf-8")
+        r = _subprocess.run([_NODE, "--check", str(f)], capture_output=True, text=True)
+        return r.returncode == 0, (r.stderr or "")[:500]
+
+
+@pytest.mark.skipif(_NODE is None, reason="needs node to parse the emitted JS")
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("page", [
+    "admin_page", "admin_today", "admin_payments", "admin_reminders",
+    "admin_analytics", "admin_accounts", "admin_setup",
+])
+def test_admin_page_javascript_parses(page, lang):
+    text = _ok(maybe_await(getattr(admin, page)(token="tok", lang=lang)))
+    scripts = _inline_scripts(text)
+    for i, js in enumerate(scripts):
+        ok, err = _js_parses(js)
+        assert ok, "%s [%s] script #%d does not parse:\n%s" % (page, lang, i, err)
+
+
+@pytest.mark.skipif(_NODE is None, reason="needs node to parse the emitted JS")
+@pytest.mark.parametrize("lang", LANGS)
+def test_party_page_javascript_parses(lang):
+    text = _ok(maybe_await(admin.admin_party(token="tok", client_id="c1", lang=lang)))
+    for i, js in enumerate(_inline_scripts(text)):
+        ok, err = _js_parses(js)
+        assert ok, "party [%s] script #%d does not parse:\n%s" % (lang, i, err)
+
+
+def test_inline_onclick_quotes_are_escaped_for_javascript():
+    """An onclick built inside a JS string needs a doubled backslash in the
+    Python source; a single one emits a bare quote and breaks the script."""
+    src = _Path("app/routers/admin.py").read_text(encoding="utf-8")
+    bs = chr(92)
+    single = "onclick=" + bs + "'"         # a lone backslash collapses to a bare quote
+    good = "onclick=" + bs + bs + "'"      # what the JS actually needs
+    bad = [ln.strip()[:160] for ln in src.split("\n")
+           if "onclick='" in ln.replace(single, "")
+           or (single in ln and good not in ln)]
+    assert not bad, "unescaped quote in an inline onclick:\n" + "\n".join(bad[:5])
