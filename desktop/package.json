@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.0.\n\nA calmer, simpler ASVA. Five places on the left: Today, Parties, Payments, Reminders and Settings. WhatsApp and Reports sit at the bottom of the left bar.\n\nOne language menu at the top. ASVA is in English unless you pick Hinglish or Hindi, and customer messages stay in English unless you set a batch to Hinglish.\n\nTour, Phone app, update check and dark mode are under More, so the top bar stays clear.\n\nNew look: clean paper-and-blue screens, easier to read. Nothing about your data or reminders changes."
+      "releaseNotes": "ASVA 2.2.1.\n\nBack to the familiar green ASVA, with the simpler layout kept: five places on the left (Today, Parties, Payments, Reminders, Settings), with WhatsApp and Reports at the bottom.\n\nFixes: the Today screen was stuck on loading and the Add-a-payment button on Payments did nothing. Both work again.\n\nBills on a party page now make sense: one row per bill, no bill shown twice, nothing marked paid while it still shows a balance, and bills already cleared in Tally are tucked under \"Settled bills\"."
     },
     "files": [
       "main.js",

@@ -193,53 +193,10 @@ def _tally_status(dt: Optional[_dt.datetime]) -> tuple[str, str]:
 # a broken page). Applied longest-phrase-first so specifics beat generics.
 def _ui_translate(html: str, lang: str) -> str:
     """Rewrite a Hinglish-authored admin page into the chosen locale
-    (english / hinglish / hindi), then dress it in the Ledger design."""
-    return _ledger_skin(i18n.translate_html(html, lang))
-
-
-# ── Ledger design (design.md): every admin page passes through here ───────
-# The pages were written against an older warm-grey + green palette in many
-# separate style blocks. Rather than rewrite 5,000 lines of markup, map each old
-# colour onto its Ledger token and add one small sheet after the page's own CSS.
-_LEDGER_REMAP = (
-    ("#0a7d33", "#2454b3"), ("%230a7d33", "%232454b3"), ("#086b2b", "#0f3f9c"),
-    ("#f7f6f3", "#f7fafe"), ("#fbfbfa", "#f7fafe"), ("#fafaf8", "#f7fafe"), ("#f6f6f4", "#f7fafe"),
-    ("#f4f4f1", "#eff3f8"), ("#f2f1ee", "#eff3f8"), ("#ededea", "#e5eaf0"), ("#f0efec", "#eff3f8"),
-    ("#eaeaea", "#dfe3ea"), ("#e2e2e0", "#cbd2da"),
-    ("#2f3437", "#121b28"), ("#787774", "#626a75"), ("#b5b5b0", "#8a929c"), ("#9a9a94", "#626a75"),
-    ("#346538", "#10703a"), ("#edf3ec", "#e0f5e5"),
-    ("#9f2f2d", "#a82e29"), ("#fdebec", "#ffeae7"), ("#c0392b", "#a82e29"),
-    ("#956400", "#8a5600"), ("#fbf3db", "#fdefd2"), ("#7a5c12", "#8a5600"), ("#7d5a0a", "#8a5600"),
-    ("#c77b0a", "#8a5600"),
-    ("#1f6c9f", "#2454b3"), ("#e1f3fe", "#e8effb"), ("#bfe2f7", "#c9d6f2"),
-)
-_LEDGER_RE = re.compile("|".join(re.escape(a) for a, _ in _LEDGER_REMAP), re.IGNORECASE)
-_LEDGER_MAP = {a.lower(): b for a, b in _LEDGER_REMAP}
-_LEDGER_HEAD = (
-    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-    '<link href="https://fonts.googleapis.com/css2?family=Anek+Latin:wdth,wght@75..125,400..800'
-    '&family=Anek+Devanagari:wght@400..800&display=swap" rel="stylesheet">'
-    '<style>'
-    ':root{--color-paper:#f7fafe;--color-paper-2:#eff3f8;--color-paper-3:#e5eaf0;--color-ink:#121b28;'
-    '--color-ink-2:#3a4350;--color-muted:#626a75;--color-rule:#cbd2da;--color-rule-2:#dfe3ea;'
-    '--color-accent:#2454b3;--color-accent-2:#0f3f9c;--color-focus:#1f5ed9;--color-paid:#10703a;'
-    '--color-paid-bg:#e0f5e5;--color-due:#8a5600;--color-due-bg:#fdefd2;--color-late:#a82e29;--color-late-bg:#ffeae7}'
-    'body,button,input,select,textarea{font-family:"Anek Latin","Anek Devanagari",system-ui,"Segoe UI",sans-serif !important}'
-    'body{background:var(--color-paper);color:var(--color-ink);-webkit-font-smoothing:antialiased}'
-    'h1,h2,h3{font-style:normal;color:var(--color-ink);letter-spacing:-.01em}'
-    'h1{font-weight:680}'
-    'th,label,.kpi .l,.hcard .l{text-transform:none !important;letter-spacing:0 !important}'
-    'td,.amt,.camt,.n,.kpi .n,.hcard .n{font-variant-numeric:tabular-nums}'
-    'button,a.op,.cacts a,.cacts button{border-radius:9px}'
-    ':focus-visible{outline:2px solid var(--color-focus) !important;outline-offset:2px}'
-    '@media(prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}'
-    '</style>')
-
-
-def _ledger_skin(html: str) -> str:
-    html = _LEDGER_RE.sub(lambda m: _LEDGER_MAP[m.group(0).lower()], html)
-    i = html.find("</style>")
-    return html[:i + 8] + _LEDGER_HEAD + html[i + 8:] if i >= 0 else _LEDGER_HEAD + html
+    (english / hinglish / hindi)."""
+    # The founder kept the original green palette (the Ledger blue shipped in
+    # 2.2.0 and was reverted on 2026-10-22); only the layout work stayed.
+    return i18n.translate_html(html, lang)
 
 
 def _is_en(lang: str) -> bool:
@@ -3207,21 +3164,38 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     def attr(s) -> str:
         return esc(s).replace('"', "&quot;")
 
-    bill_rows = ""
-    for b in all_bills[:200]:
-        odv = ""
-        dd = b.get("due_date")
-        if dd and b["status"] in ("pending", "partial", "overdue"):
+    OPEN = ("pending", "partial", "overdue")
+
+    def _fmt_date(v) -> str:
+        """2026-08-31 -> 31 Aug 2026. Owners read dates, not ISO stamps."""
+        try:
+            return _dt.date.fromisoformat(str(v)[:10]).strftime("%d %b %Y")
+        except (TypeError, ValueError):
+            return esc(v) if v else "-"
+
+    # One row per real invoice. Tally reaches us twice (day book + bill-wise
+    # outstanding), and whatever leaves the outstanding list is marked paid
+    # without clearing its balance - so a settled row that shadows an open row
+    # is a duplicate of it, not a second bill, and a settled row's leftover
+    # "outstanding" is stale and must never be shown as money owed.
+    open_bills = [b for b in all_bills if b["status"] in OPEN]
+    open_invoices = {str(b.get("invoice_number") or "").strip().lower()
+                     for b in open_bills if b.get("invoice_number")}
+    settled_bills = [
+        b for b in all_bills
+        if b["status"] not in OPEN
+        and str(b.get("invoice_number") or "").strip().lower() not in open_invoices
+    ]
+
+    def _row(b, settled: bool) -> str:
+        due_cell = _fmt_date(b.get("due_date"))
+        if not settled and b.get("due_date"):
             try:
-                d = (today - _dt.date.fromisoformat(str(dd))).days
-                if d > 0:
-                    odv = f"{d} din"
+                late = (today - _dt.date.fromisoformat(str(b["due_date"])[:10])).days
+                if late > 0:
+                    due_cell += f' <span class="latechip">{late} din late</span>'
             except (TypeError, ValueError):
                 pass
-        stcls = {"paid": "ok", "partial": "warn"}.get(b["status"], "due")
-        # Non-Tally bills (typed or photographed on WhatsApp) get a tag so the
-        # owner can tell them apart from Tally entries at a glance - and only
-        # THEY get Edit/Delete (Tally bills are owned by Tally).
         non_tally = (b.get("source") or "tally") != "tally"
         src_tag = ""
         acts = ""
@@ -3236,19 +3210,42 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
                 f'<button class="ntbtn ntdel" data-id="{b["id"]}"'
                 f' data-inv="{attr(b.get("invoice_number") or "")}" onclick="ntDel(this)">Delete</button>'
             )
-        bill_rows += (
+        paid_amt = float(b.get("paid_amount") or 0)
+        if settled:
+            # Closed in Tally: the balance is zero by definition, whatever the
+            # stale column says, and "paid" is the whole story.
+            paid_cell = _inr(paid_amt) if paid_amt > 0 else _inr(b.get("amount"))
+            bal_cell = "-"
+            status_cell = '<span class="tag ok">settled</span>'
+        else:
+            paid_cell = _inr(paid_amt) if paid_amt > 0 else "-"
+            bal_cell = f'<b>{_inr(b.get("outstanding"))}</b>'
+            stcls = "warn" if b["status"] == "partial" else "due"
+            label = "part paid" if b["status"] == "partial" else "to collect"
+            status_cell = f'<span class="tag {stcls}">{label}</span>'
+        return (
             f'<tr><td>{esc(b.get("invoice_number") or "-")}{src_tag}</td>'
-            f'<td>{esc(b.get("invoice_date"))}</td>'
+            f'<td>{_fmt_date(b.get("invoice_date"))}</td>'
             f'<td class="n">{_inr(b.get("amount"))}</td>'
-            f'<td class="n">{_inr(b.get("paid_amount"))}</td>'
-            f'<td class="n">{_inr(b.get("outstanding"))}</td>'
-            f'<td>{esc(b.get("due_date") or "-")}</td>'
-            f'<td><span class="tag {stcls}">{esc(b["status"])}</span></td>'
-            f'<td class="n">{odv or "-"}</td>'
+            f'<td class="n">{paid_cell}</td>'
+            f'<td class="n">{bal_cell}</td>'
+            f'<td>{due_cell}</td>'
+            f'<td>{status_cell}</td>'
             f'<td>{acts}</td></tr>'
         )
+
+    bill_rows = "".join(_row(b, False) for b in open_bills[:200])
     if not bill_rows:
-        bill_rows = '<tr><td colspan="9" class="muted">Koi bill nahi.</td></tr>'
+        bill_rows = ('<tr><td colspan="8" class="muted">Abhi koi bill baaki nahi.</td></tr>')
+
+    settled_rows = "".join(_row(b, True) for b in settled_bills[:200])
+    open_total = sum(Decimal(str(b.get("outstanding") or 0)) for b in open_bills)
+    bills_summary = (
+        f'{len(open_bills)} bill baaki &middot; <b>{_inr(open_total)}</b>'
+        if open_bills else 'Sab clear. Koi bill baaki nahi.'
+    )
+    if settled_bills:
+        bills_summary += f' &middot; {len(settled_bills)} settled'
 
     # ── Payments received ─────────────────────────────────────────────
     # Tally parties show their Tally receipts; non-Tally parties show the payment
@@ -3563,8 +3560,10 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
 {timeline_html}
 
 <h2>Bills <button class="ntbtn ntadd" onclick="ntAdd()">+ Add bill</button>{'' if is_tally else ' <button class="ntbtn ntpay" onclick="ntPay()">₹ Record payment</button>'}</h2>
+<div class="muted" style="margin:-4px 0 10px">{bills_summary}</div>
 <div class="tablewrap"><table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th>
-  <th class="n">Baaki</th><th>Due</th><th>Status</th><th class="n">Overdue</th><th></th></tr>{bill_rows}</table></div>
+  <th class="n">Baaki</th><th>Due</th><th>Status</th><th></th></tr>{bill_rows}</table></div>
+{f'<details class="foldsec"><summary>Settled bills ({len(settled_bills)})</summary><div class="hint" style="margin:0 0 10px">Already cleared in Tally. Kept for the record.</div><div class="tablewrap"><table><tr><th>Bill</th><th>Date</th><th class="n">Amount</th><th class="n">Paid</th><th class="n">Baaki</th><th>Due</th><th>Status</th><th></th></tr>{settled_rows}</table></div></details>' if settled_bills else ''}
 
 {f'<details class="foldsec"><summary>Reminder schedule</summary>{sched_section}</details>' if sched_section else ''}
 
@@ -3882,6 +3881,7 @@ async function delParty() {{
  .chip.over{background:#fbf3db;color:#956400;border-color:#f0dfa8}
  button.danger{background:#c0392b}
  button.primary{background:#0a7d33}
+ .latechip{display:inline-block;margin-left:6px;font-size:.72rem;font-weight:700;padding:1px 7px;border-radius:9999px;background:#FDEBEC;color:#9F2F2D}
 """
     nav = _topnav(token, lang, "dashboard",
                   self_url=f"/admin/party?client_id={client_id}")

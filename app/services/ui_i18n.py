@@ -306,6 +306,17 @@ UI: list[tuple[str, str, str]] = [
     ("Nahi mila", "Not found", "नहीं मिला"),
     (" din", " days", " दिन"),
     ("Baaki", "Balance", "बकाया"),
+    # Party page bills table
+    (" din late", " days late", " दिन लेट"),
+    ("Abhi koi bill baaki nahi.", "Nothing outstanding.", "अभी कोई बिल बाकी नहीं।"),
+    ("Sab clear. Koi bill baaki nahi.", "All clear. Nothing outstanding.", "सब क्लियर। कोई बिल बाकी नहीं।"),
+    (" bill baaki", " bills to collect", " बिल बाकी"),
+    (">to collect<", ">to collect<", ">वसूली बाकी<"),
+    (">part paid<", ">part paid<", ">आंशिक भुगतान<"),
+    (">settled<", ">settled<", ">पूरा हुआ<"),
+    ("Settled bills (", "Settled bills (", "पूरे हो चुके बिल ("),
+    ("Already cleared in Tally. Kept for the record.", "Already cleared in Tally. Kept for the record.",
+     "टैली में पहले ही क्लियर। रिकॉर्ड के लिए रखा है।"),
     # ---- Strings that used to stay Hinglish in English mode ----
     ("Tally se abhi tak sync nahi", "Not synced with Tally yet", "टैली से अभी तक सिंक नहीं"),
     ("Tally sync ho raha hai...", "Tally is syncing...", "टैली सिंक हो रहा है..."),
