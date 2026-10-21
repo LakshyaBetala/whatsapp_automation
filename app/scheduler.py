@@ -181,9 +181,10 @@ def start() -> AsyncIOScheduler:
     )
 
     # A customer tapped Pay and nothing arrived: offer help once, 15 minutes
-    # later, inside the send window. Customer-facing, so it rides with the shop
-    # sender (the same deployment that drains the outbox).
-    if settings.enable_outbox_send:
+    # later, inside the send window. It is a customer-facing shop message, so it
+    # belongs with the reminder sweep: on this host the send is queued to the
+    # outbox and server_outbox delivers it from the shop's own number.
+    if settings.enable_reminder_sweep:
         sched.add_job(
             _tracked("pay_assist", pay_assist.run),
             IntervalTrigger(minutes=5),
