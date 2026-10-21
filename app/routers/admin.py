@@ -125,6 +125,15 @@ IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 RELOAD_COOLDOWN_MIN = 10   # "Reload data" may be pressed once per 10 minutes
 
 
+def _today() -> _dt.date:
+    """Today in the shop's timezone. Never date.today(): the server runs on UTC,
+    so before 5:30 AM IST that is yesterday and a reminder due today renders as
+    a future date ("22 Oct") on one row and "Today" on the next."""
+    return _dt.datetime.now(IST).date()
+
+
+
+
 def _parse_ts(raw) -> Optional[_dt.datetime]:
     """Parse a Postgres timestamptz string into an aware datetime."""
     if not raw:
@@ -348,7 +357,7 @@ async def admin_page(token: str = Query(...), lang: str = Query("english")):
     setup_problem_js = json.dumps((biz.get("setup_problem") or "").strip())
     has_parties_js = json.dumps(bool(clients))
 
-    today = _dt.date.today()
+    today = _today()
     totals: dict[str, Decimal] = {}
     overdue_days: dict[str, int] = {}   # client_id -> max days past due
     bills_by_client: dict[str, list] = {}
@@ -971,29 +980,13 @@ async function doImportNumbers() {{
 }}
 document.getElementById('imp_go').onclick = doImportNumbers;
 
-// ── Problem #1: one calm "Needs you today" card. Only shows what actually needs
-// the owner (payments to post, paid-claims to check, parties with no number).
-// Nothing pending -> "All clear". Pure add-on: reads existing endpoints.
+// A banner on the party list, for trouble only: Tally not importing, or no
+// customers at all. Everything routine lives on Today, which is the home
+// screen - saying it twice just crowded this page.
 function goPayments() {{ location.href = '/admin/payments?token=' + encodeURIComponent(TOKEN); }}
 async function buildToday() {{
   const el = document.getElementById('todaycard'); if (!el) return;
-  let rows = [];
-  try {{
-    const [p, mn] = await Promise.all([
-      fetch('/admin/payments/data?token=' + encodeURIComponent(TOKEN)).then(r => r.json()).catch(() => ({{}})),
-      fetch('/admin/missing-numbers?token=' + encodeURIComponent(TOKEN)).then(r => r.json()).catch(() => ({{}})),
-    ]);
-    const pend = (p.pending || []).length, prom = (p.promises || []).length, miss = mn.count || 0;
-    if (pend) rows.push(['<b>' + pend + '</b> payment' + (pend > 1 ? 's' : '') + ' ready to post to Tally', 'goPayments()']);
-    if (prom) rows.push(['<b>' + prom + '</b> customer' + (prom > 1 ? 's' : '') + ' said they paid, review', 'goPayments()']);
-    if (miss) rows.push(['<b>' + miss + '</b> owe money but have no WhatsApp number', 'openImportNumbers()']);
-    // Intent, not confirmation: they were handed to their UPI app. Worth a look
-    // at the bank now, so the wording says "tapped Pay", never "paid".
-    (p.pay_signals || []).forEach(function (s) {{
-      var amt = s.amount > 0 ? ' for ₹' + Math.round(s.amount).toLocaleString('en-IN') : '';
-      rows.push([esc(s.name) + ' opened your payment link and tapped Pay' + amt + '. Check if it came in.', 'goPayments()']);
-    }});
-  }} catch (e) {{}}
+  const rows = [];
   el.style.display = 'block';
   // A setup problem outranks everything: the shop is online but importing
   // nothing, so "All clear" would be a lie.
@@ -1009,15 +1002,9 @@ async function buildToday() {{
       + 'Open Tally, keep your company loaded, then press <b>Get latest from Tally</b>.</div>';
     return;
   }}
-  if (!rows.length) {{
-    el.innerHTML = '<b>All clear.</b> Nothing needs you right now. ASVA is chasing on its own.';
-    return;
-  }}
-  el.innerHTML = '<div style="font-weight:700;margin-bottom:6px">Needs you today</div>' + rows.map(function (r) {{
-    return '<div style="padding:7px 0;border-top:1px solid #f0efec;display:flex;justify-content:space-between;align-items:center;gap:10px">'
-      + '<span>' + r[0] + '</span>'
-      + '<button style="background:#0a7d33;color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer" onclick="' + r[1] + '">Open</button></div>';
-  }}).join('');
+  // Everything else (payments to post, paid-claims, missing numbers) is the
+  // Today screen's job. Repeating it here only crowded the party list.
+  el.style.display = 'none';
 }}
 buildToday();
 
@@ -1568,7 +1555,7 @@ def admin_save(payload: SavePayload):
     # NEWLY selected parties get today's anchor ("counting starts from the
     # day you select"); parties that were already ON keep their clock.
     newly = sorted(enabled - was_enabled)
-    today = _dt.date.today().isoformat()
+    today = _today().isoformat()
     for chunk in _chunked(newly):
         db.table("clients").update(
             {"reminders_enabled": True, "reminder_anchor": today}).in_("id", chunk).execute()
@@ -1633,7 +1620,7 @@ def admin_reconcile(payload: ReloadPayload):
 
 
 @router.get("/admin/sync-status")
-def admin_sync_status(token: str = Query(...)):
+def admin_sync_status(token: str = Query(...), lang: str = Query("english")):
     """Lightweight poll for the dashboard: last Tally sync time + whether a
     manual reload is still pending. The page polls this after Reload and
     re-renders once the sync completes (last_synced advances / flag clears)."""
@@ -1648,6 +1635,10 @@ def admin_sync_status(token: str = Query(...)):
     except Exception:
         pending = False
     tally_label, tally_color = _tally_status(last)
+    # These strings are authored in Hinglish like the pages, but this is JSON:
+    # the page-level translate pass never sees it, so localize here or the
+    # desktop top bar reads "Tally se contact nahi" in English mode.
+    tally_label = i18n.translate_html(tally_label, lang)
     # Onboarding-tour signals (also power the setup checklist): whether UPI is set,
     # the owner's own number + the ASVA bot number to message, and the timestamp of
     # the last inbound message (so the tour can confirm the owner actually messaged
@@ -1666,7 +1657,7 @@ def admin_sync_status(token: str = Query(...)):
         last_inbound = None
     return {
         "last_synced_at": last.isoformat() if last else None,
-        "last_synced_label": _fmt_ago(last),
+        "last_synced_label": i18n.translate_html(_fmt_ago(last), lang),
         "pending_refresh": pending,
         "tally_label": tally_label,
         "tally_color": tally_color,
@@ -1688,7 +1679,7 @@ async def admin_due_today(token: str = Query(...)):
     from app.config import settings as _s
     biz = _biz_by_token(token)
     db = require_db()
-    today = _dt.date.today()
+    today = _today()
     blackout = {str(d) for d in (biz.get("blackout_dates") or [])}
     holiday = today.isoformat() in blackout
 
@@ -1844,7 +1835,7 @@ def admin_skip_today(payload: SkipTodayPayload):
                                          DEFAULT_CADENCE)
     biz = _biz_by_token(payload.token)
     db = require_db()
-    today = _dt.date.today()
+    today = _today()
 
     cr = (db.table("clients")
           .select("id, name, credit_days, reminder_anchor, created_at")
@@ -1945,7 +1936,7 @@ def admin_assign_batch(payload: AssignBatchPayload):
     # "The day you select a party, ASVA starts counting from that day":
     # assigning a batch (re)anchors the overdue track to today, so an
     # already-overdue party gets a fresh polite start, not instant escalation.
-    today = _dt.date.today().isoformat()
+    today = _today().isoformat()
     for chunk in _chunked(ids, 100):
         db.table("clients").update(
             {"reminder_batch": b, "reminder_anchor": today}).in_("id", chunk).execute()
@@ -2555,7 +2546,7 @@ def _nt_status(amount: float, paid: float, due_date: str | None) -> str:
     if paid > 0:
         return "partial"
     try:
-        if due_date and _dt.date.fromisoformat(str(due_date)) < _dt.date.today():
+        if due_date and _dt.date.fromisoformat(str(due_date)) < _today():
             return "overdue"
     except (TypeError, ValueError):
         pass
@@ -2600,7 +2591,7 @@ def admin_nt_bill_add(payload: NTBillAddPayload):
     days = payload.credit_days or cr.data[0].get("credit_days") or 30
     if not (1 <= days <= 730):
         raise HTTPException(status_code=400, detail="credit days must be 1-730")
-    inv_date = _parse_ymd(payload.invoice_date, "bill date") or _dt.date.today()
+    inv_date = _parse_ymd(payload.invoice_date, "bill date") or _today()
     due = _parse_ymd(payload.due_date, "due date") or (inv_date + _dt.timedelta(days=days))
     if due < inv_date:
         raise HTTPException(status_code=400, detail="due date cannot be before the bill date")
@@ -2856,7 +2847,7 @@ async def admin_record_payment(payload: RecordPaymentPayload):
     amount = round(float(payload.amount), 2)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be > 0")
-    pay_date = (_parse_ymd(payload.payment_date, "payment date") or _dt.date.today()).isoformat()
+    pay_date = (_parse_ymd(payload.payment_date, "payment date") or _today()).isoformat()
 
     cr = (db.table("clients")
           .select("id, name, whatsapp_number, language, tally_ledger_name")
@@ -2962,7 +2953,7 @@ def admin_set_reminder(payload: SetReminderPayload):
     patch: dict = {"reminders_enabled": bool(payload.enabled)}
     if payload.enabled:
         # Turning ON = selection day: the overdue track restarts from today.
-        patch["reminder_anchor"] = _dt.date.today().isoformat()
+        patch["reminder_anchor"] = _today().isoformat()
     db.table("clients").update(patch).eq("id", payload.client_id).execute()
     return {"ok": True, "enabled": bool(payload.enabled)}
 
@@ -3073,7 +3064,7 @@ async def admin_party(token: str = Query(...), client_id: str = Query(...), lang
     (which nudges already went, which is next and when) - all fetched from Tally."""
     biz = _biz_by_token(token)
     db = require_db()
-    today = _dt.date.today()
+    today = _today()
 
     cr = (db.table("clients")
           .select("id, name, whatsapp_number, credit_days, reminders_enabled, excluded, "
@@ -4556,7 +4547,7 @@ poll();
 def admin_analytics(token: str = Query(...), lang: str = Query("english")):
     biz = _biz_by_token(token)
     db = require_db()
-    today = _dt.date.today()
+    today = _today()
 
     names = {c["id"]: c["name"] for c in _fetch_paged(db, "clients", "id, name", biz["id"])}
     bills = _fetch_paged(db, "bills", "client_id, outstanding, due_date, invoice_date", biz["id"],

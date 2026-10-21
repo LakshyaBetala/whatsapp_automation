@@ -146,7 +146,7 @@ class Settings(BaseSettings):
     # freshly-made bill are PRIORITY (see wa_outbox.priority) and bypass it - they
     # go out whenever the owner asks, day or night.
     enforce_send_window: bool = True
-    send_window_start_hour: int = 10     # inclusive (10 AM)
+    send_window_start_hour: int = 9      # inclusive (9 AM)
     send_window_end_hour: int = 20       # exclusive (last send before 8 PM)
 
     # --- Morning pre-reminder checkpoint (Option A: hold + nudge, never mark paid) ---

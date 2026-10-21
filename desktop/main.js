@@ -697,6 +697,7 @@ function httpGetJson(url, cb) {
 // lastMoneySince starts at the server's clock (set on the first poll) so we
 // never replay old captures as a burst of pings when the app launches.
 let lastMoneySince = null;
+let UI_LANG = 'english';   // the window's language, for localized status text
 let EXPECTED_OPEN = 0;
 // The tray tooltip is the "badge": it names how many payments are expected
 // (customers who tapped Pay on the link) so a glance at the tray answers
@@ -786,7 +787,7 @@ function pollStatus() {
   });
   // Tally sync freshness for the top bar (label + dot colour + last-sync ISO).
   const su = CONFIG.token
-    ? `${CONFIG.backendUrl}/admin/sync-status?token=${encodeURIComponent(CONFIG.token)}`
+    ? `${CONFIG.backendUrl}/admin/sync-status?token=${encodeURIComponent(CONFIG.token)}&lang=${encodeURIComponent(UI_LANG)}`
     : `${CONFIG.backendUrl}/health`;
   ping(su, (ok, b) => {
     if (ok) { try { const d = JSON.parse(b);
@@ -1045,6 +1046,9 @@ ipcMain.handle('open-external', (e, url) => {
 // Persist the owner's chosen language on the server so the WhatsApp assistant
 // answers in the same language as the app. Fire and forget.
 ipcMain.handle('set-language', (e, l) => {
+  // Remember it for the status poll too, so the top bar is not Hinglish
+  // while the rest of the window is English.
+  UI_LANG = (l === 'hinglish' || l === 'hindi') ? l : 'english';
   if (!CONFIG.token) return false;
   const lang = (l === 'hinglish') ? 'hinglish' : 'english';
   try {

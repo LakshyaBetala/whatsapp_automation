@@ -178,11 +178,12 @@ def test_send_window_boundaries():
     from app.jobs import outbox_sweep
     IST = ZoneInfo("Asia/Kolkata")
 
-    # Window is 10 AM (inclusive) to 8 PM (exclusive), shop-local.
+    # Window is 9 AM (inclusive) to 8 PM (exclusive), shop-local.
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 9, 0, tzinfo=IST)) is True
     assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 10, 0, tzinfo=IST)) is True
     assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 19, 59, tzinfo=IST)) is True
     assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 20, 0, tzinfo=IST)) is False
-    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 9, 59, tzinfo=IST)) is False
+    assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 8, 59, tzinfo=IST)) is False
     assert outbox_sweep.within_send_window(datetime(2026, 7, 20, 23, 30, tzinfo=IST)) is False
 
 
