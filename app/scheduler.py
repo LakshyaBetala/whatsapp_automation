@@ -18,7 +18,7 @@ from app.db import get_client
 from app.jobs import (eod_digest, keepalive, monitor, onboarding_nudge,
                       outbox_sweep, promise_followup, reminder_checkpoint,
                       reminder_sweep, server_outbox, subscription_check,
-                      bill_notice_sweep)
+                      bill_notice_sweep, pay_assist)
 from app.services import monitoring
 
 log = logging.getLogger(__name__)
@@ -179,6 +179,20 @@ def start() -> AsyncIOScheduler:
         coalesce=True,
         misfire_grace_time=55,
     )
+
+    # A customer tapped Pay and nothing arrived: offer help once, 15 minutes
+    # later, inside the send window. Customer-facing, so it rides with the shop
+    # sender (the same deployment that drains the outbox).
+    if settings.enable_outbox_send:
+        sched.add_job(
+            _tracked("pay_assist", pay_assist.run),
+            IntervalTrigger(minutes=5),
+            id="pay_assist",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
+        )
 
     # Onboarding nudge: chase paired-but-never-synced shops to finish setup before
     # their code lapses. Owner-facing (goes from the bot number), so it rides with

@@ -7,27 +7,60 @@
 <link href="https://fonts.googleapis.com/css2?family=Anek+Latin:wdth,wght@75..125,400..800&family=Anek+Devanagari:wght@400..800&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; font-family: 'Anek Latin','Anek Devanagari',system-ui,'Segoe UI',sans-serif; color: #2F3437; }
+  /* Three themes from one set of variables. The sidebar and top bar are the
+     only surfaces the shell paints; the screens inside the tabs come from the
+     backend and are recoloured by the sheet injected into each webview. */
+  :root, body[data-theme="green"] {
+    --side: #17211b; --side-2: #1e2c23; --side-on: #294d38; --side-line: #263a2c;
+    --side-ink: #dfe8e2; --side-dim: #9fb7a6; --accent: #0a7d33;
+    --page: #F7F6F3; --bar: #fff; --bar-line: #EAEAEA; --ink: #2F3437; --ink-dim: #787774;
+    --ctl: #F7F6F3; --ctl-ink: #3a4a41;
+  }
+  body[data-theme="blue"] {
+    --side: #121b28; --side-2: #1d2430; --side-on: #2454b3; --side-line: #2c333e;
+    --side-ink: #e8ebf1; --side-dim: #9299a2; --accent: #2454b3;
+    --page: #f7fafe; --bar: #fff; --bar-line: #dfe3ea; --ink: #121b28; --ink-dim: #626a75;
+    --ctl: #f7fafe; --ctl-ink: #3a4350;
+  }
+  body[data-theme="midnight"] {
+    --side: #0d1210; --side-2: #18211c; --side-on: #2f6b45; --side-line: #22302a;
+    --side-ink: #e6efe9; --side-dim: #93a99b; --accent: #2f9e5a;
+    --page: #0f1512; --bar: #141c17; --bar-line: #22302a; --ink: #e6efe9; --ink-dim: #93a99b;
+    --ctl: #1b241e; --ctl-ink: #cfe0d5;
+  }
+  html, body { margin: 0; height: 100%; font-family: 'Anek Latin','Anek Devanagari',system-ui,'Segoe UI',sans-serif; color: var(--ink); }
   #app { display: flex; height: 100vh; }
-  #side { width: 208px; background: #17211b; color: #eef3ef; display: flex; flex-direction: column; flex-shrink: 0; }
-  #brand { display: flex; align-items: center; gap: 11px; padding: 18px 18px 6px; }
+  #side { width: 208px; background: var(--side); color: var(--side-ink); display: flex; flex-direction: column;
+          flex-shrink: 0; overflow: hidden; transition: width .16s cubic-bezier(.16,1,.3,1); }
+  #brand { display: flex; align-items: center; gap: 11px; padding: 18px 18px 6px; cursor: pointer; user-select: none; }
   #brand img { width: 34px; height: 34px; flex-shrink: 0; }
-  #brand .wm { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.04em; line-height: 1; }
+  #brand .wm { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.04em; line-height: 1; white-space: nowrap; }
+  /* Collapsed, the bar is a 58px rail of initials with the full name on hover,
+     so a small window spends its width on the work, not on the menu. */
+  body.railed #side { width: 58px; }
+  body.railed #brand { padding: 18px 12px 6px; justify-content: center; }
+  body.railed #brand .wm, body.railed .nav small, body.railed #verlabel,
+  body.railed #cosel, body.railed #statusbtn span:not(.dot) { display: none; }
+  body.railed .nav { text-align: center; padding: 12px 0; font-size: 0; }
+  body.railed .nav::before { content: attr(data-ic); font-size: 1.02rem; font-weight: 700; letter-spacing: 0; }
+  body.railed #statusbtn { justify-content: center; padding: 12px 0; }
   #brand small { display: block; font-size: .5em; font-weight: 400; color: #9fb7a6; letter-spacing: .02em; margin-top: 3px; }
-  .nav { border: 0; background: transparent; color: #dfe8e2; text-align: left; padding: 10px 18px; font-size: .98rem; cursor: pointer; width: 100%; letter-spacing: .01em; }
-  .nav:hover { background: #1e2c23; }
-  .nav.on { background: #294d38; color: #fff; font-weight: 600; }
-  .nav small { display: block; font-size: .7rem; color: #9fb7a6; font-weight: 400; margin-top: 2px; letter-spacing: 0; }
-  .nav.on small { color: #cfe6d8; }
-  .side-foot { margin-top: auto; border-top: 1px solid #263a2c; padding-top: 4px; }
-  .nav.sub { font-size: .86rem; padding: 7px 18px; color: #b9c6bd; }
-  #langsel { border: 1px solid #EAEAEA; background: #F7F6F3; color: #3a4a41; padding: 4px 8px; border-radius: 6px; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+  .nav { border: 0; background: transparent; color: var(--side-ink); text-align: left; padding: 10px 18px; font-size: .98rem; cursor: pointer; width: 100%; letter-spacing: .01em; white-space: nowrap; }
+  .nav:hover { background: var(--side-2); }
+  .nav.on { background: var(--side-on); color: #fff; font-weight: 600; }
+  .nav small { display: block; font-size: .7rem; color: var(--side-dim); font-weight: 400; margin-top: 2px; letter-spacing: 0; }
+  .nav.on small { color: rgba(255,255,255,.85); }
+  .side-foot { margin-top: auto; border-top: 1px solid var(--side-line); padding-top: 4px; }
+  .nav.sub { font-size: .86rem; padding: 7px 18px; color: var(--side-dim); }
+  #langsel { border: 1px solid var(--bar-line); background: var(--ctl); color: var(--ctl-ink); padding: 4px 8px; border-radius: 6px; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
   #moremenu { position: relative; }
-  #moremenu summary { list-style: none; border: 1px solid #EAEAEA; background: #F7F6F3; color: #3a4a41; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; }
+  #moremenu summary { list-style: none; border: 1px solid var(--bar-line); background: var(--ctl); color: var(--ctl-ink); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; }
   #moremenu summary::-webkit-details-marker { display: none; }
   #moremenu .mm { position: absolute; right: 0; top: calc(100% + 6px); z-index: 300; background: #fff; border: 1px solid #EAEAEA; border-radius: 10px; padding: 6px; min-width: 190px; box-shadow: 0 12px 30px rgba(18,27,40,.14); display: flex; flex-direction: column; }
   #moremenu .mm button { border: 0 !important; background: transparent !important; color: #17211b !important; text-align: left; padding: 8px 12px !important; border-radius: 7px !important; font: inherit; font-size: .88rem !important; cursor: pointer; }
   #moremenu .mm button:hover { background: #eef3ef !important; }
+  #moremenu .mm .mmlabel { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: #9aa; padding: 8px 12px 4px; }
+  #moremenu .mm button[data-theme-pick].on::after { content: ' ¹3'; color: var(--accent); font-weight: 800; }
   body.dark #langsel, body.dark #moremenu summary { background: #1e2c23; color: #EAEAEA; border-color: #263a2c; }
   body.dark #moremenu .mm { background: #14201a; border-color: #263a2c; }
   body.dark #moremenu .mm button { color: #dfe8e2 !important; }
@@ -38,18 +71,22 @@
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c9a227; }
   .dot.ok { background: #46d67e; }
   .dot.bad { background: #e2574c; }
-  #main { flex: 1; display: flex; flex-direction: column; background: #F7F6F3; min-width: 0; }
-  #topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; background: #fff; border-bottom: 1px solid #EAEAEA; font-size: .84rem; color: #787774; flex-shrink: 0; }
+  #main { flex: 1; display: flex; flex-direction: column; background: var(--page); min-width: 0; }
+  #topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; background: var(--bar); border-bottom: 1px solid var(--bar-line); font-size: .84rem; color: var(--ink-dim); flex-shrink: 0; flex-wrap: wrap; }
+  #railbtn { border: 1px solid var(--bar-line); background: var(--ctl); color: var(--ctl-ink); border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: .9rem; line-height: 1.2; }
+  #railbtn:hover { filter: brightness(.97); }
+  /* A half-screen window stays a usable app: the rail folds itself. */
+  @media (max-width: 980px) { body:not(.rail-pinned) #side { width: 58px; } }
   #topbar .tstat { display: flex; align-items: center; gap: 8px; min-width: 0; }
   #topbar .tstat b { color: #17211b; font-weight: 600; }
   button, select, input { font-family: inherit; }
   #brand img { border-radius: 8px; }
-  #helpbtn { border: 1px solid #EAEAEA; background: #F7F6F3; color: #3a4a41; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; }
+  #helpbtn { border: 1px solid var(--bar-line); background: var(--ctl); color: var(--ctl-ink); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; }
   body.dark #helpbtn { background: #1e2c23; color: #EAEAEA; border-color: #263a2c; }
-  #pagereload { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
+  #pagereload { border: 1px solid var(--bar-line); background: var(--ctl); color: var(--ctl-ink); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
   #pagereload:hover { background: #eef3ef; }
   #pagereload:active { transform: scale(.97); }
-  #phonebtn, #updchk { border: 1px solid #EAEAEA; background: #F7F6F3; color: #555; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
+  #phonebtn, #updchk { border: 1px solid var(--bar-line); background: var(--ctl); color: var(--ctl-ink); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .78rem; font-weight: 600; flex-shrink: 0; }
   #phonebtn:hover, #updchk:hover { background: #eef3ef; }
   #phonebtn:active, #updchk:active { transform: scale(.97); }
   body.dark #updchk { background: #1e2c23; color: #EAEAEA; border-color: #263a2c; }
@@ -282,14 +319,14 @@
   <div id="side">
     <div id="brand"><img src="logo.png" alt="ASVA"><span class="wm">ASVA</span></div>
     <select id="cosel" title="Switch company" style="display:none;margin:0 12px 12px;padding:8px;border-radius:6px;background:#17211b;color:#dfe8e2;border:1px solid #263a2c;width:calc(100% - 24px);font-size:.9rem"></select>
-    <button class="nav on" data-v="today">Today<small>Who paid, who to chase</small></button>
-    <button class="nav" data-v="dash">Parties<small>Dues and bills</small></button>
-    <button class="nav" data-v="payments">Payments<small>Confirm into Tally</small></button>
-    <button class="nav" data-v="reminders">Reminders<small>Time, language, holidays</small></button>
-    <button class="nav" data-v="accounts">Settings<small>UPI and bank</small></button>
+    <button class="nav on" data-v="today" data-ic="T">Today<small>Who paid, who to chase</small></button>
+    <button class="nav" data-v="dash" data-ic="P">Parties<small>Dues and bills</small></button>
+    <button class="nav" data-v="payments" data-ic="₹">Payments<small>Confirm into Tally</small></button>
+    <button class="nav" data-v="reminders" data-ic="R">Reminders<small>Time, language, holidays</small></button>
+    <button class="nav" data-v="accounts" data-ic="S">Settings<small>UPI and bank</small></button>
     <div class="side-foot">
-      <button class="nav sub" data-v="setup">WhatsApp</button>
-      <button class="nav sub" data-v="analytics">Reports</button>
+      <button class="nav sub" data-v="setup" data-ic="W">WhatsApp</button>
+      <button class="nav sub" data-v="analytics" data-ic="G">Reports</button>
       <button class="nav" id="reloadbtn" onclick="reloadData()" style="color:#9fb7a6;font-size:.85rem"
         title="Fetches fresh data from Tally now (2-3 min)">Tally refresh<small>Fresh data from Tally</small></button>
       <div id="statusbtn" onclick="toggleStatus()">
@@ -305,7 +342,7 @@
     <div id="topbar">
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
       <div style="display:flex;align-items:center;gap:10px">
-        <button id="pagereload" onclick="reloadActive()" title="Refresh this page">Refresh</button>
+        <button id="railbtn" onclick="toggleRail()" title="Hide or show the menu (Ctrl+B)">&#9776;</button><button id="pagereload" onclick="reloadActive()" title="Refresh this page">Refresh</button>
         <select id="langsel" title="Language" aria-label="Language" onchange="setLang(this.value)">
           <option value="english">English</option>
           <option value="hinglish">Hinglish</option>
@@ -318,7 +355,10 @@
             <button id="tourbtn" onclick="moreClose();startTour()">Tour</button>
             <button id="phonebtn" onclick="moreClose();openPhoneApp()">Phone app</button>
             <button id="updchk" onclick="moreClose();checkForUpdate()">Check for update</button>
-            <button id="themebtn" onclick="moreClose();toggleTheme()">Dark</button>
+            <div class="mmlabel">Theme</div>
+            <button data-theme-pick="green" onclick="moreClose();setTheme('green')">Green</button>
+            <button data-theme-pick="blue" onclick="moreClose();setTheme('blue')">Blue</button>
+            <button data-theme-pick="midnight" onclick="moreClose();setTheme('midnight')">Midnight (dark)</button>
           </div>
         </details>
       </div>
@@ -502,30 +542,80 @@ const WEBVIEW_DARK_CSS = `
   }
 `;
 
+// The pages inside the tabs are the backend's, drawn in ASVA green. A theme
+// only has to move that one accent (and, for Midnight, the whole surface), so
+// each theme is a small sheet injected into every webview. Accent-only themes
+// keep the page light, which is why they stay readable everywhere.
+const WEBVIEW_BLUE_CSS = `
+  a { color:#2454b3 !important; }
+  #save, .topnav a.on, .subtabs button.on, .cbsend, .ufill, .btn-apply, .cacts .rem,
+  button.primary, .nudgebtn, [style*="background:#0a7d33"], [style*="background: #0a7d33"] {
+    background-color:#2454b3 !important; border-color:#2454b3 !important; color:#fff !important;
+  }
+  #save:hover, .cbsend:hover, .cacts .rem:hover { background-color:#0f3f9c !important; }
+  .hcard.accent { background:#eaf0fc !important; border-color:#c9d6f2 !important; }
+  :focus-visible { outline-color:#1f5ed9 !important; }
+`;
+
+function currentTheme() {
+  const t = localStorage.getItem('asva_theme');
+  if (t === 'blue' || t === 'midnight' || t === 'green') return t;
+  return t === 'dark' ? 'midnight' : 'green';   // migrate the old light/dark flag
+}
+
+function themeSheet() {
+  const t = currentTheme();
+  if (t === 'midnight') return WEBVIEW_DARK_CSS;
+  if (t === 'blue') return WEBVIEW_BLUE_CSS;
+  return '';
+}
+
 async function applyWebviewTheme(w) {
   if (!w || !w.insertCSS) return;
-  const dark = localStorage.getItem('asva_theme') === 'dark';
+  const css = themeSheet();
   try {
-    if (dark && !w._darkKey) {
-      w._darkKey = await w.insertCSS(WEBVIEW_DARK_CSS);
-    } else if (!dark && w._darkKey) {
-      await w.removeInsertedCSS(w._darkKey);
-      w._darkKey = null;
-    }
+    if (w._themeKey) { await w.removeInsertedCSS(w._themeKey); w._themeKey = null; }
+    if (css) w._themeKey = await w.insertCSS(css);
   } catch (e) { /* webview not ready yet - re-applied on dom-ready */ }
 }
 
 function applyTheme() {
-  const dark = localStorage.getItem('asva_theme') === 'dark';
-  document.body.classList.toggle('dark', dark);
-  const b = document.getElementById('themebtn');
-  if (b) b.textContent = dark ? 'Light' : 'Dark';
+  const t = currentTheme();
+  document.body.dataset.theme = t;
+  document.body.classList.toggle('dark', t === 'midnight');
+  document.querySelectorAll('#moremenu .mm button[data-theme-pick]').forEach(b =>
+    b.classList.toggle('on', b.dataset.themePick === t));
   document.querySelectorAll('webview').forEach(applyWebviewTheme);
 }
-function toggleTheme() {
-  localStorage.setItem('asva_theme', localStorage.getItem('asva_theme') === 'dark' ? 'light' : 'dark');
+function setTheme(t) {
+  localStorage.setItem('asva_theme', t);
   applyTheme();
 }
+function toggleTheme() {   // kept: the tour and older callers still use it
+  setTheme(currentTheme() === 'midnight' ? 'green' : 'midnight');
+}
+
+// ── The left bar folds to an icon rail ───────────────────────────────────
+// Collapsed, it is 58px of initials with the full name on hover, so a small
+// window spends its width on the work instead of on the menu.
+function applyRail() {
+  const railed = localStorage.getItem('asva_rail') === '1';
+  document.body.classList.toggle('railed', railed);
+  document.body.classList.toggle('rail-pinned', !railed);
+  const b = document.getElementById('railbtn');
+  if (b) b.title = railed ? 'Show the menu (Ctrl+B)' : 'Hide the menu (Ctrl+B)';
+}
+function toggleRail() {
+  localStorage.setItem('asva_rail', localStorage.getItem('asva_rail') === '1' ? '0' : '1');
+  applyRail();
+}
+function openRailForTour() {   // a tour highlight must never point at an initial
+  if (localStorage.getItem('asva_rail') === '1') { localStorage.setItem('asva_rail', '0'); applyRail(); }
+}
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); toggleRail(); }
+});
+applyRail();
 
 // ── Show technical logs (hidden by default) ───────────────────────────────
 // The box only receives lines that arrive AFTER the window opened, so on first
@@ -822,11 +912,13 @@ function setLang(l, fromServer) {
 // The heartbeat tells us the server's saved language; on a fresh/re-paired laptop
 // adopt it so the app + chat stay in step without the owner re-choosing.
 // A money-in notification was clicked in the OS: jump to the tab it names.
-if (window.asva.onFocusTab) window.asva.onFocusTab((d) => {
+// Guarded: if the preload bridge is missing, an unguarded window.asva.X throws
+// here and every later line (theme, company switch, heartbeat) never runs.
+if (window.asva && window.asva.onFocusTab) window.asva.onFocusTab((d) => {
   const tab = (d && d.tab) === 'payments' ? 'payments' : 'today';
   try { show(tab); } catch (e) {}
 });
-if (window.asva.onLang) window.asva.onLang((d) => {
+if (window.asva && window.asva.onLang) window.asva.onLang((d) => {
   const l = d && d.language;
   // Only adopt the server language on a fresh laptop (owner never chose here).
   if (localStorage.getItem('asva_lang_set')) return;
@@ -1094,6 +1186,13 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.2.2': [
+    'The menu folds away: click the ASVA mark or press Ctrl+B. A narrow window folds it by itself, so ASVA stays usable at any size.',
+    'Three looks under More: Green, Blue and Midnight. The whole app follows your choice.',
+    'Fixed: a reminder due today no longer shows as a date on one row and "Today" on the next, and the top bar follows your language.',
+    'Reminder batches can start from 9 AM.',
+    'If a customer opens your payment link and nothing arrives, ASVA offers them help once, politely. Switch it off any time.',
+  ],
   '2.2.1': [
     'The familiar green ASVA is back, with the simpler layout kept: five places on the left, and WhatsApp and Reports at the bottom.',
     'Fixed: the Today screen no longer gets stuck on loading, and Add a payment works again on the Payments tab.',
@@ -1454,7 +1553,8 @@ function _skipTarget(i) {
   return t > i ? t : null;
 }
 function tourSkipSection() { const t = _skipTarget(tourI); if (t != null) { _clearTourPoll(); _clearTourWv(); _tourDir = 1; tourI = t; showTourStep(); } }
-function startTour() { tourI = 0; _tourDir = 1; document.getElementById('tourpop').style.display = 'block'; showTourStep(); }
+function startTour() {
+  openRailForTour(); tourI = 0; _tourDir = 1; document.getElementById('tourpop').style.display = 'block'; showTourStep(); }
 function tourGo(d) { _clearTourPoll(); _tourDir = d; tourI += d; if (tourI >= TOUR.length) { endTour(); return; } if (tourI < 0) tourI = 0; showTourStep(); }
 function endTour() {
   _clearTourPoll(); _clearTourWv();
@@ -1709,7 +1809,7 @@ function showManual(on) { const a = document.getElementById('updatemanual'); if 
 // If a download sits without finishing, offer the manual path after a while so
 // "stuck at 100%" is never a dead end.
 let _dlStuckTimer = null;
-if (window.asva.onUpdate) window.asva.onUpdate((u) => {
+if (window.asva && window.asva.onUpdate) window.asva.onUpdate((u) => {
   const bar = document.getElementById('updatebar');
   const msg = document.getElementById('updatemsg');
   const btn = document.getElementById('updatebtn');
@@ -1806,7 +1906,7 @@ function checkForUpdate() {
 
 // ── Real sync progress (from the Tally reader's stage markers) ─────────────
 let _syncDoneTimer = null;
-if (window.asva.onSyncProgress) window.asva.onSyncProgress((p) => {
+if (window.asva && window.asva.onSyncProgress) window.asva.onSyncProgress((p) => {
   const total = p.total || 1;
   const pct = Math.max(0, Math.min(100, Math.round((p.done || 0) * 100 / total)));
   const bar = document.getElementById('syncbar');

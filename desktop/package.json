@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.1.\n\nBack to the familiar green ASVA, with the simpler layout kept: five places on the left (Today, Parties, Payments, Reminders, Settings), with WhatsApp and Reports at the bottom.\n\nFixes: the Today screen was stuck on loading and the Add-a-payment button on Payments did nothing. Both work again.\n\nBills on a party page now make sense: one row per bill, no bill shown twice, nothing marked paid while it still shows a balance, and bills already cleared in Tally are tucked under \"Settled bills\"."
+      "releaseNotes": "ASVA 2.2.2.\n\nThe menu folds away: click the ASVA mark (or Ctrl+B) and the left bar becomes a slim strip of icons, so a small window spends its space on your work. A narrow window folds it by itself.\n\nThree looks under More: Green, Blue and Midnight (dark). The whole app follows your choice.\n\nFixed: a reminder due today said \"22 Oct\" on one row and \"Today\" on the next; the top bar showed Hinglish even in English; reminder batches can now start from 9 AM.\n\nNew: if a customer opens your payment link and nothing arrives, ASVA offers them help once, politely, without telling them they were watched. Switch it off in Settings if you prefer."
     },
     "files": [
       "main.js",
