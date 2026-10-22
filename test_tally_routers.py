@@ -392,3 +392,73 @@ def test_sync_new_fresh_bill_schedules_a_customer_notice(fake_db, monkeypatch):
         resp = client.post("/tally/sync", json=payload)
     assert resp.status_code == 200
     assert len(scheduled) == 1 and scheduled[0][0] == "client_1"
+
+
+# ── An exported bill PDF gets sent, whatever its age ──────────────────────
+# The sync only delivers a PDF whose voucher is in that same batch and under
+# 35 days old, so a bill exported later (or an older one re-exported) used to
+# sit in the pickup folder forever with no explanation. Exporting is a
+# deliberate act by the owner, so /tally/bill-pdf sends it regardless of age.
+def test_exported_bill_pdf_is_sent_for_an_old_bill(fake_db, monkeypatch):
+    from app.routers import tally as tally_router
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
+    fake_db.storage["bills"] = [{
+        "id": "bill-old", "business_id": biz_id, "client_id": "cli-1",
+        "tally_voucher_number": "OLD-001", "invoice_number": "OLD-001",
+        "invoice_date": "2025-01-05",
+    }]
+    fake_db.storage["clients"] = [{
+        "id": "cli-1", "name": "Old Party", "whatsapp_number": "919111111111"}]
+    sent = {}
+
+    async def _deliver(bill_id, pdf_b64=None, fname=None):
+        sent.update({"bill_id": bill_id, "name": fname})
+
+    monkeypatch.setattr(tally_router, "_generate_and_deliver", _deliver)
+    r = client.post("/tally/bill-pdf", json={
+        "business_id": biz_id, "agent_token": "valid_token",
+        "voucher_number": "OLD-001", "pdf_base64": "JVBERi0xLjQK"})
+    assert r.status_code == 200, r.text
+    assert r.json()["sent"] is True
+    assert sent["bill_id"] == "bill-old" and sent["name"] == "Invoice_OLD-001.pdf"
+
+
+def test_exported_bill_pdf_for_a_party_with_no_number_says_why(fake_db):
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
+    fake_db.storage["bills"] = [{
+        "id": "bill-x", "business_id": biz_id, "client_id": "cli-2",
+        "tally_voucher_number": "X-9", "invoice_number": "X-9",
+        "invoice_date": "2026-10-01"}]
+    fake_db.storage["clients"] = [{"id": "cli-2", "name": "No Phone", "whatsapp_number": ""}]
+    r = client.post("/tally/bill-pdf", json={
+        "business_id": biz_id, "agent_token": "valid_token",
+        "voucher_number": "X-9", "pdf_base64": "JVBERi0xLjQK"})
+    assert r.json()["sent"] is False
+    assert "WhatsApp number" in r.json()["reason"]
+
+
+def test_exported_bill_pdf_without_a_bill_number_is_refused(fake_db):
+    biz_id = str(uuid.uuid4())
+    fake_db.storage["businesses"] = [{"id": biz_id, "agent_token": "valid_token"}]
+    r = client.post("/tally/bill-pdf", json={
+        "business_id": biz_id, "agent_token": "valid_token",
+        "voucher_number": "   ", "pdf_base64": "JVBERi0xLjQK"})
+    assert r.status_code == 200 and r.json()["sent"] is False
+
+
+def test_bill_number_is_read_out_of_the_exported_file_name():
+    """Tally and the shops' own exports name files a few different ways."""
+    import os
+    def voucher_from(name):
+        base = os.path.splitext(os.path.basename(name))[0].strip()
+        for prefix in ("Sales_", "sales_", "Invoice_", "invoice_", "Bill_", "bill_"):
+            if base.startswith(prefix):
+                base = base[len(prefix):]
+                break
+        return base.strip().strip("-_ ")
+    assert voucher_from("Sales_2627RTC0179.pdf") == "2627RTC0179"
+    assert voucher_from("2627RTC0179.pdf") == "2627RTC0179"
+    assert voucher_from("Invoice_INV-105.pdf") == "INV-105"
+    assert voucher_from("bill_77.PDF") == "77"

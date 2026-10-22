@@ -53,6 +53,76 @@ def _attach_tally_pdfs(vouchers: list, pdf_dir: str) -> int:
                 pass
     return attached
 
+def _voucher_from_filename(name: str) -> str:
+    """The bill number inside an exported file name.
+
+    Tally and the shops' own exports use Sales_<no>.pdf, <no>.pdf, and
+    sometimes <no> with a suffix. Strip the extension and the common prefix
+    and hand the rest to the backend, which matches on the voucher number or
+    the invoice number.
+    """
+    base = os.path.splitext(os.path.basename(name))[0].strip()
+    for prefix in ("Sales_", "sales_", "Invoice_", "invoice_", "Bill_", "bill_"):
+        if base.startswith(prefix):
+            base = base[len(prefix):]
+            break
+    return base.strip().strip("-_ ")
+
+
+async def deliver_leftover_pdfs(config: dict, pdf_dir: str, limit: int = 20) -> int:
+    """Send bills whose PDF is in the folder but matched no voucher this sync.
+
+    This is the path for an OLD bill: the owner exported it deliberately, so
+    age is not a reason to stay quiet. Each file ends up in /sent or /skipped,
+    never back in the folder, so one file is never sent twice.
+    """
+    if not pdf_dir or not os.path.isdir(pdf_dir):
+        return 0
+    try:
+        files = [f for f in os.listdir(pdf_dir)
+                 if f.lower().endswith('.pdf')
+                 and os.path.isfile(os.path.join(pdf_dir, f))]
+    except Exception:
+        return 0
+    sent = 0
+    for fname in files[:limit]:
+        src = os.path.join(pdf_dir, fname)
+        vnum = _voucher_from_filename(fname)
+        if not vnum:
+            continue
+        try:
+            with open(src, 'rb') as fh:
+                b64 = base64.b64encode(fh.read()).decode('ascii')
+        except Exception as e:
+            log_and_print(f"Could not read {fname}: {e}", is_error=True)
+            continue
+        try:
+            res = await send_to_backend(
+                config['backend_url'], '/tally/bill-pdf', config['agent_token'],
+                {"business_id": config['business_id'],
+                 "agent_token": config['agent_token'],
+                 "voucher_number": vnum,
+                 "pdf_base64": b64})
+        except Exception as e:
+            log_and_print(f"Could not send {fname} yet: {e}", is_error=True)
+            continue        # leave it in the folder and try again next tick
+        ok = bool(res.get('sent'))
+        dest = 'sent' if ok else 'skipped'
+        if ok:
+            log_and_print(f"Bill {vnum} sent on WhatsApp to {res.get('party') or 'the customer'}.")
+            sent += 1
+        else:
+            log_and_print(f"Bill {vnum} was NOT sent: {res.get('reason') or 'unknown reason'}",
+                          is_error=True)
+        try:
+            dest_dir = os.path.join(pdf_dir, dest)
+            os.makedirs(dest_dir, exist_ok=True)
+            shutil.move(src, os.path.join(dest_dir, fname))
+        except Exception as e:
+            log_and_print(f"Could not move {fname} to {dest}: {e}", is_error=True)
+    return sent
+
+
 # Setup file logging
 logging.basicConfig(
     filename='agent.log',
@@ -894,6 +964,13 @@ async def _deliver_new_bills(config: dict, company: str, pdf_dir: str, stamp: st
     for vnum, reason in skipped.items():
         log_and_print(f"Bill {vnum} was NOT sent: {reason}", is_error=True)
         _move(vnum, 'skipped')
+    # Anything still in the folder did not match a voucher in this batch (an
+    # older bill, or one exported after its sync). The owner exported it on
+    # purpose, so send it rather than leave it sitting there.
+    try:
+        await deliver_leftover_pdfs(config, pdf_dir)
+    except Exception as e:
+        log_and_print(f"Leftover bill PDFs could not be checked: {e}", is_error=True)
     return new_bills, payments
 
 

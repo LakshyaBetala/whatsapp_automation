@@ -220,6 +220,41 @@ let restartTimer = null;
 // so it never grows without limit.
 const MSG_CACHE_MAX = 1500;
 const msgStore = new Map();   // message id -> WAMessageContent
+// The cache has to OUTLIVE this process. wa_service restarts often (reconnect,
+// update, reboot), and an in-memory-only cache meant every restart orphaned the
+// messages sent just before it: the recipient's retry could not be answered and
+// their chat showed "Waiting for this message" forever. Keeping it next to the
+// session file costs a few hundred KB and fixes exactly that.
+const MSG_CACHE_FILE = path.join(AUTH_DIR, 'msg-cache.json');
+const MSG_CACHE_PERSIST = 400;        // newest N kept on disk
+let msgCacheDirty = false;
+let msgCacheTimer = null;
+
+function saveMsgCache() {
+    msgCacheTimer = null;
+    if (!msgCacheDirty) return;
+    msgCacheDirty = false;
+    try {
+        fs.mkdirSync(AUTH_DIR, { recursive: true });
+        const all = Array.from(msgStore.entries());
+        const tail = all.slice(Math.max(0, all.length - MSG_CACHE_PERSIST));
+        const tmp = MSG_CACHE_FILE + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(tail));
+        fs.renameSync(tmp, MSG_CACHE_FILE);   // atomic: never a half-written cache
+    } catch (e) { /* a cache is a nicety, never a reason to fail a send */ }
+}
+
+function loadMsgCache() {
+    try {
+        if (!fs.existsSync(MSG_CACHE_FILE)) return;
+        const rows = JSON.parse(fs.readFileSync(MSG_CACHE_FILE, 'utf8'));
+        if (Array.isArray(rows)) {
+            for (const [id, content] of rows) if (id && content) msgStore.set(id, content);
+            console.log(`Message cache restored (${msgStore.size} recent messages).`);
+        }
+    } catch (e) { /* corrupt or absent: start empty */ }
+}
+
 function cacheMsg(id, content) {
     if (!id || !content) return;
     if (msgStore.size >= MSG_CACHE_MAX) {          // trim oldest ~10% in one pass
@@ -227,7 +262,15 @@ function cacheMsg(id, content) {
         for (const k of msgStore.keys()) { msgStore.delete(k); if (--n <= 0) break; }
     }
     msgStore.set(id, content);
+    msgCacheDirty = true;
+    // Debounced: a burst of sends writes once, not once per message.
+    if (!msgCacheTimer) msgCacheTimer = setTimeout(saveMsgCache, 4000);
 }
+loadMsgCache();
+for (const sig of ['SIGTERM', 'SIGINT']) {
+    try { process.on(sig, () => { saveMsgCache(); process.exit(0); }); } catch (e) {}
+}
+process.on('exit', () => { try { saveMsgCache(); } catch (e) {} });
 // A tiny NodeCache-compatible shim so Baileys can throttle its own decryption
 // retries (msgRetryCounterCache), which also curbs the 500-loop.
 function mkCache() {

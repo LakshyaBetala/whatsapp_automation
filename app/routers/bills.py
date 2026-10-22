@@ -151,16 +151,44 @@ async def _generate_and_deliver(
         invoice_num = bill.get("invoice_number") or bill_id[:8]
         amount_str = inr(Decimal(str(bill["amount"])))
 
-        tpl_name, body = render(
-            "invoice", lang,
-            client=client.get("name", "Customer"),
-            business=shop_name,
-            invoice_number=invoice_num,
-            amount=amount_str,
-            date=date.fromisoformat(str(bill["invoice_date"])).strftime("%d-%m-%Y"),
-            upi_link=biz.get("upi_vpa") or "",
-            pdf_url="",   # never dump a storage URL into the message body
-        )
+        inv_date = date.fromisoformat(str(bill["invoice_date"]))
+        due_raw = bill.get("due_date")
+        due_date = date.fromisoformat(str(due_raw)) if due_raw else None
+        overdue_by = (date.today() - due_date).days if due_date else 0
+        still_owed = Decimal(str(bill.get("outstanding") or 0))
+
+        if overdue_by > 0 and still_owed > 0:
+            # Re-sent on purpose, past its due date: a reminder, with the real
+            # balance and the pay link, not a "here is your new bill".
+            tpl_name = "invoice_reminder"
+            from app.services import upi as _upi
+            pay_link = ""
+            if biz.get("upi_vpa"):
+                try:
+                    pay_link = _upi.pay_page_url(bill["business_id"], still_owed,
+                                                 invoice_num, client_id=client.get("id"))
+                except Exception:
+                    pay_link = ""
+            lines = [f"Dear {client.get('name', 'Customer')},",
+                     f"A payment reminder from {shop_name}.", "",
+                     f"Invoice {invoice_num} of {inv_date.strftime('%d %b %Y')}: "
+                     f"{inr(still_owed)} outstanding ({overdue_by} days).",
+                     "", "A copy of the bill is attached."]
+            if pay_link:
+                lines += ["", "Pay online (UPI, GPay, PhonePe or bank transfer):", pay_link]
+            lines += ["", "Once paid, kindly reply PAID. Thank you."]
+            body = "\n".join(lines)
+        else:
+            tpl_name, body = render(
+                "invoice", lang,
+                client=client.get("name", "Customer"),
+                business=shop_name,
+                invoice_number=invoice_num,
+                amount=amount_str,
+                date=inv_date.strftime("%d-%m-%Y"),
+                upi_link=biz.get("upi_vpa") or "",
+                pdf_url="",   # never dump a storage URL into the message body
+            )
 
         if have_direct:
             # Send the exact PDF bytes we already hold - most robust path.

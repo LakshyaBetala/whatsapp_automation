@@ -55,9 +55,13 @@ def test_compose_english_lists_each_bill_total_and_link():
     assert "—" not in msg and "–" not in msg
 
 
-def test_compose_hinglish_single_bill_without_link():
+def test_bill_notice_is_english_even_for_a_hinglish_batch():
+    """A bill is a document, so the founder's rule is strict English for it,
+    whatever language the party's reminder batch uses."""
     msg = bn.compose("Ramesh", "Shanti", BILLS[:1], 12500, en=False, pay_link=None)
-    assert "Namaste Ramesh ji" in msg and "INV-71" in msg and "Kul baaki" in msg
+    assert "Dear Ramesh" in msg and "INV-71" in msg and "Total outstanding now" in msg
+    for hinglish in ("Namaste", "Kul baaki", "Dhanyavaad", "naya bill"):
+        assert hinglish not in msg
     assert "http" not in msg
 
 

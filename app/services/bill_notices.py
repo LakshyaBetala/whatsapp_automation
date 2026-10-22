@@ -74,34 +74,27 @@ def _d(value) -> str:
         return "-"
 
 
-def compose(name: str, biz_name: str, bills: list, total_outstanding, *, en: bool,
+def compose(name: str, biz_name: str, bills: list, total_outstanding, *, en: bool = True,
             pay_link: str | None) -> str:
-    """The customer's message for one or more new bills. No em/en dashes."""
+    """The customer's message for one or more new bills.
+
+    Always English, whatever the party's reminder batch is set to: a bill is a
+    document (numbers, dates, a pay link) and the shop wants one wording for it.
+    `en` is kept so existing callers do not break, but it is not read.
+    No em/en dashes.
+    """
     shown, more = bills[:MAX_LISTED], max(0, len(bills) - MAX_LISTED)
-    if en:
-        head = [f"Dear {name},",
-                f"{'A new bill' if len(bills) == 1 else str(len(bills)) + ' new bills'} from {biz_name}:", ""]
-        rows = [f"Bill {b.get('invoice_number') or '-'} of {_d(b.get('invoice_date'))}: "
-                f"{inr(Decimal(str(b.get('amount') or 0)))}, due {_d(b.get('due_date'))}"
-                for b in shown]
-        if more:
-            rows.append(f"and {more} more")
-        tail = ["", f"Total outstanding now: {inr(Decimal(str(total_outstanding or 0)))}"]
-        if pay_link:
-            tail += ["", "Pay online (UPI, GPay, PhonePe or bank transfer):", pay_link]
-        tail += ["", "Thank you."]
-    else:
-        head = [f"Namaste {name} ji,",
-                f"{biz_name} se aapka {'naya bill' if len(bills) == 1 else str(len(bills)) + ' naye bill'}:", ""]
-        rows = [f"Bill {b.get('invoice_number') or '-'} ({_d(b.get('invoice_date'))}): "
-                f"{inr(Decimal(str(b.get('amount') or 0)))}, due {_d(b.get('due_date'))}"
-                for b in shown]
-        if more:
-            rows.append(f"aur {more} bill")
-        tail = ["", f"Kul baaki ab: {inr(Decimal(str(total_outstanding or 0)))}"]
-        if pay_link:
-            tail += ["", "Online payment (UPI, GPay, PhonePe ya bank transfer):", pay_link]
-        tail += ["", "Dhanyavaad."]
+    head = [f"Dear {name},",
+            f"{'A new bill' if len(bills) == 1 else str(len(bills)) + ' new bills'} from {biz_name}:", ""]
+    rows = [f"Bill {b.get('invoice_number') or '-'} of {_d(b.get('invoice_date'))}: "
+            f"{inr(Decimal(str(b.get('amount') or 0)))}, due {_d(b.get('due_date'))}"
+            for b in shown]
+    if more:
+        rows.append(f"and {more} more")
+    tail = ["", f"Total outstanding now: {inr(Decimal(str(total_outstanding or 0)))}"]
+    if pay_link:
+        tail += ["", "Pay online (UPI, GPay, PhonePe or bank transfer):", pay_link]
+    tail += ["", "Thank you."]
     return "\n".join(head + rows + tail)
 
 

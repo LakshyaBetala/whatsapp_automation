@@ -957,6 +957,65 @@ def _run_reconcile(db, biz: str, all_clients: list, all_parties: list, parties: 
     return archived
 
 
+class ExportedBillPayload(BaseModel):
+    """One PDF the agent found sitting in the pickup folder."""
+    business_id: uuid.UUID
+    agent_token: str
+    voucher_number: str
+    pdf_base64: str
+
+
+@router.post("/bill-pdf")
+async def deliver_exported_bill(payload: ExportedBillPayload,
+                                background_tasks: BackgroundTasks):
+    """Send a bill the owner exported, whoever matched it and however old it is.
+
+    The sync only delivers PDFs whose voucher is in that same batch and under
+    35 days old. Anything else used to sit in the folder with no explanation.
+    Dropping a PDF into the folder is a deliberate act by the owner, so here the
+    age does not matter and a previous send does not block a re-send; the agent
+    moves the file out of the folder afterwards, so nothing can loop.
+    """
+    db = _verify_token(payload.business_id, payload.agent_token)
+    biz = str(payload.business_id)
+    vnum = (payload.voucher_number or "").strip()
+    if not vnum:
+        return {"sent": False, "reason": "no bill number in the file name"}
+
+    rows = (db.table("bills")
+            .select("id, client_id, invoice_number, tally_voucher_number, invoice_date")
+            .eq("business_id", biz).eq("tally_voucher_number", vnum)
+            .limit(1).execute()).data
+    if not rows:
+        rows = (db.table("bills")
+                .select("id, client_id, invoice_number, tally_voucher_number, invoice_date")
+                .eq("business_id", biz).eq("invoice_number", vnum)
+                .limit(1).execute()).data
+    if not rows:
+        return {"sent": False,
+                "reason": "this bill is not in ASVA yet - press Tally refresh, then re-export"}
+    bill = rows[0]
+
+    cl = (db.table("clients").select("id, name, whatsapp_number")
+          .eq("id", bill["client_id"]).limit(1).execute()).data
+    client = cl[0] if cl else None
+    if not client:
+        return {"sent": False, "reason": "the customer for this bill is not in ASVA"}
+    if not client.get("whatsapp_number"):
+        return {"sent": False,
+                "reason": "this customer has no WhatsApp number - add their mobile, then re-export"}
+
+    # Mark before sending, so a slow send cannot be started twice by two ticks.
+    try:
+        db.table("bills").update({"pdf_url": "sent"}).eq("id", bill["id"]).execute()
+    except Exception:
+        pass
+    background_tasks.add_task(_generate_and_deliver, bill["id"], payload.pdf_base64,
+                              f"Invoice_{vnum}.pdf")
+    log.info("exported bill %s queued for %s", vnum, client.get("name"))
+    return {"sent": True, "party": client.get("name") or ""}
+
+
 @router.post("/outstandings")
 def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: BackgroundTasks):
     """Make Tally's bill-by-bill OUTSTANDING the source of truth.
