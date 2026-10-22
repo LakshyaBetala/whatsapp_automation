@@ -110,6 +110,33 @@ def mark_connected(db, business_id: str, *, already_linked: bool) -> None:
     db.table("businesses").update(patch).eq("id", business_id).execute()
 
 
+def release_server(db, business_id: str, port: int | None) -> bool:
+    """Take this shop's WhatsApp off the server, at the owner's request.
+
+    Logs the number out (so ASVA leaves the phone's Linked devices and the
+    session cannot be reused), then clears the request flag so the manager
+    stops the process, and points sending back at the shop's own computer.
+    Returns whether the child confirmed the logout; the flags are cleared
+    either way, because the owner asked to leave and a down child must not
+    trap them on the server.
+    """
+    ok = False
+    if port:
+        try:
+            r = httpx.post(f"{child_url(int(port))}/api/wa/logout",
+                           headers=_headers(), timeout=20.0)
+            ok = r.status_code == 200
+        except Exception:
+            log.info("wa logout: child on port %s did not answer", port)
+    db.table("businesses").update({
+        "wa_transport": "laptop",       # the shop's own app sends again
+        "wa_server_requested_at": None,  # the manager stops this shop's process
+        "wa_ready": False,
+        "wa_checked_at": _now_iso(),
+    }).eq("id", business_id).execute()
+    return ok
+
+
 def shops_for_manager(db) -> list:
     """The shop processes the manager should run: requested, with a port, and
     not suspended (a suspended shop sends nothing, so its process stops)."""

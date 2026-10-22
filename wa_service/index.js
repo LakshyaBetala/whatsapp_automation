@@ -679,6 +679,25 @@ app.post('/api/wa/relink', requireKey, async (req, res) => {
     res.json({ ok: true });
 });
 
+// ── Leave the server: the owner asked for their WhatsApp back ──────────
+// A real logout (so ASVA disappears from the phone's Linked devices), then the
+// session files go. The manager stops this process once the shop drops off its
+// list; exiting here just makes it immediate.
+app.post('/api/wa/logout', requireKey, async (req, res) => {
+    console.log('LOGOUT requested: unlinking this number from the server.');
+    gen += 1;                       // orphan the socket before the wipe
+    try { if (sock) await sock.logout(); } catch (e) { /* phone may be offline */ }
+    try { if (sock) sock.end(new Error('logout')); } catch (e) {}
+    try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
+    clientReady = false;
+    qrCodeData = null;
+    registered = false;
+    res.json({ ok: true });
+    // Let the response flush, then stop; the manager will not restart us
+    // because the shop is no longer on its list.
+    setTimeout(() => process.exit(0), 400);
+});
+
 const QR_HELP = `
     <div style="max-width:420px;font-family:system-ui;color:#444;line-height:1.6">
       <p><b>Phone says "couldn't link device"?</b> Do this once:</p>

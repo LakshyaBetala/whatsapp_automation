@@ -4476,6 +4476,18 @@ def admin_whatsapp_start(payload: TokenPayload):
     return {"ok": True, "port": port}
 
 
+@router.post("/admin/whatsapp/disconnect")
+def admin_whatsapp_disconnect(payload: TokenPayload):
+    """Owner's choice: take this shop's WhatsApp off the ASVA server.
+
+    Sending goes back to the shop's own computer, so reminders then need ASVA
+    open there. Nothing about the shop's data changes.
+    """
+    biz = _wa_biz(payload.token)
+    ok = wa_server.release_server(require_db(), biz["id"], biz.get("wa_port"))
+    return {"ok": True, "logged_out": ok}
+
+
 @router.get("/admin/whatsapp/status")
 def admin_whatsapp_status(token: str = Query(...)):
     biz = _wa_biz(token)
@@ -4513,6 +4525,14 @@ async function start(){{
          body: JSON.stringify({{token: TOKEN}})}}); }} catch(e) {{}}
   poll();
 }}
+async function disconnect(){{
+  if (!confirm('Take your WhatsApp off the ASVA server?\\n\\nReminders and bills will then go out only '
+             + 'while ASVA is open on this computer. Nothing else changes, and you can move it back any time.')) return;
+  el('Taking your WhatsApp off the server...');
+  try {{ await fetch('/admin/whatsapp/disconnect', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+         body: JSON.stringify({{token: TOKEN}})}}); }} catch(e) {{}}
+  setTimeout(poll, 1500);
+}}
 async function poll(){{
   let s = null;
   try {{ s = await (await fetch('/admin/whatsapp/status?token=' + encodeURIComponent(TOKEN))).json(); }} catch(e) {{}}
@@ -4532,7 +4552,12 @@ async function poll(){{
   }}
   el('<p><b>Connected.</b> Your reminders and bills now go from ASVA\\'s server, even when this computer is off.</p>'
    + '<div class="hint">If WhatsApp shows an older ASVA entry under Linked devices, you can log it out. '
-   + 'ASVA now sends only from the server.</div>');
+   + 'ASVA now sends only from the server.</div>'
+   + '<button id="wa_off" onclick="disconnect()" style="margin-top:16px;background:#fff;color:#9F2F2D;'
+   + 'border:1px solid #9F2F2D">Take my WhatsApp off the server</button>'
+   + '<div class="hint" style="margin-top:8px">Your number is unlinked from ASVA\\'s server and sending moves '
+   + 'back to this computer, so ASVA must be open here for reminders to go out. Your customers, bills and '
+   + 'history are not touched. You can move it back any time.</div>');
 }}
 poll();
 </script>"""
