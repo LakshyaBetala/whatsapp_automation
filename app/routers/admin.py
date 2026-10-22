@@ -200,12 +200,65 @@ def _tally_status(dt: Optional[_dt.datetime]) -> tuple[str, str]:
 # rendered HTML (never the f-string templates - that keeps the fragile markup
 # untouched and makes the worst-case failure "some text stays Hinglish", never
 # a broken page). Applied longest-phrase-first so specifics beat generics.
+_FEEDBACK = """
+<style>
+#asva-prog{position:fixed;left:0;top:0;height:2px;width:0;background:#0a7d33;
+  z-index:99999;transition:width .4s ease;pointer-events:none;opacity:0}
+#asva-prog.go{width:92%;opacity:1}
+button:disabled{opacity:.65;cursor:progress}
+button.asva-busy{position:relative;padding-right:26px}
+button.asva-busy::after{content:"";position:absolute;right:8px;top:50%;width:10px;height:10px;
+  margin-top:-5px;border:2px solid currentColor;border-right-color:transparent;
+  border-radius:50%;animation:asva-spin .6s linear infinite}
+@keyframes asva-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){button.asva-busy::after{animation-duration:2s}}
+</style>
+<script>
+/* Slow is fine. Looking broken is not. See admin.py _FEEDBACK. */
+(function(){
+  if (window.__asvaFeedback) return; window.__asvaFeedback = 1;
+  var bar = document.createElement('div'); bar.id = 'asva-prog';
+  document.body.appendChild(bar);
+  function go(){ requestAnimationFrame(function(){ bar.classList.add('go'); }); }
+  addEventListener('beforeunload', go);
+  addEventListener('pagehide', go);
+  /* Only labels ASVA itself sets while waiting. A button the page disabled on
+     purpose is left exactly as it is. */
+  var BUSY = /^(\\.\\.\\.|Sending\\.\\.\\.|Saving\\.\\.\\.|Preparing\\.\\.\\.|Checking\\.\\.\\.)$/;
+  document.addEventListener('click', function(e){
+    var t = e.target, b = (t && t.closest) ? t.closest('button') : null;
+    if (!b || b.disabled) return;
+    var label = b.textContent, html = b.innerHTML;
+    setTimeout(function(){
+      if (!b.isConnected || !b.disabled) return;
+      b.classList.add('asva-busy');
+      setTimeout(function(){
+        if (!b.isConnected || !b.disabled) return;
+        if (BUSY.test((b.textContent || '').trim())) {
+          b.disabled = false; b.innerHTML = html; b.classList.remove('asva-busy');
+          b.title = 'That did not go through. Check the connection and try again.';
+        }
+      }, 15000);
+    }, 180);
+  }, true);
+})();
+</script>
+"""
+
+
 def _ui_translate(html: str, lang: str) -> str:
     """Rewrite a Hinglish-authored admin page into the chosen locale
-    (english / hinglish / hindi)."""
+    (english / hinglish / hindi), then add the shared responsiveness layer."""
     # The founder kept the original green palette (the Ledger blue shipped in
     # 2.2.0 and was reverted on 2026-10-22); only the layout work stayed.
-    return i18n.translate_html(html, lang)
+    out = i18n.translate_html(html, lang)
+    # Injected AFTER translation: this text is English on purpose and must not
+    # be rewritten. Appending works with or without a </body>.
+    if "__asvaFeedback" in out:
+        return out
+    if "</body>" in out:
+        return out.replace("</body>", _FEEDBACK + "</body>", 1)
+    return out + _FEEDBACK
 
 
 def _is_en(lang: str) -> bool:

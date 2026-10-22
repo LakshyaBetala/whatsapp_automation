@@ -82,7 +82,7 @@ def build_ops_data(db) -> dict:
     # (1) all businesses
     bizes = _paged(lambda: db.table("businesses").select(
         "id, business_name, plan, plan_expires_on, license_key, last_seen, "
-        "agent_version, whatsapp_number, setup_problem"))
+        "agent_version, whatsapp_number, setup_problem, subscription_status"))
     # (2) this-month usage, one query -> dict
     used_by: dict = {}
     for r in _paged(lambda: db.table("usage").select("business_id, message_count")
@@ -101,7 +101,10 @@ def build_ops_data(db) -> dict:
 
     rows = []
     tot = {"businesses": 0, "online": 0, "active": 0, "grace": 0, "suspended": 0,
-           "messages_month": 0, "failed_today": 0, "outdated": 0, "needs_reinstall": 0}
+           "messages_month": 0, "failed_today": 0, "outdated": 0, "needs_reinstall": 0,
+           # The three numbers that answer "how is the business doing, and what
+           # do I have to chase this week?" without opening a spreadsheet.
+           "mrr": 0, "renew_7": 0, "trials": 0}
     for b in bizes:
         plan = _plan(b)
         limits = PLAN_LIMITS[plan]
@@ -118,6 +121,8 @@ def build_ops_data(db) -> dict:
         # Below the fleet floor = too old to self-update, needs a manual reinstall.
         # Distinct from merely "outdated" (a build that will auto-update itself).
         needs_reinstall = (ver != "-") and _vparts(ver) < _vparts(min_ver)
+        # A trial shop is live but pays nothing, so it must not count as revenue.
+        on_trial = (b.get("subscription_status") == "trial") and status != "suspended"
 
         tot["businesses"] += 1
         tot["online"] += 1 if online else 0
@@ -126,6 +131,12 @@ def build_ops_data(db) -> dict:
         tot["failed_today"] += failed
         tot["outdated"] += 0 if version_ok else 1
         tot["needs_reinstall"] += 1 if needs_reinstall else 0
+        if on_trial:
+            tot["trials"] += 1
+        elif status in ("active", "grace"):
+            tot["mrr"] += int(limits.get("price", 0))
+            if dleft is not None and 0 <= dleft <= 7:
+                tot["renew_7"] += 1
 
         rows.append({
             "id": b["id"],
@@ -135,6 +146,7 @@ def build_ops_data(db) -> dict:
             "plan_label": PLAN_LABELS.get(plan, plan.value.title()),
             "price": int(limits.get("price", 0)),
             "status": status,
+            "on_trial": on_trial,
             "expiry": str(exp)[:10] if exp else None,
             "days_left": dleft,
             "online": online,
@@ -485,6 +497,9 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
  .top h1{font-size:1.15rem;margin:0;letter-spacing:.02em;font-weight:800}
  .top .meta{color:#8fae9c;font-size:.82rem}
  .wrap{padding:18px 22px;max-width:1500px;margin:0 auto}
+ .billcell{white-space:nowrap}
+ .billcell .btn{margin:1px 2px 1px 0}
+ .billcell .btn.yr{border-color:#2c5c42;color:#9ae6b4}
  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
  .kpi{background:#17211b;border:1px solid #24332a;border-radius:12px;padding:14px 16px}
  .kpi .n{font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums}
@@ -725,7 +740,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
    <thead><tr>
      <th>Business</th><th>Status</th><th>Plan</th><th>Expiry</th><th class="num">Days</th>
      <th>Last seen</th><th>Version</th><th class="num">Msgs (mo)</th><th class="num">Fail (today)</th>
-     <th>Renew</th><th>Cut off</th><th>Pair</th><th>Delete</th>
+     <th>Billing</th><th>Cut off</th><th>Pair</th><th>Delete</th>
    </tr></thead>
    <tbody id="rows"></tbody>
   </table></div>
@@ -786,7 +801,12 @@ async function load(){
       ['messages_month','Messages (mo)',''],['failed_today','Failed (today)', t.failed_today?'bad':''],
       ['outdated','Outdated',t.outdated?'warn':''],
       ['needs_reinstall','Reinstall', t.needs_reinstall?'bad':'']];
-    document.getElementById('kpis').innerHTML = K.map(k=>
+    // Money first: what is coming in, what has to be collected this week, and
+    // how many shops are still on the house.
+    const MONEY='<div class="kpi good"><div class="n">&#8377;'+inr(t.mrr)+'</div><div class="l">Monthly, paying</div></div>'
+      +'<div class="kpi '+(t.renew_7?'warn':'')+'"><div class="n">'+inr(t.renew_7)+'</div><div class="l">Renew in 7 days</div></div>'
+      +'<div class="kpi"><div class="n">'+inr(t.trials)+'</div><div class="l">On free trial</div></div>';
+    document.getElementById('kpis').innerHTML = MONEY + K.map(k=>
       '<div class="kpi '+(k[2])+'"><div class="n">'+inr(t[k[0]])+'</div><div class="l">'+k[1]+'</div></div>').join('');
     document.getElementById('rows').innerHTML = d.businesses.map(rowHtml).join('') ||
       '<tr><td colspan="13" class="muted" style="padding:22px">No businesses yet.</td></tr>';
@@ -852,7 +872,7 @@ function rowHtml(b){
   return '<tr data-name="'+esc(b.name).toLowerCase()+'" data-prob="'+(prob?'1':'0')+'">'+
     '<td><div><span class="dot '+(b.online?'on':'off')+'"></span>'+esc(b.name)+'</div>'+
       '<div class="lk">'+esc(b.license_key)+'</div></td>'+
-    '<td><span class="pill '+b.status+'">'+b.status+'</span></td>'+
+    '<td><span class="pill '+b.status+'">'+(b.on_trial?'trial':b.status)+'</span></td>'+
     '<td><select class="pl" onchange="setPlan(\''+b.id+'\',this.value)">'+plopts+'</select>'+
       '<div class="muted">&#8377;'+inr(b.price)+'</div></td>'+
     '<td>'+(b.expiry||'-')+'</td>'+
@@ -861,8 +881,11 @@ function rowHtml(b){
     '<td class="'+verCls+'">'+esc(b.version)+verExtra+'</td>'+
     '<td class="num">'+inr(b.messages_used)+' / '+inr(b.messages_limit)+'</td>'+
     '<td class="num">'+(b.failed_today||0)+'</td>'+
-    '<td><button class="btn" onclick="renew(\''+b.id+'\',1)">+1 mo</button>'+
-      '<button class="btn" onclick="renewUntil(\''+b.id+'\')" title="Free/paid until an exact date">Till date</button></td>'+
+    '<td class="billcell">'+
+      '<button class="btn" onclick="startTrial(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')" title="Free trial on the full product, from today">Trial</button>'+
+      '<button class="btn" onclick="renew(\''+b.id+'\',1)" title="Paid: add one month">+1 mo</button>'+
+      '<button class="btn yr" onclick="renewYear(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')" title="Paid: add twelve months">+1 yr</button>'+
+      '<button class="btn" onclick="renewUntil(\''+b.id+'\')" title="Access until an exact date">Date</button></td>'+
     '<td><button class="btn sus" onclick="suspend(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Suspend</button></td>'+
     '<td><button class="btn" onclick="pairCode(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Get code</button></td>'+
     '<td><button class="btn del" onclick="delBiz(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')" title="Erase this shop and ALL its data - irreversible">Delete</button></td>'+
@@ -872,6 +895,16 @@ function flash(t){var m=document.getElementById('msg');m.textContent=t;setTimeou
 async function post(url,body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json().catch(()=>({})); return {ok:r.ok,j:j};
+}
+async function startTrial(id,name){
+  if(!confirm('Start the free trial for "'+name+'" from today?\\n\\nThey get the full product (Recover) for 14 days, and the trial-end notice goes out on day 12 and day 14.'))return;
+  const x=await post('/license/trial',{admin_key:KEY,business_id:id});
+  flash(x.ok?('Trial running until '+x.j.until):(x.j.detail||'Could not start the trial')); load();
+}
+async function renewYear(id,name){
+  if(!confirm('Renew "'+name+'" for a full year?\\n\\nTwelve months are added on top of whatever is left.'))return;
+  const x=await post('/license/renew',{admin_key:KEY,business_id:id,months:12});
+  flash(x.ok?('Renewed until '+x.j.renewed_until):(x.j.detail||'Renew failed')); load();
 }
 async function renew(id,months){
   const x=await post('/license/renew',{admin_key:KEY,business_id:id,months:months});

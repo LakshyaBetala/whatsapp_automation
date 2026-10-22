@@ -350,6 +350,39 @@ def renew(payload: RenewPayload):
     return {"ok": True, "renewed_until": new_expiry.isoformat(), "heartbeat": hb}
 
 
+class TrialPayload(BaseModel):
+    admin_key: str
+    business_id: str
+    days: Optional[int] = None        # default: settings.trial_days (14)
+
+
+@router.post("/trial")
+def start_trial(payload: TrialPayload):
+    """OPS ONLY: put a shop on the free trial, starting today.
+
+    Same deal a new shop gets at creation: the full product (Recover) for
+    settings.trial_days, marked 'trial' so the trial-end notices fire on day 12
+    and day 14 and name the plan their debtor count actually needs. Use it for a
+    shop that was created as paid, or to give a prospect a clean second run;
+    renewing afterwards just overwrites the expiry.
+    """
+    _require_admin(payload.admin_key)
+    db = require_db()
+    days = int(payload.days or settings.trial_days)
+    if days < 1 or days > 90:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 90")
+    until = _dt.date.today() + _dt.timedelta(days=days)
+    r = (db.table("businesses").update({
+        "plan": Plan.pro.value,            # the trial is the whole product
+        "plan_expires_on": until.isoformat(),
+        "subscription_status": "trial",    # what makes the day-12/14 notices fire
+    }).eq("id", payload.business_id).execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    log.info("Trial started for %s until %s (%s days)", payload.business_id, until, days)
+    return {"ok": True, "until": until.isoformat(), "days": days, "plan": Plan.pro.value}
+
+
 class RenewUntilPayload(BaseModel):
     admin_key: str
     business_id: str

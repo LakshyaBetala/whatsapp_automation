@@ -119,3 +119,49 @@ def test_relink_controls_are_present():
     for needle in ('id="walink"', 'id="wabody"', 'id="warelink"',
                    "openWaLink", "doWaRelink", "/ops/wa-qr", "/ops/wa-relink"):
         assert needle in html, "missing %s" % needle
+
+
+# ── The controls the business is run with ─────────────────────────────────
+def test_every_billing_control_is_on_the_page():
+    """Trial, month, year, exact date, cut off, pair, delete. Lose one of these
+    and the operator is back to editing the database by hand."""
+    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    for fn in ("startTrial(", "renew(", "renewYear(", "renewUntil(",
+               "suspend(", "pairCode(", "delBiz("):
+        assert fn in html, "the Command Center lost its %s control" % fn
+    assert "/license/trial" in html, "no way to start a free trial"
+    assert "months:12" in html, "no annual renewal"
+
+
+def test_the_money_line_is_shown():
+    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    for label in ("Monthly, paying", "Renew in 7 days", "On free trial"):
+        assert label in html, "missing from the Subscriptions header: " + label
+
+
+def test_totals_separate_paying_shops_from_trials():
+    """A trial shop is live but pays nothing. Counting it as revenue is the
+    one number an operator must never be lied to about."""
+    import datetime as _d
+
+    def _db(row):
+        class _T(_Tbl):
+            def execute(self):
+                return _Resp([row] if self.name == "businesses" else [])
+
+        class _DB:
+            def table(self, name):
+                return _T(name)
+        return _DB()
+
+    soon = (_d.date.today() + _d.timedelta(days=3)).isoformat()
+    trial = dict(BIZ, subscription_status="trial", plan="pro", plan_expires_on=soon)
+    t = ops.build_ops_data(_db(trial))["totals"]
+    assert t["trials"] == 1 and t["mrr"] == 0 and t["renew_7"] == 0
+
+    paid = dict(BIZ, subscription_status="active", plan="pro", plan_expires_on=soon)
+    out = ops.build_ops_data(_db(paid))
+    t = out["totals"]
+    assert t["mrr"] == 1499, "a paying Recover shop is Rs 1,499 a month"
+    assert t["renew_7"] == 1 and t["trials"] == 0
+    assert out["businesses"][0]["on_trial"] is False

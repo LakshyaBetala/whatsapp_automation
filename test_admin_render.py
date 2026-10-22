@@ -257,3 +257,41 @@ def test_inline_onclick_quotes_are_escaped_for_javascript():
            if "onclick='" in ln.replace(single, "")
            or (single in ln and good not in ln)]
     assert not bad, "unescaped quote in an inline onclick:\n" + "\n".join(bad[:5])
+
+
+# ── Slow must not look broken ─────────────────────────────────────────────
+@pytest.mark.parametrize("page", [
+    "admin_page", "admin_today", "admin_payments", "admin_reminders",
+    "admin_analytics", "admin_accounts", "admin_setup",
+])
+def test_every_page_carries_the_responsiveness_layer(page):
+    """A server-rendered page over a tunnel takes a second or three to come
+    back. Without the progress bar and the spinner that reads as a hang, which
+    is what made people press a slow button twice."""
+    html = _ok(maybe_await(getattr(admin, page)(token="tok", lang="english")))
+    # one bar, one listener: the layer guards against a second injection
+    assert html.count("id = 'asva-prog'") == 1, "layer missing or injected twice"
+    assert "__asvaFeedback" in html
+    assert "asva-prog" in html and "asva-busy" in html
+
+
+@pytest.mark.skipif(_NODE is None, reason="needs node to run the regex")
+def test_the_rescue_only_frees_buttons_asva_itself_made_busy():
+    """The 15-second rescue re-enables a button whose request died. It must
+    match only the labels ASVA sets while waiting: a button the page disabled
+    for its own reasons has to stay disabled."""
+    import json
+    import re as _re2
+    html = _ok(maybe_await(admin.admin_page(token="tok", lang="english")))
+    m = _re2.search(r"var BUSY = (/.*?/);", html)
+    assert m, "the rescue regex is gone"
+    script = (
+        "const BUSY=" + m.group(1) + ";"
+        "const busy=['...','Sending...','Saving...','Preparing...','Checking...'];"
+        "const real=['Send now','Save','Add a payment','Exclude','Bring back','Sent','Done'];"
+        "if(!busy.every(x=>BUSY.test(x))) { console.log('MISS'); process.exit(1); }"
+        "if(real.some(x=>BUSY.test(x))) { console.log('OVERREACH'); process.exit(1); }"
+        "console.log('OK');"
+    )
+    r = _subprocess.run([_NODE, "-e", script], capture_output=True, text=True)
+    assert r.returncode == 0 and "OK" in r.stdout, (r.stdout + r.stderr)[:400]
