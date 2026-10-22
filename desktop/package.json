@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.4.\n\nBills you export are always sent. A bill PDF dropped into the ASVA bills folder now goes out however old it is, and whenever you export it. Sent files move to the sent folder, and anything that could not go moves to skipped with the reason written down.\n\nAn old bill you re-export goes out as a payment reminder with the balance and a pay link, because that is usually why you are sending it again.\n\nFixed: customers sometimes saw \"Waiting for this message\" in WhatsApp. ASVA now keeps what it sent across a restart, so their phone can always fetch the message.\n\nBill messages are in English."
+      "releaseNotes": "ASVA 2.2.5.\n\nFour looks instead of two: Green, Blue, Midnight and the new Slate. Pick one under More, and it now carries through every screen rather than stopping at the menu.\n\nThe dark themes are easier to live with: a softer background instead of near-black, text that does not glare back at you, and the menu clearly separated from the page.\n\nASVA opens faster. It loads the screen you are looking at first instead of fetching all six at once, so Today is ready while the rest catch up behind it.\n\nButtons tell you what is happening. A slow action shows a spinner and a thin line at the top of the screen, and if something never comes back the button frees itself instead of sitting there looking stuck."
     },
     "files": [
       "main.js",
