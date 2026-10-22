@@ -32,13 +32,22 @@
   #app { display: flex; height: 100vh; }
   #side { width: 208px; background: var(--side); color: var(--side-ink); display: flex; flex-direction: column;
           flex-shrink: 0; overflow: hidden; transition: width .16s cubic-bezier(.16,1,.3,1); }
-  #brand { display: flex; align-items: center; gap: 11px; padding: 18px 18px 6px; cursor: pointer; user-select: none; }
+  #brand { display: flex; align-items: center; gap: 10px; padding: 18px 14px 6px; user-select: none; }
+  #brand img, #brand .wm { cursor: pointer; }
+  /* The fold control sits with the menu it folds, not across the window. */
+  #sidetoggle { margin-left: auto; border: 1px solid var(--side-line); background: transparent;
+    color: var(--side-dim); width: 24px; height: 24px; border-radius: 6px; cursor: pointer;
+    font-size: .72rem; line-height: 1; display: flex; align-items: center; justify-content: center;
+    flex: none; transition: transform .16s ease, color .12s ease; }
+  #sidetoggle:hover { color: var(--side-ink); background: var(--side-2); }
+  body.railed #sidetoggle { transform: rotate(180deg); }
   #brand img { width: 34px; height: 34px; flex-shrink: 0; }
   #brand .wm { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.04em; line-height: 1; white-space: nowrap; }
   /* Collapsed, the bar is a 58px rail of initials with the full name on hover,
      so a small window spends its width on the work, not on the menu. */
   body.railed #side { width: 58px; }
-  body.railed #brand { padding: 18px 12px 6px; justify-content: center; }
+  body.railed #brand { padding: 18px 0 6px; justify-content: center; gap: 0; }
+  body.railed #sidetoggle { display: none; }   /* the mark is the way back */
   body.railed #brand .wm, body.railed .nav small, body.railed #verlabel,
   body.railed #cosel, body.railed #statusbtn span:not(.dot) { display: none; }
   body.railed .nav { text-align: center; padding: 12px 0; font-size: 0; }
@@ -73,8 +82,6 @@
   .dot.bad { background: #e2574c; }
   #main { flex: 1; display: flex; flex-direction: column; background: var(--page); min-width: 0; }
   #topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; background: var(--bar); border-bottom: 1px solid var(--bar-line); font-size: .84rem; color: var(--ink-dim); flex-shrink: 0; flex-wrap: wrap; }
-  #railbtn { border: 1px solid var(--bar-line); background: var(--ctl); color: var(--ctl-ink); border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: .9rem; line-height: 1.2; }
-  #railbtn:hover { filter: brightness(.97); }
   /* A half-screen window stays a usable app: the rail folds itself. */
   @media (max-width: 980px) { body:not(.rail-pinned) #side { width: 58px; } }
   #topbar .tstat { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -317,7 +324,7 @@
 <body>
 <div id="app">
   <div id="side">
-    <div id="brand"><img src="logo.png" alt="ASVA"><span class="wm">ASVA</span></div>
+    <div id="brand"><img src="logo.png" alt="ASVA" onclick="toggleRail()" title="Hide or show the menu (Ctrl+B)"><span class="wm" onclick="toggleRail()">ASVA</span><button id="sidetoggle" onclick="toggleRail()" aria-label="Hide or show the menu" title="Hide or show the menu (Ctrl+B)">&#10094;</button></div>
     <select id="cosel" title="Switch company" style="display:none;margin:0 12px 12px;padding:8px;border-radius:6px;background:#17211b;color:#dfe8e2;border:1px solid #263a2c;width:calc(100% - 24px);font-size:.9rem"></select>
     <button class="nav on" data-v="today" data-ic="T">Today<small>Who paid, who to chase</small></button>
     <button class="nav" data-v="dash" data-ic="P">Parties<small>Dues and bills</small></button>
@@ -342,7 +349,7 @@
     <div id="topbar">
       <div class="tstat"><span class="dot" id="t-dot"></span><span id="t-sync">Tally sync: ...</span></div>
       <div style="display:flex;align-items:center;gap:10px">
-        <button id="railbtn" onclick="toggleRail()" title="Hide or show the menu (Ctrl+B)">&#9776;</button><button id="pagereload" onclick="reloadActive()" title="Refresh this page">Refresh</button>
+        <button id="pagereload" onclick="reloadActive()" title="Refresh this page">Refresh</button>
         <select id="langsel" title="Language" aria-label="Language" onchange="setLang(this.value)">
           <option value="english">English</option>
           <option value="hinglish">Hinglish</option>
@@ -508,52 +515,56 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, m => ({'&':'&amp;
 // (page #F7F6F3, cards #fff, borders #EAEAEA, text #17211b/#787774) to the same
 // dark tones the shell uses, while keeping the green primary + coloured chips.
 const WEBVIEW_DARK_CSS = `
+  /* The pages inside the tabs are the backend's, authored light. Midnight has
+     to restate every surface they use, or it lands half-dark: white cards,
+     pale chips, dark text on dark. Keep the status colours readable rather
+     than merely dark. */
   :root { color-scheme: dark; }
   html, body { background:#0f1512 !important; color:#dfe8e2 !important; }
-  .bar, .subhead, header, .sticky { background:#0f1512 !important; }
-  /* Surfaces: cards, tables, inputs, generic buttons */
-  .tablewrap, .usage, .subtabs, .modalbox, .msgprev, .statuscard, .card, .box,
-  table, thead, tbody, tr, td, .partycard, .sectionbox, .panel, .well,
-  input, select, textarea, button {
-    background-color:#14201a !important; color:#dfe8e2 !important;
-    border-color:#263a2c !important;
-  }
-  th { background:#14201a !important; color:#9fb7a6 !important; border-color:#263a2c !important; }
-  td { border-color:#24332b !important; }
-  tbody tr:hover td, tr:hover td { background:#1e2c23 !important; }
-  nav.topnav { background:#14201a !important; border-color:#263a2c !important; }
-  .topnav a { color:#EAEAEA !important; }
-  .topnav a:hover { background:#1e2c23 !important; }
-  h1,h2,h3,h4,b,strong { color:#eef3ef !important; }
-  a { color:#7fe0a6 !important; }
-  input::placeholder, textarea::placeholder { color:#9fb7a6 !important; }
-  ::-webkit-scrollbar-thumb { background:#263a2c !important; }
-  /* Keep the green primary + its variants readable on dark */
-  #save, .topnav a.on, .subtabs button.on, .cbsend, .ufill, .btn-apply,
-  [style*="background:#294d38"], [style*="background: #294d38"] {
-    background-color:#294d38 !important; color:#fff !important; border-color:#294d38 !important;
-  }
-  #save:hover, .cbsend:hover { background-color:#0c9a3f !important; }
-  .ubar { background:#24332b !important; }
-  /* Catch plain-white inline surfaces that classes miss */
-  [style*="background:#fff"], [style*="background: #fff"],
-  [style*="background:#ffffff"], [style*="background: #ffffff"] {
-    background-color:#14201a !important;
-  }
-`;
-
-// The pages inside the tabs are the backend's, drawn in ASVA green. A theme
-// only has to move that one accent (and, for Midnight, the whole surface), so
-// each theme is a small sheet injected into every webview. Accent-only themes
-// keep the page light, which is why they stay readable everywhere.
-const WEBVIEW_BLUE_CSS = `
-  a { color:#2454b3 !important; }
+  .wrap, .bar, .subhead, header, .sticky, .topnav { background:transparent !important; }
+  h1, h2, h3, h4, b, strong, .nm, .camt, .kpi .n, .hcard .n { color:#eef3ef !important; }
+  .muted, .hint, .sub, .mt, .ago, .l, small, th { color:#9fb7a6 !important; }
+  .card, .hcard, .clist, .panel, .box, .tablewrap, .modalbox, .statuscard, .usage,
+  .partycard, .sectionbox, .well, .msgprev, .tl, .foldsec, details {
+    background:#16221b !important; border-color:#2c4536 !important; color:#dfe8e2 !important; }
+  table { background:transparent !important; border-color:#2c4536 !important; }
+  th { background:#14201a !important; border-color:#2c4536 !important; }
+  td { border-color:#223228 !important; color:#dfe8e2 !important; }
+  tbody tr:hover td, tr:hover td, .crow:hover { background:#1b2a21 !important; }
+  .crow, .xrow, .anrow, .tl-row, .irow { border-color:#223228 !important; }
+  input, select, textarea { background:#111a15 !important; color:#eef3ef !important;
+    border-color:#2c4536 !important; }
+  input::placeholder, textarea::placeholder { color:#7d9488 !important; }
+  button, .ntbtn, .op, .cacts .op, button.ghost { background:#1e2c23 !important;
+    color:#dfe8e2 !important; border-color:#2c4536 !important; }
+  a, .plink, .morelink { color:#7fe0a6 !important; }
+  /* Status colours: darker grounds, brighter ink, so they still mean something */
+  .tag.ok, .chip.paid, .synp.ok { background:#16351f !important; color:#7fe0a6 !important; border-color:transparent !important; }
+  .tag.due, .chip.due, .synp.stale, .nudge { background:#3a3320 !important; color:#f0d68a !important; border-color:#4a411f !important; }
+  .tag.warn { background:#3a3320 !important; color:#f0d68a !important; }
+  .late, .latechip, .tag.late, .chip.late { background:#3d1f1d !important; color:#ff9e95 !important; }
+  .hcard.accent { background:#16351f !important; border-color:#2b5a3a !important; }
+  .barwrap { background:#223228 !important; }
+  /* The one accent that must stay loud: the primary action */
   #save, .topnav a.on, .subtabs button.on, .cbsend, .ufill, .btn-apply, .cacts .rem,
   button.primary, .nudgebtn, [style*="background:#0a7d33"], [style*="background: #0a7d33"] {
-    background-color:#2454b3 !important; border-color:#2454b3 !important; color:#fff !important;
-  }
+    background-color:#0a7d33 !important; border-color:#0a7d33 !important; color:#fff !important; }
+  #save:hover, .cbsend:hover, .cacts .rem:hover { background-color:#0c9a3f !important; }
+  ::-webkit-scrollbar-thumb { background:#2c4536 !important; }
+  :focus-visible { outline-color:#7fe0a6 !important; }
+`;
+
+const WEBVIEW_BLUE_CSS = `
+  /* Blue keeps the pages light and moves only what carries meaning: the
+     accent, links, the focus ring, and the one accented card. */
+  a, .plink, .morelink { color:#2454b3 !important; }
+  #save, .topnav a.on, .subtabs button.on, .cbsend, .ufill, .btn-apply, .cacts .rem,
+  button.primary, .nudgebtn, [style*="background:#0a7d33"], [style*="background: #0a7d33"] {
+    background-color:#2454b3 !important; border-color:#2454b3 !important; color:#fff !important; }
   #save:hover, .cbsend:hover, .cacts .rem:hover { background-color:#0f3f9c !important; }
   .hcard.accent { background:#eaf0fc !important; border-color:#c9d6f2 !important; }
+  .tag.ok, .chip.paid, .synp.ok { background:#e7f0ff !important; color:#1a3f8f !important; }
+  .idx, .knum, .step, .crank { color:#2454b3 !important; }
   :focus-visible { outline-color:#1f5ed9 !important; }
 `;
 
@@ -602,7 +613,7 @@ function applyRail() {
   const railed = localStorage.getItem('asva_rail') === '1';
   document.body.classList.toggle('railed', railed);
   document.body.classList.toggle('rail-pinned', !railed);
-  const b = document.getElementById('railbtn');
+  const b = document.getElementById('sidetoggle');
   if (b) b.title = railed ? 'Show the menu (Ctrl+B)' : 'Hide the menu (Ctrl+B)';
 }
 function toggleRail() {
@@ -1186,6 +1197,11 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.2.3': [
+    'Updates install cleanly: closing ASVA stops the Tally reader every time, and an update waits for everything to stop before installing.',
+    'The fold control sits next to the ASVA mark now. Click the mark or the arrow, or press Ctrl+B.',
+    'Midnight and Blue are consistent across every screen: cards, tables, chips and inputs all follow the theme.',
+  ],
   '2.2.2': [
     'The menu folds away: click the ASVA mark or press Ctrl+B. A narrow window folds it by itself, so ASVA stays usable at any size.',
     'Three looks under More: Green, Blue and Midnight. The whole app follows your choice.',

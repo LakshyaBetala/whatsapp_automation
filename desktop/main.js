@@ -259,6 +259,10 @@ const SPECS = {
   drainer: agentService(['--drain-outbox']),
 };
 const services = {}; // name -> { proc, restarts }
+// One-off Tally reader runs (setup steps, manual refresh). They are not in
+// `services`, so without this they outlived a close and kept the installer
+// from replacing asva-agent.exe.
+const oneOffAgents = new Set();
 const logs = {};     // name -> ring buffer of recent output lines
 
 function sendToWindow(channel, payload) {
@@ -420,7 +424,8 @@ function runAgent(args, timeoutMs = 90000) {
     } catch (e) {
       return resolve({ ok: false, error: 'Setup helper could not start.' });
     }
-    const done = (v) => { clearTimeout(timer); resolve(v); };
+    oneOffAgents.add(proc);
+    const done = (v) => { clearTimeout(timer); oneOffAgents.delete(proc); resolve(v); };
     const timer = setTimeout(() => {
       try { proc.kill(); } catch (_) {}
       done({ ok: false, error: 'That took too long. Please try again.' });
@@ -457,6 +462,26 @@ function stopAll() {
     if (p) killTree(p);
     if (services[name]) services[name].proc = null;
   }
+  for (const p of oneOffAgents) killTree(p);
+  oneOffAgents.clear();
+  // Belt and braces: a one-off run whose parent handle we lost still holds the
+  // exe, and that is exactly what blocks an update. The name is ours alone.
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/IM', 'asva-agent.exe', '/T', '/F'],
+                { windowsHide: true, timeout: 8000 });
+    } catch (e) { /* nothing was running */ }
+  }
+}
+
+// True once no ASVA child process is left holding a file the installer needs.
+function childrenGone() {
+  if (process.platform !== 'win32') return true;
+  try {
+    const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq asva-agent.exe', '/NH'],
+                        { windowsHide: true, encoding: 'utf8', timeout: 8000 });
+    return !(r.stdout || '').toLowerCase().includes('asva-agent.exe');
+  } catch (e) { return true; }
 }
 
 // The version we're about to install (from update-downloaded), shown on the splash.
@@ -606,12 +631,22 @@ function applyUpdateAndQuit() {
   // A clear pause so the "updating, will reopen, data safe" splash is read before
   // the process is replaced (the reinstall itself runs windowless; the durable
   // OS notification + welcome-back on relaunch cover that ~minute).
-  setTimeout(() => {
+  // Hand over only once our children are really gone: NSIS cannot replace a
+  // file that is still open, and a half-applied update is what makes an owner
+  // think the app broke. Poll briefly, then go anyway rather than hang.
+  const started = Date.now();
+  const handOver = () => {
     try {
       if (autoUpdater) autoUpdater.quitAndInstall(true, true);   // isSilent, isForceRunAfter
       else app.quit();
     } catch (e) { try { app.quit(); } catch (_) {} }
-  }, 3200);
+  };
+  const waitThenInstall = () => {
+    if (childrenGone() || Date.now() - started > 12000) return handOver();
+    try { stopAll(); } catch (e) {}
+    setTimeout(waitThenInstall, 800);
+  };
+  setTimeout(waitThenInstall, 3200);
 }
 
 // ── Health polling (done in main to avoid renderer CORS) ──────────────────
