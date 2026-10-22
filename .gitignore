@@ -74,3 +74,6 @@ dev/*.log
 
 # build transcripts (electron-builder / pyinstaller)
 *.log
+
+# Playwright MCP scratch output (screenshots, page snapshots)
+.playwright-mcp/
