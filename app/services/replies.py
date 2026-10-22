@@ -37,6 +37,9 @@ from app.services.templates import inr
 log = logging.getLogger(__name__)
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 
+FYI = "reply_fyi"        # an owner notice that asks nothing of them
+FYI_QUIET_HOURS = 6      # at most one of those per party in that window
+
 _PAID_RE = re.compile(r"^\s*paid\b(.*)$", re.IGNORECASE)
 _AMOUNT_RE = re.compile(r"(\d[\d,]*)\s*(k|hazaar|hazar|thousand)?", re.IGNORECASE)
 
@@ -83,6 +86,42 @@ def _promise_hold(promise_date: str) -> _dt.datetime:
 async def _notify_owner(business_id: str, text: str) -> None:
     try:
         await whatsapp.notify_owner(business_id, text)
+    except Exception:
+        log.exception("owner notify failed (reply capture)")
+
+
+def _told_about_recently(business_id: str, client_id: str | None) -> bool:
+    """Has this owner already had a nothing-to-do notice about this party today?
+
+    A party who types four half-sentences ("hello", "ok", "bhai", "dekho") would
+    otherwise ring the owner's phone four times to say ASVA did nothing. Once is
+    information; four times is why people mute a tool.
+    """
+    if not client_id:
+        return False
+    try:
+        since = (_now() - _dt.timedelta(hours=FYI_QUIET_HOURS)).isoformat()
+        r = (require_db().table("messages").select("id")
+             .eq("business_id", business_id).eq("client_id", client_id)
+             .eq("template_name", FYI).gte("created_at", since).limit(1).execute())
+        return bool(r.data)
+    except Exception:
+        return False          # unknown: tell the owner rather than lose the reply
+
+
+async def _fyi_owner(business_id: str, client_id: str | None, text: str) -> None:
+    """An owner notice that carries no action for them beyond "have a look".
+
+    Held to one per party per FYI_QUIET_HOURS. Everything ASVA actually DID
+    (paused reminders, queued a payment, a dispute) goes through _notify_owner
+    and is never held back.
+    """
+    if _told_about_recently(business_id, client_id):
+        log.info("Reply FYI held back: owner already told about %s today", client_id)
+        return
+    try:
+        await whatsapp.notify_owner(business_id, text, template_name=FYI,
+                                    client_id=client_id)
     except Exception:
         log.exception("owner notify failed (reply capture)")
 
@@ -264,7 +303,7 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
         # AI off, rate-limited or failing: never guess, never pause, never reply
         # to the customer - but show the owner the exact words so the reply is
         # not silently lost.
-        await _notify_owner(business_id,
+        await _fyi_owner(business_id, client_id,
             f'{name} replied: "{text[:300]}". ASVA could not read it automatically '
             f"right now, so reminders are unchanged. Message {name} yourself, or reply "
             f"CHASE {name} / STOP {name}.")
@@ -295,10 +334,13 @@ async def capture_reply(client: dict, text: str, *, media_b64: str | None = None
 
     # 4. Confidence gate: dispute / unclear / low confidence -> owner decides, no pause.
     if kind in ("dispute", "unclear") or conf < settings.promise_confidence_threshold:
-        await _notify_owner(business_id,
-            f'{name} replied: "{text[:300]}". ASVA did NOT act on this (it needs your '
-            f"eye). Reminders are unchanged. Message {name} yourself, or reply "
-            f"CHASE {name} / STOP {name}.")
+        msg = (f'{name} replied: "{text[:300]}". ASVA did NOT act on this (it needs your '
+               f"eye). Reminders are unchanged. Message {name} yourself, or reply "
+               f"CHASE {name} / STOP {name}.")
+        if kind == "dispute":
+            await _notify_owner(business_id, msg)   # a complaint always reaches the owner
+        else:
+            await _fyi_owner(business_id, client_id, msg)
         return True
 
     # Confident paid_claim.

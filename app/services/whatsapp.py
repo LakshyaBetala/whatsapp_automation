@@ -313,8 +313,14 @@ async def send_template(
     )
 
 
-async def notify_owner(business_id: str, alert_text: str) -> dict:
-    """Send a short alert to the business owner's personal WhatsApp."""
+async def notify_owner(business_id: str, alert_text: str, *,
+                       template_name: str = "openwa_custom",
+                       client_id: Optional[str] = None) -> dict:
+    """Send a short alert to the business owner's personal WhatsApp.
+
+    `template_name` names the kind of notice in the messages log, which is how
+    callers that must not repeat themselves (e.g. the WhatsApp-disconnected
+    notice) see whether this owner has already been told."""
     db = require_db()
     biz = (
         db.table("businesses")
@@ -334,5 +340,7 @@ async def notify_owner(business_id: str, alert_text: str) -> dict:
         plan=Plan(biz.data["plan"]),
         message_type=MessageType.owner_alert,
         language=Lang.hi,
+        template_name=template_name,
+        client_id=client_id,   # which party this notice was about (dedup lookups)
         channel="platform",  # owner-facing → company number when configured
     )

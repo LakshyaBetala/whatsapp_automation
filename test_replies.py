@@ -23,6 +23,7 @@ class Rec:
     def __init__(self):
         self.created = []
         self.owner = []
+        self.templates = []
         self.proof = []
 
 
@@ -35,8 +36,9 @@ def _setup(monkeypatch, verdict=None):
         return {"id": "p1"}
     monkeypatch.setattr(replies.promises, "create", fake_create)
 
-    async def fake_notify(bid, text):
+    async def fake_notify(bid, text, *, template_name=None, client_id=None):
         rec.owner.append(text)
+        rec.templates.append(template_name)
     monkeypatch.setattr(replies.whatsapp, "notify_owner", fake_notify)
 
     async def fake_classify(text):
@@ -293,3 +295,40 @@ def test_final_intent_is_stored(monkeypatch):
                         lambda db, rid, it: stored.append((rid, it)))
     _run("statement bhejo")
     assert stored == [("row1", "statement_request")]
+
+
+# ── the quiet window on notices that ask nothing of the owner ──────────────
+def _told_before(monkeypatch, already: bool):
+    """Pretend ASVA already sent (or did not send) an FYI about this party."""
+    monkeypatch.setattr(replies, "_told_about_recently",
+                        lambda bid, cid: already)
+
+
+def test_vague_reply_does_not_ring_the_owner_twice(monkeypatch):
+    # First vague message: the owner hears about it, tagged as an FYI so the
+    # next one can be recognised as a repeat.
+    rec = _setup(monkeypatch, verdict={"intent": "unclear", "confidence": 0.9})
+    _told_before(monkeypatch, False)
+    assert _run("bhai dekho") is True
+    assert len(rec.owner) == 1 and rec.templates == [replies.FYI]
+
+    # Second one within the window: ASVA still acts the same, says nothing.
+    rec = _setup(monkeypatch, verdict={"intent": "unclear", "confidence": 0.9})
+    _told_before(monkeypatch, True)
+    assert _run("bhai dekho") is True
+    assert rec.owner == []
+
+
+def test_a_dispute_always_reaches_the_owner(monkeypatch):
+    rec = _setup(monkeypatch, verdict={"intent": "dispute", "confidence": 0.95})
+    _told_before(monkeypatch, True)       # even right after an FYI about them
+    assert _run("maal kharab tha, paisa nahi dunga") is True
+    assert len(rec.owner) == 1 and rec.templates == [None]   # a plain owner alert
+
+
+def test_a_confident_promise_is_never_held_back(monkeypatch):
+    rec = _setup(monkeypatch, verdict={"intent": "promise", "confidence": 0.95,
+                                       "promise_date": FUTURE, "amount": None})
+    _told_before(monkeypatch, True)
+    assert _run("agle hafte de dunga") is True
+    assert rec.created and len(rec.owner) == 1

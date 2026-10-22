@@ -1,0 +1,226 @@
+- generic [active] [ref=f2e1]:
+  - banner [ref=f2e2]:
+    - generic [ref=f2e4]:
+      - link [ref=f2e5] [cursor=pointer]:
+        - /url: /
+        - img "ASVA logo" [ref=f2e6]
+        - text: ASVA
+      - navigation [ref=f2e7]:
+        - link "How it works" [ref=f2e8] [cursor=pointer]:
+          - /url: /how-it-works
+        - link "Features" [ref=f2e9] [cursor=pointer]:
+          - /url: /features
+        - link "Pricing" [ref=f2e10] [cursor=pointer]:
+          - /url: /pricing
+        - link "Compare" [ref=f2e11] [cursor=pointer]:
+          - /url: /compare
+        - link "↓ Download ASVA" [ref=f2e12] [cursor=pointer]:
+          - /url: /download
+  - main [ref=f2e13]:
+    - generic [ref=f2e15]:
+      - link "Free for 14 days, then from Rs 699 a month start free →" [ref=f2e16] [cursor=pointer]:
+        - /url: /download
+        - generic [ref=f2e17]: Free for 14 days, then from Rs 699 a month
+        - generic [ref=f2e18]: start free →
+      - generic [ref=f2e19]:
+        - generic [ref=f2e20]:
+          - heading "Stop chasing. Get paid." [level=1] [ref=f2e21]:
+            - generic [ref=f2e22]:
+              - generic [ref=f2e23]: Stop
+              - generic [ref=f2e24]: chasing.
+            - generic [ref=f2e25]: Get paid.
+          - paragraph [ref=f2e27]: ASVA sends every new Tally bill on WhatsApp, chases the overdue ones from your own number, and posts the receipt into Tally the moment you confirm a payment.
+          - generic [ref=f2e28]:
+            - link "Download for Windows" [ref=f2e29] [cursor=pointer]:
+              - /url: https://app.tryasva.com/download/latest
+            - link "See how it works →" [ref=f2e30] [cursor=pointer]:
+              - /url: /how-it-works
+          - generic [ref=f2e31]:
+            - generic [ref=f2e32]: Collected so far
+            - generic [ref=f2e33]: ₹0+ for shops running ASVA
+        - img "A WhatsApp chat where ASVA sends a bill and a payment reminder from the shop's own number, and pauses the moment the customer replies." [ref=f2e34]:
+          - generic [ref=f2e36]: from your own number
+          - generic [ref=f2e38]:
+            - generic [ref=f2e39]:
+              - generic [ref=f2e40]: ST
+              - generic [ref=f2e41]:
+                - generic [ref=f2e42]: Sharma Traders
+                - generic [ref=f2e43]: online
+            - generic [ref=f2e44]:
+              - generic [ref=f2e45]: "Bill #4021 from Sharma Traders: ₹18,400, due 15 Aug. Pay by UPI."
+              - generic [ref=f2e46]: "Reminder: ₹18,400 is still pending on bill #4021."
+              - generic [ref=f2e47]: will send payment on the 5th sir
+              - generic [ref=f2e48]: Noted. Reminders paused till the 5th.
+    - generic [ref=f2e50]:
+      - text: The problem
+      - heading [level=2] [ref=f2e51]:
+        - text: You already earned it.
+        - emphasis [ref=f2e52]: Where is it?
+      - paragraph [ref=f2e53]: Indian distributors carry 30 to 160 days of credit. That's your cash, sold, invoiced, delivered, sitting in someone else's account. Every day you don't chase, you're their unpaid banker.
+      - generic [ref=f2e54]:
+        - generic [ref=f2e55]:
+          - generic [ref=f2e56]: Credit cycle
+          - generic [ref=f2e57]: 0days
+          - heading "You're their banker" [level=3] [ref=f2e58]
+          - paragraph [ref=f2e59]: Every rupee sold sits stuck for weeks, sometimes months, before it comes home. Interest-free.
+        - generic [ref=f2e60]:
+          - generic [ref=f2e61]: Ledger
+          - generic [ref=f2e62]: "0"
+          - heading "Too many to chase" [level=3] [ref=f2e63]
+          - paragraph [ref=f2e64]: "Debtors in a single Tally test. Manual follow-up breaks: small parties slip through, big ones get chased twice."
+        - generic [ref=f2e65]:
+          - generic [ref=f2e66]: With ASVA
+          - generic [ref=f2e67]: ₹0L+
+          - heading "Collected so far" [level=3] [ref=f2e68]
+          - paragraph [ref=f2e69]: Collected by shops running ASVA. Money they had already earned, just waiting to be asked for from the right number, at the right time.
+      - generic [ref=f2e70]:
+        - generic [ref=f2e71]: The one line
+        - paragraph [ref=f2e72]:
+          - text: ASVA is a small helper on your Tally computer that sends your customers their bills and reminders on WhatsApp all day, so your money comes in
+          - mark [ref=f2e73]: without a single phone call
+          - text: .
+    - generic [ref=f2e74]:
+      - generic [ref=f2e75]:
+        - generic [ref=f2e76]:
+          - generic [ref=f2e77]: The fix
+          - heading "What ASVA changes." [level=2] [ref=f2e78]
+          - paragraph [ref=f2e79]: Same Tally. Same WhatsApp. A quiet loop between them that runs by itself.
+        - generic [ref=f2e80]:
+          - generic [ref=f2e81]:
+            - generic [ref=f2e82]: Before ASVA
+            - generic [ref=f2e83]: After ASVA
+          - generic [ref=f2e84]:
+            - generic [ref=f2e85]: × Staff sits with a call list and dials one by one
+            - generic [ref=f2e86]: ✓ Reminders go out on their own, timed to each party's credit days
+          - generic [ref=f2e87]:
+            - generic [ref=f2e88]: × The same customer gets nudged twice, or not at all
+            - generic [ref=f2e89]: ✓ One message per customer, with every open bill in it
+          - generic [ref=f2e90]:
+            - generic [ref=f2e91]: × Someone paid last week and you find out when you check
+            - generic [ref=f2e92]: ✓ A "paid" reply or screenshot reaches you the same minute
+          - generic [ref=f2e93]:
+            - generic [ref=f2e94]: × Bills sent by email, most never opened
+            - generic [ref=f2e95]: ✓ Bills reach the customer on WhatsApp minutes after Tally
+          - generic [ref=f2e96]:
+            - generic [ref=f2e97]: × Reminders from an unknown number, ignored
+            - generic [ref=f2e98]: ✓ Messages come from your own number, so they get read
+          - generic [ref=f2e99]:
+            - generic [ref=f2e100]: × Evenings on the phone, mornings on Tally
+            - generic [ref=f2e101]: "✓ One evening digest: who paid, who to call tomorrow"
+          - generic [ref=f2e102]: Same Tally, same WhatsApp, same customers. The work moves off your evenings.
+      - generic [ref=f2e103]:
+        - generic [ref=f2e104]:
+          - generic [ref=f2e105]: How it works
+          - heading "Four steps. Then it runs on its own." [level=2] [ref=f2e106]
+          - paragraph [ref=f2e107]: No new habits. You keep using Tally and WhatsApp exactly as you do today.
+        - generic [ref=f2e108]:
+          - generic [ref=f2e109]:
+            - generic [ref=f2e110]: Read
+            - heading "Tally is the truth" [level=3] [ref=f2e111]
+            - paragraph [ref=f2e112]: ASVA sits next to Tally and reads what is outstanding. The only thing it writes back is a receipt voucher, after you confirm a payment.
+          - generic [ref=f2e113]:
+            - generic [ref=f2e114]: Decide
+            - heading "ASVA composes" [level=3] [ref=f2e115]
+            - paragraph [ref=f2e116]: It picks who to nudge today by each party's credit terms, then drafts a message in their language.
+          - generic [ref=f2e117]:
+            - generic [ref=f2e118]: Send
+            - heading "Your own WhatsApp" [level=3] [ref=f2e119]
+            - paragraph [ref=f2e120]: The bill and reminder go out from your shop's number, with a UPI pay link. Customers install nothing.
+          - generic [ref=f2e121]:
+            - generic [ref=f2e122]: Reconcile
+            - heading "Payment posts back" [level=3] [ref=f2e123]
+            - paragraph [ref=f2e124]: A "paid" reply pauses reminders. You confirm the amount and post the receipt into Tally in one tap.
+        - link "See the full walkthrough →" [ref=f2e125] [cursor=pointer]:
+          - /url: /how-it-works
+      - generic [ref=f2e126]:
+        - generic [ref=f2e127]:
+          - generic [ref=f2e128]: Why ASVA
+          - heading "Built so your customers stay yours." [level=2] [ref=f2e129]
+        - generic [ref=f2e130]:
+          - generic [ref=f2e131]:
+            - heading "Your own WhatsApp number" [level=3] [ref=f2e132]
+            - paragraph [ref=f2e133]: Customers hear from your shop, not an unknown brand, so the message gets read. Sending is paced and daytime only.
+          - generic [ref=f2e134]:
+            - heading "ASVA never touches the money" [level=3] [ref=f2e135]
+            - paragraph [ref=f2e136]: Every reminder carries a UPI link straight to your account. No gateway, no cut, no wallet in between.
+          - generic [ref=f2e137]:
+            - heading "Tally stays your book" [level=3] [ref=f2e138]
+            - paragraph [ref=f2e139]: ASVA reads your bills and only ever writes a receipt voucher, after you confirm the payment.
+        - link "See everything ASVA does →" [ref=f2e140] [cursor=pointer]:
+          - /url: /features
+    - generic [ref=f2e142]:
+      - generic [ref=f2e143]:
+        - generic [ref=f2e144]: Questions
+        - heading "Straight answers before you download." [level=2] [ref=f2e145]
+        - paragraph [ref=f2e146]: What shop owners and their accountants ask us most.
+      - group [ref=f2e147]:
+        - generic "What is the best WhatsApp payment reminder software for TallyPrime? +" [ref=f2e148] [cursor=pointer]
+      - group [ref=f2e149]:
+        - generic "Does ASVA send reminders from my own WhatsApp number? +" [ref=f2e150] [cursor=pointer]
+      - group [ref=f2e151]:
+        - generic "Does ASVA change my Tally data? +" [ref=f2e152] [cursor=pointer]
+      - group [ref=f2e153]:
+        - generic "How much does ASVA cost? +" [ref=f2e154] [cursor=pointer]
+      - group [ref=f2e155]:
+        - generic "Do my customers need an app? +" [ref=f2e156] [cursor=pointer]
+      - group [ref=f2e157]:
+        - generic "Which languages does ASVA use? +" [ref=f2e158] [cursor=pointer]
+      - group [ref=f2e159]:
+        - generic "How do I get ASVA set up? +" [ref=f2e160] [cursor=pointer]
+      - paragraph [ref=f2e161]:
+        - text: Still deciding? Message us on WhatsApp at
+        - link "+91 93441 10272" [ref=f2e162] [cursor=pointer]:
+          - /url: https://wa.me/919344110272?text=I%20want%20to%20try%20ASVA
+        - text: and we will tell you honestly whether ASVA fits your books.
+    - generic [ref=f2e164]:
+      - generic [ref=f2e165]: Get started
+      - heading "See your first reminders go out today" [level=2] [ref=f2e166]
+      - paragraph [ref=f2e167]: Send us a message and we will connect your Tally and set up your first batch together.
+      - link "Talk to us on WhatsApp" [ref=f2e168] [cursor=pointer]:
+        - /url: https://wa.me/919344110272?text=I%20want%20to%20try%20ASVA
+  - contentinfo [ref=f2e169]:
+    - generic [ref=f2e170]:
+      - generic [ref=f2e171]:
+        - generic [ref=f2e172]:
+          - generic [ref=f2e173]:
+            - img "ASVA logo" [ref=f2e174]
+            - text: ASVA
+          - paragraph [ref=f2e175]: The recovery agent for Indian distributors on TallyPrime. Collect faster. Stop chasing.
+          - paragraph [ref=f2e176]: An Almmatix product.
+        - generic [ref=f2e177]:
+          - generic [ref=f2e178]: Product
+          - link "How it works" [ref=f2e179] [cursor=pointer]:
+            - /url: /how-it-works
+          - link "Features" [ref=f2e180] [cursor=pointer]:
+            - /url: /features
+          - link "Pricing" [ref=f2e181] [cursor=pointer]:
+            - /url: /pricing
+          - link "Setup guide" [ref=f2e182] [cursor=pointer]:
+            - /url: /guide
+          - link "Use cases" [ref=f2e183] [cursor=pointer]:
+            - /url: /use-cases
+        - generic [ref=f2e184]:
+          - generic [ref=f2e185]: Get started
+          - link "Download for Windows" [ref=f2e186] [cursor=pointer]:
+            - /url: /download
+          - link "Talk to us on WhatsApp" [ref=f2e187] [cursor=pointer]:
+            - /url: https://wa.me/919344110272?text=I%20want%20to%20try%20ASVA
+          - link "WhatsApp +91 93441 10272" [ref=f2e188] [cursor=pointer]:
+            - /url: https://wa.me/919344110272?text=I%20want%20to%20try%20ASVA
+          - link "almmatix@gmail.com" [ref=f2e189] [cursor=pointer]:
+            - /url: mailto:almmatix@gmail.com
+        - generic [ref=f2e190]:
+          - generic [ref=f2e191]: Legal
+          - link "Privacy Policy" [ref=f2e192] [cursor=pointer]:
+            - /url: /privacy
+          - link "Terms of Service" [ref=f2e193] [cursor=pointer]:
+            - /url: /terms
+      - generic [ref=f2e194]:
+        - generic [ref=f2e195]: © 2026 Almmatix. ASVA is an Almmatix product.
+        - generic [ref=f2e196]:
+          - text: "Talk to a human:"
+          - link "+91 93441 10272" [ref=f2e197] [cursor=pointer]:
+            - /url: https://wa.me/919344110272?text=I%20want%20to%20try%20ASVA
+          - text: ·
+          - link "almmatix@gmail.com" [ref=f2e198] [cursor=pointer]:
+            - /url: mailto:almmatix@gmail.com

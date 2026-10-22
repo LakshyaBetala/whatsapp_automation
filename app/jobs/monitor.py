@@ -12,7 +12,7 @@ import httpx
 
 from app.config import settings
 from app.db import require_db
-from app.services import alerts, monitoring
+from app.services import alerts, monitoring, wa_notice
 from app.services import whatsapp
 
 log = logging.getLogger(__name__)
@@ -42,8 +42,12 @@ async def run() -> None:
             health.setdefault("system", {})["bot_wa"] = {"ok": bot}
         problems = monitoring.evaluate(health)
         result = alerts.reconcile(db, problems)
+        # An operator email does not help a shopkeeper whose WhatsApp dropped;
+        # only they can re-scan. wa_notice tells them, at most once a day.
+        told = await wa_notice.run(db, problems, health)
         monitoring.stamp_job(db, "monitor", ok=True,
-                             detail=f"{len(problems)} open, {result['emailed']} emailed")
+                             detail=f"{len(problems)} open, {result['emailed']} emailed, "
+                                    f"{told} owner notices")
         if result["opened"] or result["resolved"]:
             log.info("Monitor: opened=%s resolved=%s emailed=%s",
                      result["opened"], result["resolved"], result["emailed"])
