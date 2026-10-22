@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.5.\n\nFour looks instead of two: Green, Blue, Midnight and the new Slate. Pick one under More, and it now carries through every screen rather than stopping at the menu.\n\nThe dark themes are easier to live with: a softer background instead of near-black, text that does not glare back at you, and the menu clearly separated from the page.\n\nASVA opens faster. It loads the screen you are looking at first instead of fetching all six at once, so Today is ready while the rest catch up behind it.\n\nButtons tell you what is happening. A slow action shows a spinner and a thin line at the top of the screen, and if something never comes back the button frees itself instead of sitting there looking stuck."
+      "releaseNotes": "ASVA 2.2.6.\n\nThe dark themes are easier on the eyes. The page sits on a soft charcoal instead of near-black, text comes down off pure white, and the menu is clearly separated from the screen beside it, so a long evening on ASVA stops glaring back at you.\n\nGreen and Blue are exactly as they were, and nothing moved on any screen: same words, same layout, only the colours of the dark themes."
     },
     "files": [
       "main.js",

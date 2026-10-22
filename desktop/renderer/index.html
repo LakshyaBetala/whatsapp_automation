@@ -14,28 +14,29 @@
     --side: #17211b; --side-2: #1e2c23; --side-on: #294d38; --side-line: #263a2c;
     --side-ink: #dfe8e2; --side-dim: #9fb7a6; --accent: #0a7d33;
     --page: #F7F6F3; --bar: #fff; --bar-line: #EAEAEA; --ink: #2F3437; --ink-dim: #787774;
-    --ctl: #F7F6F3; --ctl-ink: #3a4a41; --link: #0a7d33;
+    --ctl: #F7F6F3; --ctl-ink: #3a4a41; --panel: #fff; --link: #0a7d33;
   }
   body[data-theme="blue"] {
     --side: #121b28; --side-2: #1d2430; --side-on: #2454b3; --side-line: #2c333e;
     --side-ink: #e8ebf1; --side-dim: #9299a2; --accent: #2454b3;
     --page: #f7fafe; --bar: #fff; --bar-line: #dfe3ea; --ink: #121b28; --ink-dim: #626a75;
-    --ctl: #f7fafe; --ctl-ink: #3a4350; --link: #2454b3;
+    --ctl: #f7fafe; --ctl-ink: #3a4350; --panel: #fff; --link: #2454b3;
   }
-  /* Dark themes sit on a soft charcoal, not near-black: pure #0a0a0a under
-     near-white text haloes the letters and is what makes long evenings hurt.
-     These stay well above the contrast floor while reading calmly. */
+  /* The two dark themes share one rule: the page is the lowest surface and
+     everything above it gets LIGHTER, never darker. Near-black under
+     near-white is the pairing that glares in a dim room, so the ground is a
+     soft charcoal and the text comes down off pure white. Still ~13:1. */
   body[data-theme="midnight"] {
-    --side: #1a231d; --side-2: #24302a; --side-on: #2f6b45; --side-line: #2c3a33;
-    --side-ink: #dde7e0; --side-dim: #9bb0a3; --accent: #35a862;
-    --page: #111713; --bar: #1a231d; --bar-line: #2c3a33; --ink: #dbe5de; --ink-dim: #9aae9f;
-    --ctl: #1f2a23; --ctl-ink: #cfe0d5; --link: #7fe0a6;
+    --side: #1b241e; --side-2: #26332c; --side-on: #2f6b45; --side-line: #2c3a33;
+    --side-ink: #dde7e0; --side-dim: #9db2a4; --accent: #2f9e5a;
+    --page: #141b17; --bar: #1b241e; --bar-line: #2c3a33; --ink: #dde7e0; --ink-dim: #9db2a4;
+    --ctl: #26332c; --ctl-ink: #e4ede7; --panel: #1e2922; --link: #7fe0a6;
   }
   body[data-theme="slate"] {
-    --side: #1c232b; --side-2: #262f39; --side-on: #2f5aa8; --side-line: #313b46;
-    --side-ink: #dde4ec; --side-dim: #9cabb9; --accent: #4b82e8;
-    --page: #12171c; --bar: #1c232b; --bar-line: #313b46; --ink: #dde4ec; --ink-dim: #9aa6b2;
-    --ctl: #1f262d; --ctl-ink: #cdd6e0; --link: #8ab4f8;
+    --side: #1b222a; --side-2: #252e38; --side-on: #2f5aa8; --side-line: #2f3944;
+    --side-ink: #dbe2ea; --side-dim: #98a6b4; --accent: #4b82e8;
+    --page: #141a20; --bar: #1b222a; --bar-line: #2f3944; --ink: #dbe2ea; --ink-dim: #98a6b4;
+    --ctl: #252e38; --ctl-ink: #e2e8f0; --panel: #1e2630; --link: #8ab4f8;
   }
   html, body { margin: 0; height: 100%; font-family: 'Anek Latin','Anek Devanagari',system-ui,'Segoe UI',sans-serif; color: var(--ink); }
   #app { display: flex; height: 100vh; }
@@ -115,7 +116,7 @@
   #phonemodal .plink { margin: 12px 0; font-size: .72rem; color: #9aa; word-break: break-all; }
   #phonemodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
   body.dark #phonebtn { background: var(--ctl); color: var(--ctl-ink); border-color: var(--bar-line); }
-  body.dark #phonemodal .pcard { background: var(--bar); }
+  body.dark #phonemodal .pcard { background: var(--panel); }
   body.dark #phonemodal h3 { color: var(--ink); }
   #whatsnewmodal { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45); align-items: center; justify-content: center; }
   #whatsnewmodal .wncard { background: #fff; border-radius: 14px; padding: 24px 26px; max-width: 400px; text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
@@ -123,7 +124,7 @@
   #whatsnewmodal ul { margin: 0 0 18px; padding-left: 20px; }
   #whatsnewmodal li { font-size: .88rem; color: #3a4a41; line-height: 1.55; margin-bottom: 8px; }
   #whatsnewmodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
-  body.dark #whatsnewmodal .wncard { background: var(--bar); }
+  body.dark #whatsnewmodal .wncard { background: var(--panel); }
   body.dark #whatsnewmodal h3 { color: var(--ink); }
   body.dark #whatsnewmodal li { color: var(--ink-dim); }
   #helpmodal { display: none; position: fixed; inset: 0; z-index: 210; background: rgba(0,0,0,.5); align-items: center; justify-content: center; }
@@ -136,7 +137,7 @@
   #helpmodal .hk code { background: #eef3ef; border: 1px solid #d7e3d7; border-radius: 5px; padding: 1px 6px; font-family: 'SF Mono','Consolas',monospace; font-size: .82rem; color: #0a5d28; }
   #helpmodal .hv { color: #3a4a41; }
   #helpmodal .pclose { border: 0; background: #294d38; color: #fff; font-weight: 700; padding: 9px 20px; border-radius: 8px; cursor: pointer; margin-top: 18px; }
-  body.dark #helpmodal .helpcard { background: var(--bar); }
+  body.dark #helpmodal .helpcard { background: var(--panel); }
   body.dark #helpmodal h3 { color: var(--ink); }
   body.dark #helpmodal .hrow { border-bottom-color: var(--bar-line); }
   body.dark #helpmodal .hk { color: var(--ink); }
@@ -180,7 +181,7 @@
   #tourpop .tnext.ghost { background: none; color: #787774; font-weight: 500; }
   #tourhint.done { color: #294d38; background: #e6f6ec; border-color: #a9d8b8; }
   body.dark #tourhint.done { color: var(--link); background: var(--side-2); border-color: var(--bar-line); }
-  body.dark #tourpop { background: var(--bar); color: var(--ink); }
+  body.dark #tourpop { background: var(--panel); color: var(--ink); }
   body.dark #tourpop h4 { color: var(--ink); }
   body.dark #tourpop p { color: var(--ink-dim); }
   body.dark #tourpop .tback { background: var(--bar-line); color: var(--ctl-ink); }
@@ -539,20 +540,20 @@ const THEME = {
     accentCard: '#eaf0fc', accentCardLine: '#c9d6f2', okBg: '#e7f0ff', okInk: '#1a3f8f',
   },
   midnight: {
-    bg: '#111713', card: '#1a231d', line: '#2c4536', softLine: '#243229',
-    ink: '#dbe5de', strong: '#eaf2ed', dim: '#9aae9f', rowHover: '#1f2b24',
-    input: '#111a15', th: '#19221c', link: '#7fe0a6',
-    accent: '#0a7d33', accentHi: '#0c9a3f', accentCard: '#17351f', accentCardLine: '#2b5a3a',
-    okBg: '#17351f', okInk: '#7fe0a6', dueBg: '#3a3320', dueInk: '#f0d68a',
-    lateBg: '#3d1f1d', lateInk: '#ff9e95',
+    bg: '#141b17', card: '#1e2922', line: '#30413a', softLine: '#27332c',
+    ink: '#dde7e0', strong: '#eef3ef', dim: '#9db2a4', rowHover: '#26322b',
+    input: '#101713', th: '#1b241e', link: '#7fe0a6', btn: '#26332c',
+    accent: '#0a7d33', accentHi: '#0c9a3f', accentCard: '#16351f', accentCardLine: '#2b5a3a',
+    okBg: '#16351f', okInk: '#7fe0a6', dueBg: '#3a3320', dueInk: '#f0d68a',
+    dueLine: '#4a411f', hint: '#7d9488', lateBg: '#3d1f1d', lateInk: '#ff9e95',
   },
   slate: {
-    bg: '#12171c', card: '#1c232b', line: '#333d48', softLine: '#29323a',
-    ink: '#dde4ec', strong: '#eef2f7', dim: '#9aa6b2', rowHover: '#232b33',
-    input: '#121820', th: '#1a2026', link: '#8ab4f8',
+    bg: '#141a20', card: '#1e2630', line: '#36414e', softLine: '#2b343e',
+    ink: '#dbe2ea', strong: '#eef2f7', dim: '#98a6b4', rowHover: '#262f3a',
+    input: '#10151a', th: '#1b222a', link: '#8ab4f8', btn: '#252e38',
     accent: '#3b6fd4', accentHi: '#5585e4', accentCard: '#1c2a40', accentCardLine: '#2f4463',
     okBg: '#17311f', okInk: '#86e0a4', dueBg: '#352f1f', dueInk: '#f0d68a',
-    lateBg: '#3a2020', lateInk: '#ff9e95',
+    dueLine: '#443b23', hint: '#7f8b97', lateBg: '#3a2020', lateInk: '#ff9e95',
   },
 };
 
@@ -592,13 +593,12 @@ function darkSheet(p) {
   .crow, .xrow, .anrow, .tl-row, .irow { border-color:${p.softLine} !important; }
   input, select, textarea { background:${p.input} !important; color:${p.strong} !important;
     border-color:${p.line} !important; }
-  input::placeholder, textarea::placeholder { color:${p.dim} !important; }
-  button, .ntbtn, .op, .cacts .op, button.ghost { background:${p.card} !important;
+  input::placeholder, textarea::placeholder { color:${p.hint} !important; }
+  button, .ntbtn, .op, .cacts .op, button.ghost { background:${p.btn} !important;
     color:${p.ink} !important; border-color:${p.line} !important; }
-  button:hover, .ntbtn:hover, .op:hover { background:${p.rowHover} !important; }
   a, .plink, .morelink { color:${p.link} !important; }
   .tag.ok, .chip.paid, .synp.ok { background:${p.okBg} !important; color:${p.okInk} !important; border-color:transparent !important; }
-  .tag.due, .chip.due, .synp.stale, .nudge { background:${p.dueBg} !important; color:${p.dueInk} !important; border-color:transparent !important; }
+  .tag.due, .chip.due, .synp.stale, .nudge { background:${p.dueBg} !important; color:${p.dueInk} !important; border-color:${p.dueLine} !important; }
   .tag.warn { background:${p.dueBg} !important; color:${p.dueInk} !important; }
   .late, .latechip, .tag.late, .chip.late { background:${p.lateBg} !important; color:${p.lateInk} !important; }
   .hcard.accent { background:${p.accentCard} !important; border-color:${p.accentCardLine} !important; }
@@ -608,9 +608,7 @@ function darkSheet(p) {
   button.primary, .nudgebtn, [style*="background:#0a7d33"], [style*="background: #0a7d33"] {
     background-color:${p.accent} !important; border-color:${p.accent} !important; color:#fff !important; }
   #save:hover, .cbsend:hover, .cacts .rem:hover { background-color:${p.accentHi} !important; }
-  ::-webkit-scrollbar { width:10px; height:10px; }
-  ::-webkit-scrollbar-track { background:${p.bg} !important; }
-  ::-webkit-scrollbar-thumb { background:${p.line} !important; border-radius:6px; }
+  ::-webkit-scrollbar-thumb { background:${p.line} !important; }
   :focus-visible { outline-color:${p.link} !important; }
 `;
 }
@@ -1264,6 +1262,10 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.2.6': [
+    'The dark themes are easier on the eyes: the page sits on a soft charcoal instead of near-black, text is a shade off pure white, and the menu is clearly separated from the screen beside it.',
+    'Green and Blue are unchanged, and nothing moved on any screen. Same words, same layout, only the colours of the dark themes.',
+  ],
   '2.2.5': [
     'Two more looks, four in all: Green, Blue, Midnight and the new Slate. Pick one under More, and it now follows through every screen instead of stopping at the menu.',
     'The dark themes are easier on the eyes: a softer background instead of near-black, text that does not glare, and the menu clearly separated from the page.',
