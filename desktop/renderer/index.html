@@ -1197,6 +1197,11 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.2.4': [
+    'A bill PDF you export into the ASVA bills folder is always sent, however old the bill is. Sent files move to the sent folder; anything that could not go moves to skipped with the reason.',
+    'An old bill you re-export goes out as a payment reminder with the balance and a pay link.',
+    'Fixed: customers sometimes saw "Waiting for this message" in WhatsApp. ASVA keeps what it sent across a restart, so their phone can always fetch it.',
+  ],
   '2.2.3': [
     'Updates install cleanly: closing ASVA stops the Tally reader every time, and an update waits for everything to stop before installing.',
     'The fold control sits next to the ASVA mark now. Click the mark or the arrow, or press Ctrl+B.',

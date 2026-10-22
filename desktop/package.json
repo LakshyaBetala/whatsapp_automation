@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.3.\n\nUpdates install cleanly: closing ASVA now stops the Tally reader every time, including one-off runs, and an update waits until everything has really stopped before it installs. Before this, a reader left running could block the update silently.\n\nThe fold control moved next to the ASVA mark, where the menu is. Click the mark or the arrow, or press Ctrl+B.\n\nMidnight and Blue are consistent now: cards, tables, chips, inputs and status colours all follow the theme instead of staying half light."
+      "releaseNotes": "ASVA 2.2.4.\n\nBills you export are always sent. A bill PDF dropped into the ASVA bills folder now goes out however old it is, and whenever you export it. Sent files move to the sent folder, and anything that could not go moves to skipped with the reason written down.\n\nAn old bill you re-export goes out as a payment reminder with the balance and a pay link, because that is usually why you are sending it again.\n\nFixed: customers sometimes saw \"Waiting for this message\" in WhatsApp. ASVA now keeps what it sent across a restart, so their phone can always fetch the message.\n\nBill messages are in English."
     },
     "files": [
       "main.js",
