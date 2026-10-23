@@ -108,6 +108,24 @@ def _skip(rel: str) -> bool:
     return name in SKIP_NAMES or name.endswith(SKIP_SUFFIX)
 
 
+def _add(z, abs_path: str, rel: str) -> None:
+    """Add one file, forcing Unix line endings on anything the server runs as
+    a script.
+
+    The zip is built from the working tree, so git normalising on commit
+    protects nothing here: a .sh saved with CRLF on Windows reaches the box
+    with CRLF, and bash then fails on `set -euo pipefail` and exits before it
+    can unpack the fixed copy of itself. That happened; it needed an SSH
+    repair. Converting on the way in makes it impossible.
+    """
+    if rel.endswith(".sh"):
+        with open(abs_path, 'rb') as fh:
+            data = fh.read().replace(b"\r\n", b"\n")
+        z.writestr(rel, data)
+    else:
+        z.write(abs_path, rel)
+
+
 def _walk():
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -210,7 +228,7 @@ def build_server() -> None:
             if rel == ".env":
                 z.writestr(".env", _server_env(key))
             else:
-                z.write(ap, rel)
+                _add(z, ap, rel)
             n += 1
     _report("ASVA_server.zip", out, n,
             ("ASVA_HOST.bat", "TUNNEL.bat", "KEEP_AWAKE.bat", "HOST_SETUP.md",
@@ -230,7 +248,7 @@ def build_shop_client() -> None:
                 continue
             keep = rel in CLIENT_FILES or any(rel.startswith(d) for d in CLIENT_DIRS)
             if keep:
-                z.write(ap, rel)
+                _add(z, ap, rel)
                 n += 1
         z.writestr("tally_agent/config.json", _client_config_template())
         n += 1
@@ -253,7 +271,7 @@ def build_shop() -> None:
             if rel == ".env":
                 z.writestr(".env", _shop_env())   # transformed
             else:
-                z.write(ap, rel)
+                _add(z, ap, rel)
             n += 1
         z.writestr("tally_agent/config.json", _client_config_template())
         n += 1
@@ -290,7 +308,7 @@ def build_standalone() -> None:
             if rel == ".env":
                 z.writestr(".env", _solo_env())
             else:
-                z.write(ap, rel)
+                _add(z, ap, rel)
             n += 1
     _report("ASVA_standalone.zip", out, n,
             ("SETUP.bat", "START.bat", "ASVA.vbs", "Asva/Asva.exe",
@@ -395,7 +413,7 @@ def build_bot() -> None:
         for ap, rel in _walk():
             keep = rel in BOT_FILES or any(rel.startswith(d) for d in BOT_DIRS)
             if keep:
-                z.write(ap, rel)
+                _add(z, ap, rel)
                 n += 1
     _report("ASVA_bot.zip", out, n,
             ("ASVA_BOT.bat", ".env.bot", "BOT_SETUP.md", "requirements.txt",
