@@ -226,7 +226,7 @@ button.asva-busy::after{content:"";position:absolute;right:8px;top:50%;width:10p
   addEventListener('pagehide', go);
   /* Only labels ASVA itself sets while waiting. A button the page disabled on
      purpose is left exactly as it is. */
-  var BUSY = /^(\\.\\.\\.|Sending\\.\\.\\.|Saving\\.\\.\\.|Preparing\\.\\.\\.|Checking\\.\\.\\.)$/;
+  var BUSY = /^(\\.\\.\\.|Sending\\.\\.\\.|Saving\\.\\.\\.|Preparing\\.\\.\\.|Deleting\\.\\.\\.|Removing\\.\\.\\.|Checking\\.\\.\\.)$/;
   document.addEventListener('click', function(e){
     var t = e.target, b = (t && t.closest) ? t.closest('button') : null;
     if (!b || b.disabled) return;
@@ -547,10 +547,11 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
         # Source tab: excluded parties live in their own Do-not-chase tab; the
         # rest split into Tally-synced (has a ledger name) vs OCR/manual (non-Tally).
         is_excl = bool(c.get("excluded"))
-        if is_excl:
-            src = "exclude"
-        else:
-            src = "tally" if (c.get("tally_ledger_name") or "").strip() else "nontally"
+        # home = the tab this party belongs to when it is NOT on the
+        # do-not-chase list. Carried in the markup so bringing one back can
+        # put the row where it came from without re-rendering the page.
+        home = "tally" if (c.get("tally_ledger_name") or "").strip() else "nontally"
+        src = "exclude" if is_excl else home
         cname = (c["name"] or "").replace("&", "&amp;").replace("<", "&lt;")
         nm_attr = cname.replace('"', "&quot;")
         # Non-Tally parties get manual controls: "₹ Pay" records a payment and
@@ -589,7 +590,7 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
                        f'data-exclude="1" title="Move to the do-not-chase list" '
                        f'style="background:#fbf3db;color:#8a6100;border:1px solid #e2c46a;{_xs}">Exclude</button>')
         rows.append(
-            f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}">'
+            f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}" data-home="{home}">'
             f'<td class="c-rem" data-label="Reminder?"><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
             f'<td class="c-party"><a class="plink" href="/admin/party?token={token}&client_id={c["id"]}&lang={lang}">{cname}</a></td>'
             f'<td class="amt" data-label="Baaki">{out_str}</td>'
@@ -977,21 +978,50 @@ document.querySelectorAll('.subtabs button').forEach(b => b.onclick = () => {{
 }});
 applyFilter();   // apply the default Tally filter on load
 
-// Exclude / bring back: flip the party's do-not-chase flag, then reload so it
-// moves between the tabs (out of Tally/Non-Tally, into Do-not-chase, or back).
+// Exclude / bring back: flip the party's do-not-chase flag and MOVE THE ROW.
+// Reloading instead meant re-rendering nine hundred rows to move one of them,
+// which cost about two seconds and threw away the scroll position and the
+// search box. The row knows which tab it belongs to (data-home).
+function recountTabs() {{
+  const n = {{tally: 0, nontally: 0, exclude: 0}};
+  document.querySelectorAll('tr[data-src]').forEach(r => {{
+    if (n[r.dataset.src] !== undefined) n[r.dataset.src]++;
+  }});
+  const label = {{tally: 'Tally bills', nontally: 'Non-Tally bills', exclude: 'Do-not-chase'}};
+  document.querySelectorAll('.subtabs button[data-sub]').forEach(b => {{
+    const k = b.dataset.sub;
+    if (label[k]) b.textContent = label[k] + ' (' + n[k].toLocaleString('en-IN') + ')';
+  }});
+}}
 async function toggleExclude(btn) {{
   const cid = btn.dataset.cid, exclude = btn.dataset.exclude === '1', party = btn.dataset.party;
   const ask = exclude
     ? party + ' ko do-not-chase list me daalein? Reminders band ho jayenge.'
     : party + ' ko wapas laayein? Woh phir se chase list me aa jayega.';
   if (!confirm(ask)) return;
+  const row = btn.closest('tr');
+  const wasSrc = row ? row.dataset.src : null;
   btn.disabled = true; btn.textContent = '...';
+  let ok = false;
   try {{
     const r = await fetch('/admin/set-excluded', {{method:'POST', headers:{{'Content-Type':'application/json'}},
       body: JSON.stringify({{token: TOKEN, client_id: cid, excluded: exclude}})}});
-    if (r.ok) {{ location.reload(); return; }}
-  }} catch (e) {{}}
-  btn.disabled = false; btn.textContent = exclude ? 'Exclude' : 'Bring back';
+    ok = r.ok;
+  }} catch (e) {{ ok = false; }}
+  btn.disabled = false;
+  if (!ok) {{
+    if (row && wasSrc) row.dataset.src = wasSrc;
+    btn.textContent = exclude ? 'Exclude' : 'Bring back';
+    alert('That did not go through. Check the connection and try again.');
+    return;
+  }}
+  if (row) row.dataset.src = exclude ? 'exclude' : (row.dataset.home || 'tally');
+  btn.dataset.exclude = exclude ? '0' : '1';
+  btn.textContent = exclude ? 'Bring back' : 'Exclude';
+  const cb = row && row.querySelector('input.cb');
+  if (cb) cb.checked = !exclude;        // an excluded party is never chased
+  recountTabs();
+  applyFilter();                         // the row leaves the tab you are on
 }}
 document.querySelectorAll('.exclbtn').forEach(b => b.onclick = () => toggleExclude(b));
 
@@ -3902,7 +3932,11 @@ async function saveNTPayment() {{
 const _npSave = document.getElementById('np_save'); if (_npSave) _npSave.onclick = saveNTPayment;
 async function ntDel(btn) {{
   if (!confirm('Delete bill ' + (btn.dataset.inv || '') + '? This cannot be undone.')) return;
+  // Say it is happening: the page reloads on success and that takes a moment,
+  // and a Delete button that does not react reads as a broken one.
+  btn.disabled = true; btn.textContent = 'Deleting...';
   await ntPost('/admin/nt-bill/delete', {{token: TOKEN, bill_id: btn.dataset.id}});
+  btn.disabled = false; btn.textContent = 'Delete';   // only reached if it failed
 }}
 // ── Non-Tally party edit / delete ──
 function editParty() {{
@@ -3934,13 +3968,16 @@ async function confirmBalance() {{
 const _pmSave = document.getElementById('pm_save'); if (_pmSave) _pmSave.onclick = saveParty;
 async function delParty() {{
   if (!confirm('Delete party "' + PNAME + '" and ALL its bills? This cannot be undone.')) return;
+  const btn = document.querySelector('.ntdel');
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Deleting...'; }}
+  const undo = () => {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Delete party'; }} }};
   try {{
     const r = await fetch('/admin/party/delete', {{method:'POST', headers:{{'Content-Type':'application/json'}},
       body: JSON.stringify({{token: TOKEN, client_id: CID}})}});
     if (r.ok) {{ location.href = '/admin?token=' + encodeURIComponent(TOKEN) + '&lang=' + encodeURIComponent(LANG); return; }}
     const d = await r.json().catch(() => ({{}}));
-    alert(d.detail || 'Could not delete. Please try again.');
-  }} catch (e) {{ alert('Could not delete. Please try again.'); }}
+    undo(); alert(d.detail || 'Could not delete. Please try again.');
+  }} catch (e) {{ undo(); alert('Could not delete. Please try again.'); }}
 }}
 </script>"""
     extra = """
