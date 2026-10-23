@@ -376,7 +376,7 @@ def _topnav(token: str, lang: str, active: str, self_url: str | None = None) -> 
 
 
 @router.get("/admin", response_class=HTMLResponse)
-async def admin_page(token: str = Query(...), lang: str = Query("english")):
+def admin_page(token: str = Query(...), lang: str = Query("english")):
     biz = _biz_by_token(token)
     db = require_db()
 
@@ -1214,7 +1214,7 @@ async function saveTerms() {{
 
 
 @router.get("/admin/reminders", response_class=HTMLResponse)
-async def admin_reminders(token: str = Query(...), lang: str = Query("english")):
+def admin_reminders(token: str = Query(...), lang: str = Query("english")):
     """Reminder settings on their own page (its own desktop tab): language, send
     time, weekly off, holidays, custom line, early-pay discount, and preview.
     Timing itself is ASVA's logic (per-party credit days), not editable here."""
@@ -1722,7 +1722,7 @@ def admin_sync_status(token: str = Query(...), lang: str = Query("english")):
 
 
 @router.get("/admin/due-today")
-async def admin_due_today(token: str = Query(...)):
+def admin_due_today(token: str = Query(...)):
     """Dry run: exactly which parties would get a reminder in today's sweep, using
     the SAME cadence + dedup logic the sweep uses. Nothing is sent. So the owner
     is never surprised by who gets messaged."""
@@ -1825,7 +1825,7 @@ def _missed_batch_hours(db, biz: dict, now_ist) -> list[int]:
 
 
 @router.get("/admin/catchup-status")
-async def admin_catchup_status(token: str = Query(...)):
+def admin_catchup_status(token: str = Query(...)):
     """Is a missed-hour catch-up waiting for the owner's decision? Powers the
     dashboard banner: 'ASVA was off at HH:00 - N reminders waiting. Send / Skip.'"""
     from app.jobs.reminder_sweep import IST
@@ -1842,7 +1842,7 @@ async def admin_catchup_status(token: str = Query(...)):
     if not missed or decided:
         return {"pending": False, "decision": decided, "missed_hours": missed}
 
-    due = await admin_due_today(token)
+    due = admin_due_today(token)
     if due.get("holiday") or not due.get("count"):
         return {"pending": False, "decision": decided, "missed_hours": missed}
     return {"pending": True, "decision": None, "missed_hours": missed,
@@ -3112,7 +3112,7 @@ def _party_timeline(db, business_id: str, client_id: str, bills: list, receipts:
 
 
 @router.get("/admin/party", response_class=HTMLResponse)
-async def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str = Query("english")):
+def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str = Query("english")):
     """Per-party page: bills, payments received, and the exact reminder schedule
     (which nudges already went, which is next and when) - all fetched from Tally."""
     biz = _biz_by_token(token)
@@ -4054,7 +4054,7 @@ _TODAY_CSS = """
 
 
 @router.get("/admin/today", response_class=HTMLResponse)
-async def admin_today(token: str = Query(...), lang: str = Query("english")):
+def admin_today(token: str = Query(...), lang: str = Query("english")):
     """The Today home: the single reason to open ASVA each morning. Answers
     'did I get paid?' and 'who do I chase today?' in one glance, then hands the
     owner one-tap actions on the ranked chase list. All numbers are honest -
@@ -4420,7 +4420,7 @@ def _inr(n) -> str:
 
 
 @router.get("/admin/setup", response_class=HTMLResponse)
-async def admin_setup(token: str = Query(...), lang: str = Query("english")):
+def admin_setup(token: str = Query(...), lang: str = Query("english")):
     """First-run wizard for a new shop: UPI + language + a starter batch in one
     screen, then a pointer to scan WhatsApp. Reuses /admin/accounts/save and
     /admin/batches. Existing shops can ignore it."""
@@ -4752,7 +4752,7 @@ def _promise_head(pr: dict, name: str, en: bool) -> str:
 
 
 @router.get("/admin/payments", response_class=HTMLResponse)
-async def admin_payments(token: str = Query(...), lang: str = Query("english")):
+def admin_payments(token: str = Query(...), lang: str = Query("english")):
     """The Payments tab: AI-read promise/claim ledger (B6) on the left, and the
     receipt queue awaiting confirm-and-post-to-Tally (C7) on the right."""
     biz = _biz_by_token(token)
@@ -5474,7 +5474,7 @@ def admin_pending_cancel(payload: PendingCancelPayload):
 
 
 @router.get("/admin/accounts", response_class=HTMLResponse)
-async def admin_accounts(token: str = Query(...), lang: str = Query("english")):
+def admin_accounts(token: str = Query(...), lang: str = Query("english")):
     db = require_db()
     biz = (db.table("businesses")
            .select("id, business_name, upi_vpa, upi_vpa_2, upi_vpa_3, bank_account_name, bank_account_no, bank_ifsc, bank_name, share_data")

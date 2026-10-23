@@ -966,7 +966,7 @@ class ExportedBillPayload(BaseModel):
 
 
 @router.post("/bill-pdf")
-async def deliver_exported_bill(payload: ExportedBillPayload,
+def deliver_exported_bill(payload: ExportedBillPayload,
                                 background_tasks: BackgroundTasks):
     """Send a bill the owner exported, whoever matched it and however old it is.
 
