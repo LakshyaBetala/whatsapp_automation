@@ -1413,7 +1413,9 @@ function previewBatch(i){
   var box=document.getElementById('prevtext'); box.textContent='Loading...';
   document.getElementById('prevmodal').classList.add('show');
   var p=new URLSearchParams({token:TOKEN,language:b.lang,discount_pct:String(b.disc||0),upi:b.upi||''});
-  fetch('/admin/preview?'+p.toString()).then(function(r){return r.json();}).then(function(d){box.textContent=d.message||'Preview not available.';}).catch(function(){box.textContent='Preview failed.';});
+  // no-store: two batches with the same language and discount make the same
+  // URL, and a cached reply is the other way a preview looks stuck.
+  fetch('/admin/preview?'+p.toString(),{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){box.textContent=d.message||'Preview not available.';}).catch(function(){box.textContent='Preview failed.';});
 }
 renderBatches();
 """
@@ -2157,21 +2159,29 @@ def admin_settings(payload: SettingsPayload):
 @router.get("/admin/preview")
 def admin_preview(
     token: str = Query(...),
-    style: str = Query("standard"),
+    style: str | None = Query(None),
     language: str = Query("english"),
-    custom_line: str = Query(""),
+    custom_line: str | None = Query(None),
     discount_pct: float = Query(0.0),
     upi: str = Query(""),
 ):
-    """Render the exact reminder a customer would receive for the given (unsaved)
-    settings, so the owner can preview it before saving."""
+    """Render the exact reminder a customer would receive.
+
+    style and custom_line default to WHAT THE SHOP HAS SAVED, not to the
+    standard wording. They used to default to "standard" and "", so a shop on
+    the gentle or firm tone, or with its own closing line, was previewed a
+    message it never sends. An explicit value still wins, so an unsaved
+    setting can be previewed before it is saved.
+    """
     from decimal import Decimal
     from app.models import Lang
     from app.services.templates import apply_discount, inr, render
 
     biz = _biz_by_token(token)
     lang = (language or "english").lower()
-    style_v = (style or "standard").lower()
+    if custom_line is None:
+        custom_line = biz.get("reminder_custom_line") or ""
+    style_v = (style or biz.get("reminder_style") or "standard").lower()
     if style_v not in STYLE_CADENCE:
         style_v = "standard"
 
