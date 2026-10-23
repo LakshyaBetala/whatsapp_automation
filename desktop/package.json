@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.6",
+  "version": "2.2.7",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.6.\n\nThe dark themes are easier on the eyes. The page sits on a soft charcoal instead of near-black, text comes down off pure white, and the menu is clearly separated from the screen beside it, so a long evening on ASVA stops glaring back at you.\n\nGreen and Blue are exactly as they were, and nothing moved on any screen: same words, same layout, only the colours of the dark themes."
+      "releaseNotes": "ASVA 2.2.7.\n\nThe app answers faster. One shop opening a screen no longer makes the server wait, so pages and reminders stop queueing behind each other, and the Dashboard fetches everything it needs at once instead of one thing after another.\n\nPutting a party on the do-not-chase list, or bringing one back, happens straight away now. It used to reload the whole list, which took a couple of seconds and lost your place on the page and anything you had typed in the search box.\n\nDelete tells you it is working, and a button whose request never comes back frees itself instead of staying stuck.\n\nThe menu folds in one smooth movement rather than the labels vanishing first and the panel catching up."
     },
     "files": [
       "main.js",
