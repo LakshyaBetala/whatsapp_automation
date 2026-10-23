@@ -11,13 +11,17 @@ businesses there are - never a per-business loop over the network.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
+import hmac
+import json
 import logging
 import secrets
+import time as _time
 from collections import Counter
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from app.config import settings
@@ -36,6 +40,93 @@ IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 def _key_ok(key: str | None) -> bool:
     configured = (settings.admin_api_key or "").strip()
     return bool(configured) and bool(key) and secrets.compare_digest(key, configured)
+
+
+# ── Signing in, once per device ─────────────────────────────────────────
+# The cookie carries a value derived from the key, never the key itself, so a
+# stolen cookie cannot be pasted into the admin_key field of a write endpoint.
+COOKIE = "asva_ops"
+COOKIE_DAYS = 30
+_FAILS: dict = {}            # caller address -> [count, first attempt]
+_MAX_FAILS = 6
+_LOCKOUT_S = 300
+
+
+def _cookie_value() -> str:
+    key = (settings.admin_api_key or "").strip()
+    return hmac.new(key.encode(), b"asva-ops-session", hashlib.sha256).hexdigest()
+
+
+def _cookie_ok(request: Request) -> bool:
+    if not (settings.admin_api_key or "").strip():
+        return False
+    got = request.cookies.get(COOKIE) or ""
+    return bool(got) and secrets.compare_digest(got, _cookie_value())
+
+
+def _authed(request: Request, key: str = "") -> bool:
+    """Signed in on this device, or carrying the key (an old bookmark)."""
+    return _cookie_ok(request) or _key_ok(key)
+
+
+def _caller(request: Request) -> str:
+    # Behind the tunnel the socket is always localhost, so trust Cloudflare's
+    # header for throttling. It is not used for access, only for counting.
+    return (request.headers.get("cf-connecting-ip")
+            or (request.client.host if request.client else "?"))
+
+
+def _locked_out(request: Request) -> bool:
+    n, first = _FAILS.get(_caller(request), (0, 0.0))
+    if n < _MAX_FAILS:
+        return False
+    if _time.monotonic() - first > _LOCKOUT_S:
+        _FAILS.pop(_caller(request), None)
+        return False
+    return True
+
+
+def _note_fail(request: Request) -> None:
+    who = _caller(request)
+    n, first = _FAILS.get(who, (0, _time.monotonic()))
+    if _time.monotonic() - first > _LOCKOUT_S:
+        n, first = 0, _time.monotonic()
+    _FAILS[who] = (n + 1, first)
+    log.warning("Command Center: wrong key from %s (attempt %d)", who, n + 1)
+
+
+def _sign_in(response, request: Request):
+    response.set_cookie(
+        COOKIE, _cookie_value(), max_age=COOKIE_DAYS * 86400,
+        httponly=True, samesite="strict", path="/ops",
+        secure=request.url.scheme == "https",   # http on the box must still work
+    )
+    _FAILS.pop(_caller(request), None)
+    return response
+
+
+class LoginPayload(BaseModel):
+    key: str
+
+
+@router.post("/login")
+def ops_login(payload: LoginPayload, request: Request):
+    """Swap the operator key for a cookie, so it never rides in a URL."""
+    if _locked_out(request):
+        raise HTTPException(status_code=429, detail="Too many attempts. Wait five minutes.")
+    if not _key_ok(payload.key):
+        _note_fail(request)
+        raise HTTPException(status_code=401, detail="Wrong key")
+    log.info("Command Center: signed in from %s", _caller(request))
+    return _sign_in(JSONResponse({"ok": True}), request)
+
+
+@router.post("/logout")
+def ops_logout():
+    """Sign this device out - what you want when a phone goes missing."""
+    r = JSONResponse({"ok": True})
+    r.delete_cookie(COOKIE, path="/ops")
+    return r
 
 
 def _plan(biz: dict) -> Plan:
@@ -216,26 +307,26 @@ def _latest_release(db) -> tuple[str, bool]:
 
 
 @router.get("/data")
-def ops_data(key: str = Query("")):
-    if not _key_ok(key):
+def ops_data(request: Request, key: str = Query("")):
+    if not _authed(request, key):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
     return JSONResponse(build_ops_data(require_db()))
 
 
 @router.get("/support")
-def ops_support(key: str = Query("")):
+def ops_support(request: Request, key: str = Query("")):
     """Every TEAM/support request an owner sent, so the operator can see who asked
     what, and when - and mark each resolved."""
-    if not _key_ok(key):
+    if not _authed(request, key):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
     from app.services import support
     return JSONResponse({"requests": support.list_recent(require_db(), 100)})
 
 
 @router.get("/assistant")
-def ops_assistant(key: str = Query("")):
+def ops_assistant(request: Request, key: str = Query("")):
     """The marketing/bot assistant switch + recent leads (founder-only)."""
-    if not _key_ok(key):
+    if not _authed(request, key):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
     from app.services import assistant
     db = require_db()
@@ -350,14 +441,14 @@ def _bot_wa_base() -> str:
 
 
 @router.get("/wa-qr")
-async def ops_wa_qr(key: str = Query(default="")):
+async def ops_wa_qr(request: Request, key: str = Query(default="")):
     """Bot WhatsApp link state + the pairing QR, behind the operator key.
 
     wa_service is bound to localhost and needs its own WA_API_KEY, so its /qr
     page is no longer reachable from a browser. Proxying it here means the
     operator re-links with the ONE credential they already use for the Command
     Center, instead of keeping a second secret to hand."""
-    if not _key_ok(key):
+    if not _authed(request, key):
         raise HTTPException(status_code=401, detail="Invalid admin key")
     try:
         async with httpx.AsyncClient(timeout=8) as h:
@@ -375,10 +466,10 @@ async def ops_wa_qr(key: str = Query(default="")):
 
 
 @router.post("/wa-relink")
-async def ops_wa_relink(key: str = Query(default="")):
+async def ops_wa_relink(request: Request, key: str = Query(default="")):
     """Log the bot number out and produce a fresh QR (the escape hatch when
     linking is stuck). Destructive on purpose: the UI confirms first."""
-    if not _key_ok(key):
+    if not _authed(request, key):
         raise HTTPException(status_code=401, detail="Invalid admin key")
     async with httpx.AsyncClient(timeout=20) as h:
         r = await h.post(_bot_wa_base() + "/api/wa/relink",
@@ -428,10 +519,10 @@ async def ops_send_code(payload: SendCodePayload):
 
 
 @router.get("/health")
-async def ops_health(key: str = Query("")):
+async def ops_health(request: Request, key: str = Query("")):
     """The health center snapshot: system state, per-shop health, 14-day traffic,
     drops, scheduler job heartbeats, and open/recent alerts."""
-    if not _key_ok(key):
+    if not _authed(request, key):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
     db = require_db()
     health = monitoring.build_health(db)
@@ -458,12 +549,19 @@ async def ops_health(key: str = Query("")):
 
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
-async def ops_page(key: str = Query("")):
+async def ops_page(request: Request, key: str = Query("")):
     if not (settings.admin_api_key or "").strip():
         return HTMLResponse(_DISABLED_HTML, status_code=503)
-    if not _key_ok(key):
+    # An old ?key= bookmark still works: it is swapped for the cookie and the
+    # URL is cleaned, so that bookmark stops leaking the key from now on.
+    if key and _key_ok(key):
+        return _sign_in(RedirectResponse("/ops", status_code=303), request)
+    if not _cookie_ok(request):
         return HTMLResponse(_LOGIN_HTML)
-    return HTMLResponse(_PAGE_HTML)
+    # The page is only ever served to a signed-in device, so it can carry the
+    # key for its write calls (which send it in a POST body, not a URL).
+    return HTMLResponse(_PAGE_HTML.replace(
+        "__ASVA_OPS_KEY__", json.dumps((settings.admin_api_key or "").strip())))
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────
@@ -482,10 +580,20 @@ _LOGIN_HTML = """<!doctype html><meta charset="utf-8"><title>ASVA Command Center
 <button onclick="go()" style="margin-top:12px;width:100%;padding:11px;border:0;border-radius:8px;background:#0a7d33;color:#fff;font:inherit;cursor:pointer">Open</button>
 <div id="e" style="color:#c0392b;margin-top:10px;font-size:.9rem"></div>
 <script>
-function go(){var k=document.getElementById('k').value.trim();if(!k)return;
- location.href='/ops?key='+encodeURIComponent(k);}
+// Posted, never put in the URL: a key in a query string ends up in history,
+// in screenshots and in the server's log. The reply sets the cookie.
+async function go(){
+  var k=document.getElementById('k').value.trim(); if(!k) return;
+  var e=document.getElementById('e'); e.textContent='';
+  try{
+    var r=await fetch('/ops/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:k})});
+    if(r.ok){ location.href='/ops'; return; }
+    var d=await r.json().catch(function(){return {};});
+    e.textContent = r.status===429 ? (d.detail||'Too many attempts.') : 'Wrong key.';
+  }catch(err){ e.textContent='Could not reach the server.'; }
+}
 document.getElementById('k').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
-if(location.search.indexOf('key=')>-1)document.getElementById('e').textContent='Wrong key.';
 </script></body>"""
 
 _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
@@ -617,6 +725,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 <div class="top">
   <h1>ASVA Command Center<span id="statuspill" class="statuspill ok" onclick="showTab('health')" title="Jump to Health">checking...</span></h1>
   <div class="meta"><button class="add" onclick="openAdd()">+ Add business</button>
+   <button class="add" style="background:transparent;border:1px solid #2c5c42;color:#9ab" onclick="signOut()">Sign out</button>
     &nbsp;&nbsp;<span id="clock"></span> &middot; server v<span id="sv"></span></div>
 </div>
 <div id="opsbanner" class="opsbanner" style="display:none"></div>
@@ -754,7 +863,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
   </div>
 </div>
 <script>
-const KEY = new URLSearchParams(location.search).get('key') || '';
+const KEY = __ASVA_OPS_KEY__;   // served only to a signed-in device
 const inr = n => (n||0).toLocaleString('en-IN');
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 const PLANS=['starter','growth','pro','max'], PLABEL={starter:'Lite',growth:'Collect',pro:'Recover',max:'Custom'};
@@ -782,7 +891,7 @@ function fetchFailed(r,label){
 
 async function load(){
   try{
-    const r = await fetch('/ops/data?key='+encodeURIComponent(KEY));
+    const r = await fetch('/ops/data');
     if(!r.ok){ fetchFailed(r,'Command Center'); return; }
     const d = await r.json();
     PUBLIC_URL = d.public_url || '';
@@ -890,6 +999,11 @@ function rowHtml(b){
     '<td><button class="btn" onclick="pairCode(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Get code</button></td>'+
     '<td><button class="btn del" onclick="delBiz(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')" title="Erase this shop and ALL its data - irreversible">Delete</button></td>'+
   '</tr>';
+}
+async function signOut(){
+  if(!confirm('Sign this device out of the Command Center?'))return;
+  try{ await fetch('/ops/logout',{method:'POST'}); }catch(e){}
+  location.href='/ops';
 }
 function flash(t){var m=document.getElementById('msg');m.textContent=t;setTimeout(()=>{if(m.textContent===t)m.textContent='';},4000);}
 async function post(url,body){
@@ -1023,7 +1137,7 @@ function fmtWhen(iso){try{var d=new Date(iso);return d.toLocaleString();}catch(e
 async function loadSupport(){
   var box=document.getElementById('reqlist');
   try{
-    var r=await fetch('/ops/support?key='+encodeURIComponent(KEY));
+    var r=await fetch('/ops/support');
     if(!r.ok){ fetchFailed(r,'Requests'); return; }
     var reqs=(await r.json()).requests||[];
     var open=reqs.filter(function(x){return x.status==='open';}).length;
@@ -1056,7 +1170,7 @@ function minsSince(iso){try{return Math.floor((Date.now()-new Date(iso).getTime(
 function sysCard(icon,label,state,cls){return '<div class="c"><div class="big '+cls+'">'+icon+'</div><div><div class="l">'+label+'</div><div class="s '+cls+'">'+esc(state)+'</div></div></div>';}
 async function loadHealth(){
   try{
-    const r=await fetch('/ops/health?key='+encodeURIComponent(KEY));
+    const r=await fetch('/ops/health');
     if(!r.ok){ fetchFailed(r,'Health'); return; }
     const d=await r.json();
     const sy=d.system||{}, bw=sy.bot_wa||{};
@@ -1132,7 +1246,7 @@ async function loadHealth(){
 let ASST_ON = true;
 async function loadAssistant(){
   try{
-    const r = await fetch('/ops/assistant?key='+encodeURIComponent(KEY));
+    const r = await fetch('/ops/assistant');
     if(!r.ok) return;
     const d = await r.json();
     ASST_ON = !!d.enabled;
@@ -1178,7 +1292,7 @@ function closeWaLink(){
 async function pollWa(){
   const box = document.getElementById('wabody');
   try{
-    const r = await fetch('/ops/wa-qr?key='+encodeURIComponent(KEY));
+    const r = await fetch('/ops/wa-qr');
     if(!r.ok) throw new Error('http '+r.status);
     const d = await r.json();
     if(!d.reachable){
@@ -1204,7 +1318,7 @@ async function doWaRelink(){
   const b = document.getElementById('warelink');
   b.disabled = true; b.textContent = 'Working...';
   try{
-    const r = await fetch('/ops/wa-relink?key='+encodeURIComponent(KEY), {method:'POST'});
+    const r = await fetch('/ops/wa-relink', {method:'POST'});
     if(!r.ok) throw new Error('http '+r.status);
     document.getElementById('wabody').innerHTML = '<p class="muted">Logged out. A fresh QR is coming&hellip;</p>';
   }catch(e){ alert('Could not re-link. Check that asva-bot is running.'); }

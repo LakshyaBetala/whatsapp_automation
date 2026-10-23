@@ -18,3 +18,26 @@ def maybe_await(value):
     if inspect.isawaitable(value):
         return asyncio.run(value)
     return value
+
+
+def ops_request(*, signed_in: bool = True, host: str = "203.0.113.9",
+                scheme: str = "https"):
+    """A request to the Command Center, as a signed-in device or a stranger.
+
+    /ops is gated on an HttpOnly cookie rather than a key in the URL (a key in
+    a query string lands in history, screenshots and the server's log), so a
+    test that wants the page has to arrive carrying one.
+    """
+    from starlette.requests import Request
+
+    from app.routers import ops as _ops
+
+    headers = [(b"host", b"app.tryasva.com"), (b"cf-connecting-ip", host.encode())]
+    if signed_in:
+        headers.append((b"cookie", f"{_ops.COOKIE}={_ops._cookie_value()}".encode()))
+    return Request({
+        "type": "http", "http_version": "1.1", "method": "GET", "scheme": scheme,
+        "path": "/ops", "raw_path": b"/ops", "query_string": b"",
+        "root_path": "", "headers": headers, "client": ("127.0.0.1", 1234),
+        "server": ("app.tryasva.com", 443),
+    })

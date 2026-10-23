@@ -11,12 +11,13 @@ from unittest.mock import MagicMock
 
 sys.modules.setdefault("weasyprint", MagicMock())
 
+from conftest import ops_request
 from app.routers import ops
 
 
 def _render(monkeypatch) -> str:
     monkeypatch.setattr(ops.settings, "admin_api_key", "testkey")
-    resp = asyncio.run(ops.ops_page(key="testkey"))
+    resp = asyncio.run(ops.ops_page(request=ops_request(), key=""))
     return resp.body.decode()
 
 

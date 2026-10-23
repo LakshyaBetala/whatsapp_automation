@@ -11,6 +11,7 @@ import pytest
 
 sys.modules.setdefault("weasyprint", MagicMock())
 
+from conftest import ops_request
 from app.routers import ops
 
 BIZ = {
@@ -47,7 +48,7 @@ def _body(resp):
 
 
 def test_ops_page_renders_with_key():
-    resp = asyncio.run(ops.ops_page(key="testkey"))
+    resp = asyncio.run(ops.ops_page(request=ops_request(), key=""))
     assert resp.status_code == 200
     html = _body(resp)
     assert "Internal Server Error" not in html
@@ -69,14 +70,14 @@ def test_ops_send_code_bad_key_refused():
 
 
 def test_ops_page_wrong_key_shows_login_not_500():
-    resp = asyncio.run(ops.ops_page(key="nope"))
+    resp = asyncio.run(ops.ops_page(request=ops_request(signed_in=False), key="nope"))
     assert resp.status_code == 200
     assert "Command Center" in _body(resp)
 
 
 def test_ops_page_disabled_without_admin_key(monkeypatch):
     monkeypatch.setattr(ops.settings, "admin_api_key", "")
-    resp = asyncio.run(ops.ops_page(key="anything"))
+    resp = asyncio.run(ops.ops_page(request=ops_request(signed_in=False), key="anything"))
     assert resp.status_code == 503
 
 
@@ -97,7 +98,7 @@ def test_ops_page_javascript_parses(tmp_path):
     """The Command Center is one big inline <script>: a single syntax slip
     blanks the whole operator console. Parse it with node when available."""
     import re, shutil, subprocess
-    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    html = _body(asyncio.run(ops.ops_page(request=ops_request(), key="")))
     js = "\n;\n".join(re.findall(r"<script[^>]*>(.*?)</script>", html, re.S))
     assert js.strip(), "no inline script found"
     # Python's repr() is not a JS literal - `True` is an undefined identifier
@@ -115,7 +116,7 @@ def test_ops_page_javascript_parses(tmp_path):
 def test_relink_controls_are_present():
     # The bot QR page is no longer reachable in a browser (localhost bind +
     # WA_API_KEY), so re-linking MUST be possible from here.
-    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    html = _body(asyncio.run(ops.ops_page(request=ops_request(), key="")))
     for needle in ('id="walink"', 'id="wabody"', 'id="warelink"',
                    "openWaLink", "doWaRelink", "/ops/wa-qr", "/ops/wa-relink"):
         assert needle in html, "missing %s" % needle
@@ -125,7 +126,7 @@ def test_relink_controls_are_present():
 def test_every_billing_control_is_on_the_page():
     """Trial, month, year, exact date, cut off, pair, delete. Lose one of these
     and the operator is back to editing the database by hand."""
-    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    html = _body(asyncio.run(ops.ops_page(request=ops_request(), key="")))
     for fn in ("startTrial(", "renew(", "renewYear(", "renewUntil(",
                "suspend(", "pairCode(", "delBiz("):
         assert fn in html, "the Command Center lost its %s control" % fn
@@ -134,7 +135,7 @@ def test_every_billing_control_is_on_the_page():
 
 
 def test_the_money_line_is_shown():
-    html = _body(asyncio.run(ops.ops_page(key="testkey")))
+    html = _body(asyncio.run(ops.ops_page(request=ops_request(), key="")))
     for label in ("Monthly, paying", "Renew in 7 days", "On free trial"):
         assert label in html, "missing from the Subscriptions header: " + label
 

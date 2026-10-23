@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 sys.modules.setdefault("weasyprint", MagicMock())
 
+from conftest import maybe_await, ops_request
 from app.routers import ops, license as lr
 
 
@@ -106,19 +107,22 @@ def test_ops_flags_below_min_as_needs_reinstall(monkeypatch):
     assert d["totals"]["outdated"] == 2          # Old + Cur both != latest 1.8.4
 
 
-def test_ops_data_requires_key(monkeypatch):
+def test_ops_data_requires_being_signed_in(monkeypatch):
+    """Neither a wrong key nor no cookie gets the fleet's data."""
     monkeypatch.setattr(ops.settings, "admin_api_key", "K")
     from fastapi import HTTPException
-    try:
-        asyncio.run(ops.ops_data(key="wrong"))
-        assert False
-    except HTTPException as e:
-        assert e.status_code == 401
+    stranger = ops_request(signed_in=False)
+    for bad in ("", "wrong"):
+        try:
+            maybe_await(ops.ops_data(request=stranger, key=bad))
+            assert False, "served the data to a stranger (key=%r)" % bad
+        except HTTPException as e:
+            assert e.status_code == 401
 
 
 def test_ops_page_disabled_without_key(monkeypatch):
     monkeypatch.setattr(ops.settings, "admin_api_key", "")
-    resp = asyncio.run(ops.ops_page(key=""))
+    resp = asyncio.run(ops.ops_page(request=ops_request(signed_in=False), key=""))
     assert resp.status_code == 503
 
 
