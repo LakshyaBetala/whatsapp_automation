@@ -86,10 +86,10 @@ class SyncType(str, Enum):
 # (see reminder_sweep priority drip). A new number is warmed up UNDER this (ramp
 # over ~7 days). Higher tiers clear a large debtor book faster.
 PLAN_LIMITS: dict[Plan, dict[str, int]] = {
-    Plan.starter: {"debtors": 100, "messages": 1200, "clients": 1000000, "price": 699, "bot": 1, "daily_cap": 50},
-    Plan.growth: {"debtors": 250, "messages": 3200, "clients": 1000000, "price": 999, "bot": 1, "daily_cap": 100},
-    Plan.pro: {"debtors": 500, "messages": 8000, "clients": 1000000, "price": 1499, "bot": 1, "daily_cap": 150},
-    Plan.max: {"debtors": 5000, "messages": 40000, "clients": 1000000, "price": 0, "bot": 1, "daily_cap": 300},
+    Plan.starter: {"debtors": 100, "messages": 900, "clients": 1000000, "price": 699, "bot": 1, "daily_cap": 50},
+    Plan.growth: {"debtors": 250, "messages": 2250, "clients": 1000000, "price": 999, "bot": 1, "daily_cap": 100},
+    Plan.pro: {"debtors": 500, "messages": 4000, "clients": 1000000, "price": 1499, "bot": 1, "daily_cap": 150},
+    Plan.max: {"debtors": 2000, "messages": 16000, "clients": 1000000, "price": 0, "bot": 1, "daily_cap": 300},
 }
 
 # ── Trade categories -> default credit period ─────────────────────────────

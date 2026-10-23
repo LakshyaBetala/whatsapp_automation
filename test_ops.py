@@ -75,7 +75,7 @@ def test_build_ops_data_totals_status_online_sort():
     assert beta["status"] == "suspended" and alpha["status"] == "active"
     assert alpha["online"] is True and beta["online"] is False
     assert alpha["version_ok"] is True and beta["version_ok"] is False
-    assert alpha["messages_limit"] == 8000 and beta["messages_limit"] == 1200
+    assert alpha["messages_limit"] == 4000 and beta["messages_limit"] == 900
 
 
 def test_ops_flags_below_min_as_needs_reinstall(monkeypatch):

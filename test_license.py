@@ -52,8 +52,8 @@ def test_heartbeat_active_business(monkeypatch):
     assert hb["status"] == "active"
     assert hb["plan"] == "pro" and hb["plan_label"] == "Recover" and hb["price"] == 1499
     assert hb["days_left"] == 24
-    assert hb["messages_used"] == 270 and hb["messages_limit"] == 8000
-    assert hb["messages_remaining"] == 8000 - 270
+    assert hb["messages_used"] == 270 and hb["messages_limit"] == 4000
+    assert hb["messages_remaining"] == 4000 - 270
     assert hb["active_debtors"] == 180 and hb["debtor_cap"] == 500
     assert hb["over_debtor_cap"] is False
     assert hb["features"]["send"] is True
@@ -71,7 +71,7 @@ def test_heartbeat_suspended_blocks_paid_features(monkeypatch):
     assert hb["features"]["send"] is False
     assert hb["features"]["sync"] is True
     assert hb["over_debtor_cap"] is True             # 1200 > 300 starter cap
-    assert hb["messages_remaining"] == 0             # 9000 used > 1200 limit
+    assert hb["messages_remaining"] == 0             # 9000 used > 900 limit
 
 
 def test_heartbeat_grace_still_sends(monkeypatch):
@@ -286,7 +286,7 @@ def test_new_plan_table():
     trio = (Plan.starter, Plan.growth, Plan.pro)
     assert [PLAN_LIMITS[p]["price"] for p in trio] == [699, 999, 1499]
     assert [PLAN_LIMITS[p]["debtors"] for p in trio] == [100, 250, 500]
-    assert [PLAN_LIMITS[p]["messages"] for p in trio] == [1200, 3200, 8000]
+    assert [PLAN_LIMITS[p]["messages"] for p in trio] == [900, 2250, 4000]
     assert [PLAN_LABELS[p] for p in trio] == ["Lite", "Collect", "Recover"]
     assert all(plan_has_bot(p) for p in Plan)
     assert recommend_plan(100) == Plan.starter and recommend_plan(101) == Plan.growth
