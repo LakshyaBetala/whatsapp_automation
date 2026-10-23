@@ -7,8 +7,10 @@ operator on the LAN - auth is the business agent_token.
 """
 from __future__ import annotations
 
+import concurrent.futures as _cf
 import datetime as _dt
 import json
+import time as _time
 from html import escape as _h
 import logging
 import re
@@ -306,9 +308,84 @@ def _vparts(v: str) -> tuple:
         return (0,)
 
 
+def _together(**jobs):
+    """Run independent read queries at the same time, return {name: result}.
+
+    A page that makes five unrelated queries one after another pays five round
+    trips; at ~250ms each that is most of its time. These handlers run in
+    FastAPI's threadpool and the Supabase client's httpx session is
+    thread-safe, so the page can cost the slowest query instead of the sum.
+    An exception inside a job is raised here, exactly as it would have been.
+    """
+    if len(jobs) < 2:
+        return {k: fn() for k, fn in jobs.items()}
+    with _cf.ThreadPoolExecutor(max_workers=min(8, len(jobs))) as pool:
+        futures = {k: pool.submit(fn) for k, fn in jobs.items()}
+        return {k: f.result() for k, f in futures.items()}
+
+
+def _all_parties(db, business_id: str) -> list:
+    """Every party the shop still has, oldest page first (1000 at a time).
+    Archived parties are the ones removed from Tally; they stay hidden."""
+    out: list = []
+    start = 0
+    while True:
+        resp = (db.table("clients")
+                .select("id, name, whatsapp_number, reminders_enabled, excluded, tally_ledger_name, "
+                        "credit_days, reminder_batch, reminder_anchor, created_at")
+                .eq("business_id", business_id)
+                .is_("archived_at", "null")   # hide parties removed from Tally (reconcile)
+                .order("name")
+                .range(start, start + 999).execute())
+        batch = resp.data or []
+        out.extend(batch)
+        if len(batch) < 1000:
+            return out
+        start += 1000
+
+
+def _open_bill_rows(db, business_id: str) -> list:
+    """Every bill with money still on it, paged."""
+    out: list = []
+    start = 0
+    while True:
+        resp = (db.table("bills")
+                .select("client_id, outstanding, due_date, invoice_date")
+                .eq("business_id", business_id)
+                .in_("status", ["pending", "partial", "overdue"])
+                .range(start, start + 999).execute())
+        batch = resp.data or []
+        out.extend(batch)
+        if len(batch) < 1000:
+            return out
+        start += 1000
+
+
+def _messages_used(db, business_id: str, period: str) -> int:
+    r = (db.table("usage").select("message_count")
+         .eq("business_id", business_id).eq("period_month", period).limit(1).execute())
+    return int(r.data[0]["message_count"]) if r.data else 0
+
+
+# The release banner reads a table that changes when a version is published.
+# Every shop was paying a round trip for it on every page view.
+_RELEASE_MEMO: dict = {"at": 0.0, "html": ""}
+_RELEASE_TTL = 120.0
+
+
 def _update_banner(db) -> str:
     """Tally-style update notice: newest app_releases row vs this build.
-    Best-effort - never breaks a page if the table is missing."""
+    Best-effort - never breaks a page if the table is missing. Memoised for
+    two minutes: a new version appears when one is published, not per page."""
+    now = _time.monotonic()
+    if now - _RELEASE_MEMO["at"] < _RELEASE_TTL:
+        return _RELEASE_MEMO["html"]
+    html = _build_update_banner(db)
+    _RELEASE_MEMO.update(at=now, html=html)
+    return html
+
+
+def _build_update_banner(db) -> str:
     try:
         r = (db.table("app_releases").select("version, notes, mandatory")
              .order("created_at", desc=True).limit(1).execute()).data
@@ -380,27 +457,22 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
     biz = _biz_by_token(token)
     db = require_db()
 
-    synced_dt = _last_synced_at(db, biz["id"])
+    today = _today()
+    # Five unrelated reads. One after another they are most of this page's
+    # time, so they go together and the page costs the slowest one.
+    got = _together(
+        synced=lambda: _last_synced_at(db, biz["id"]),
+        clients=lambda: _all_parties(db, biz["id"]),
+        bills=lambda: _open_bill_rows(db, biz["id"]),
+        used=lambda: _messages_used(db, biz["id"], _today().replace(day=1).isoformat()),
+        banner=lambda: _update_banner(db),
+    )
+    synced_dt = got["synced"]
     synced_label = _fmt_ago(synced_dt)
     synced_iso = synced_dt.isoformat() if synced_dt else ""
     tally_label, tally_color = _tally_status(synced_dt)
-
-    # All clients (paged) + outstanding totals
-    clients: list = []
-    start = 0
-    while True:
-        resp = (db.table("clients")
-                .select("id, name, whatsapp_number, reminders_enabled, excluded, tally_ledger_name, "
-                        "credit_days, reminder_batch, reminder_anchor, created_at")
-                .eq("business_id", biz["id"])
-                .is_("archived_at", "null")   # hide parties removed from Tally (reconcile)
-                .order("name")
-                .range(start, start + 999).execute())
-        batch = resp.data or []
-        clients.extend(batch)
-        if len(batch) < 1000:
-            break
-        start += 1000
+    clients: list = got["clients"]
+    update_banner_html = got["banner"]
 
     # Shown instead of "All clear": a shop can be online, syncing, and still be
     # importing zero customers (see tally._flag_setup_problem).
@@ -410,33 +482,21 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
     setup_problem_js = json.dumps((biz.get("setup_problem") or "").strip())
     has_parties_js = json.dumps(bool(clients))
 
-    today = _today()
     totals: dict[str, Decimal] = {}
     overdue_days: dict[str, int] = {}   # client_id -> max days past due
     bills_by_client: dict[str, list] = {}
-    start = 0
-    while True:
-        resp = (db.table("bills")
-                .select("client_id, outstanding, due_date, invoice_date")
-                .eq("business_id", biz["id"])
-                .in_("status", ["pending", "partial", "overdue"])
-                .range(start, start + 999).execute())
-        batch = resp.data or []
-        for b in batch:
-            cid = b["client_id"]
-            totals[cid] = totals.get(cid, Decimal(0)) + Decimal(str(b["outstanding"]))
-            bills_by_client.setdefault(cid, []).append(b)
-            dd = b.get("due_date")
-            if dd:
-                try:
-                    od = (today - _dt.date.fromisoformat(str(dd))).days
-                    if od > 0:
-                        overdue_days[cid] = max(overdue_days.get(cid, 0), od)
-                except (TypeError, ValueError):
-                    pass
-        if len(batch) < 1000:
-            break
-        start += 1000
+    for b in got["bills"]:
+        cid = b["client_id"]
+        totals[cid] = totals.get(cid, Decimal(0)) + Decimal(str(b["outstanding"]))
+        bills_by_client.setdefault(cid, []).append(b)
+        dd = b.get("due_date")
+        if dd:
+            try:
+                od = (today - _dt.date.fromisoformat(str(dd))).days
+                if od > 0:
+                    overdue_days[cid] = max(overdue_days.get(cid, 0), od)
+            except (TypeError, ValueError):
+                pass
 
     clients.sort(key=lambda c: totals.get(c["id"], Decimal(0)), reverse=True)
 
@@ -570,10 +630,7 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
     plan_mismatch = rec_plan != plan_enum
 
     # Messages this month - shown small, only as info (not the billing metric).
-    period = today.replace(day=1).isoformat()
-    _u = (db.table("usage").select("message_count")
-          .eq("business_id", biz["id"]).eq("period_month", period).limit(1).execute())
-    used = int(_u.data[0]["message_count"]) if _u.data else 0
+    used = got["used"]
 
     exclude_n = sum(1 for c in clients if c.get("excluded"))
     _active = [c for c in clients if not c.get("excluded")]
@@ -689,7 +746,7 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
 {_NAV_CSS}
 </style></head><body>
 {_topnav(token, lang, "dashboard")}
-{_update_banner(db)}
+{update_banner_html}
 <div class="catchband" id="catchband"></div>
 <h2>{biz['business_name']}</h2>
 <div class="sub">Tick = us party ko reminder ON. Batch, timing aur holidays: <b>Reminders</b> tab.</div>
