@@ -462,7 +462,7 @@ async function start() {
         else console.log('Could not fetch WA version, using library default.');
         console.log(registered
             ? 'Existing session found - reconnecting WITHOUT a QR.'
-            : 'No session yet - a QR will appear for one-time linking.');
+            : 'No saved login found yet. If this is a first link, a QR will appear; if a session exists it will connect in a moment.');
 
         sock = makeWASocket({
             version,

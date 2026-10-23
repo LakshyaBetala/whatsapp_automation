@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.7",
+  "version": "2.2.8",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.7.\n\nThe app answers faster. One shop opening a screen no longer makes the server wait, so pages and reminders stop queueing behind each other, and the Dashboard fetches everything it needs at once instead of one thing after another.\n\nPutting a party on the do-not-chase list, or bringing one back, happens straight away now. It used to reload the whole list, which took a couple of seconds and lost your place on the page and anything you had typed in the search box.\n\nDelete tells you it is working, and a button whose request never comes back frees itself instead of staying stuck.\n\nThe menu folds in one smooth movement rather than the labels vanishing first and the panel catching up."
+      "releaseNotes": "ASVA 2.2.8.\n\nPreview now shows the message your customers actually receive. It had been showing an older version of the reminder, with the old payment link, so changing a batch looked like it changed nothing.\n\nIf an update ever fails, ASVA now says why instead of only saying it failed, and writes it down so it can be fixed."
     },
     "files": [
       "main.js",
