@@ -1412,7 +1412,7 @@ function previewBatch(i){
   var b=collectBatches()[i]; if(!b){return;}
   var box=document.getElementById('prevtext'); box.textContent='Loading...';
   document.getElementById('prevmodal').classList.add('show');
-  var p=new URLSearchParams({token:TOKEN,language:b.lang,discount_pct:String(b.disc||0),upi:b.upi||''});
+  var p=new URLSearchParams({token:TOKEN,language:b.lang,discount_pct:String(b.disc||0),upi:b.upi||'',batch:String(i)});
   // no-store: two batches with the same language and discount make the same
   // URL, and a cached reply is the other way a preview looks stuck.
   fetch('/admin/preview?'+p.toString(),{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){box.textContent=d.message||'Preview not available.';}).catch(function(){box.textContent='Preview failed.';});
@@ -2164,97 +2164,66 @@ def admin_preview(
     custom_line: str | None = Query(None),
     discount_pct: float = Query(0.0),
     upi: str = Query(""),
+    batch: int = Query(0),
 ):
-    """Render the exact reminder a customer would receive.
+    """The exact reminder a customer would receive, composed by the code that
+    actually sends it.
 
-    style and custom_line default to WHAT THE SHOP HAS SAVED, not to the
-    standard wording. They used to default to "standard" and "", so a shop on
-    the gentle or firm tone, or with its own closing line, was previewed a
-    message it never sends. An explicit value still wins, so an unsaved
-    setting can be previewed before it is saved.
+    This used to render the old `reminder_en` template with a raw upi:// link,
+    which the sender stopped using when reminders moved to a tappable pay page.
+    The owner was previewing a message their customers had not received in
+    months. Now the sender composes it in dry-run, so the preview cannot drift
+    from the send again: one body, one code path.
+
+    The sample party and figures are fixed so the preview is about the wording,
+    not about whoever happens to be top of the list.
     """
+    import asyncio as _asyncio
     from decimal import Decimal
-    from app.models import Lang
-    from app.services.templates import apply_discount, inr, render
+
+    from app.services import bot as bot_svc
 
     biz = _biz_by_token(token)
     lang = (language or "english").lower()
-    if custom_line is None:
-        custom_line = biz.get("reminder_custom_line") or ""
-    style_v = (style or biz.get("reminder_style") or "standard").lower()
-    if style_v not in STYLE_CADENCE:
-        style_v = "standard"
 
-    # Sample figures for a realistic preview.
-    from app.services.batches import BANK_SENTINEL, CASH_SENTINEL, bank_details, cash_line
-    sample_amt = Decimal("12500")
-    biz_name = biz.get("business_name", "")
-    sel = (upi or "").strip()
+    # Start from the batch as SAVED, so everything the query does not mention
+    # (its closing line, its collection method) is the real thing, then apply
+    # whatever the owner has changed on screen but not saved yet.
+    from app.services.batches import get_batches
+    saved = get_batches(biz)
+    base = dict(saved[batch]) if 0 <= batch < len(saved) else dict(saved[0])
+    base["lang"] = lang
+    if upi:
+        base["upi"] = upi.strip()
+    base["disc"] = discount_pct or 0
 
-    # Cash batch: preview the real cash message - no UPI link, no QR, no bank.
-    if sel == CASH_SENTINEL:
-        en = lang == "english"
-        if en:
-            body = (f"Dear Ramesh Traders,\nA payment reminder from {biz_name}.\n\n"
-                    f"Invoice 2526RTC0203: {inr(sample_amt)} outstanding (5 days).\n\n"
-                    f"{cash_line(True)}")
-        else:
-            body = (f"Namaste Ramesh Traders ji,\n{biz_name} ki taraf se payment ka "
-                    f"vinamra reminder.\n\nBill 2526RTC0203 ka {inr(sample_amt)} baaki "
-                    f"hai (5 din).\n\n{cash_line(False)}")
-        _, discount_line = apply_discount(sample_amt, discount_pct, lang)
-        if discount_line:
-            body = f"{body}\n\n{discount_line}"
-        cl = (custom_line or "").strip()[:120]
-        if cl:
-            body = f"{body}\n\n{cl}"
-        body += ("\n\nOnce paid, kindly reply PAID. Thank you." if en
-                 else "\n\nPayment ho jaye to PAID reply karein. Dhanyavaad.")
-        return {"message": body}
+    sample_biz = dict(biz)
+    if custom_line is not None:
+        sample_biz["reminder_custom_line"] = custom_line
+    if style:
+        sample_biz["reminder_style"] = style
+    sample_biz["reminder_batches"] = [base]
 
-    bank_primary = sel == BANK_SENTINEL
-    vpa = ("" if bank_primary else sel) or biz.get("upi_vpa") or "shopupi@bank"
-    pay_amount, discount_line = apply_discount(sample_amt, discount_pct, lang)
+    today = _today()
+    bill = {"id": "preview", "invoice_number": "2526RTC0203",
+            "invoice_date": (today - _dt.timedelta(days=35)).isoformat(),
+            "due_date": (today - _dt.timedelta(days=5)).isoformat(),
+            "outstanding": Decimal("12500")}
+    entry = {
+        "client": {"id": "preview", "name": "Ramesh Traders",
+                   "whatsapp_number": "919000000000", "reminder_batch": 0,
+                   "language": "hi"},
+        "total": Decimal("12500"),
+        "bills": [bill],
+    }
 
-    template_key = "reminder"
-    render_style = style_v
-    if lang == "english":
-        template_key = "reminder_en"
-        render_style = "standard"
-
-    from app.services import upi as upi_svc
-    pay_link = upi_svc.upi_link(vpa, biz_name, pay_amount, "2526RTC0203")
-    _, body = render(
-        template_key, Lang.hi, style=render_style,
-        client="Ramesh Traders", business=biz_name,
-        invoice_number="2526RTC0203", outstanding=inr(sample_amt),
-        days_overdue="5", upi_link=pay_link,
-    )
-    # Bank/NEFT block - ONLY when this batch's account is set to Bank transfer.
-    bank = bank_details(biz)
-    if bank and bank_primary:
-        en = lang == "english"
-        blk = [("For bank transfer (NEFT/IMPS/RTGS):"
-                if en else "Bank transfer (NEFT/IMPS) ke liye:")]
-        if bank["name"]:
-            blk.append((f"Name: {bank['name']}" if en else f"Naam: {bank['name']}"))
-        blk.append(f"A/c No: {bank['no']}")
-        if bank["ifsc"]:
-            blk.append(f"IFSC: {bank['ifsc']}")
-        if bank["bank"]:
-            blk.append(f"Bank: {bank['bank']}")
-        body = "\n".join(blk) + f"\n\n{body}"
-    if discount_line:
-        body = f"{body}\n\n{discount_line}"
-    cl = (custom_line or "").strip()[:120]
-    if cl:
-        body = f"{body}\n\n{cl}"
-    return {"message": body}
-
-
-class SendNowPayload(BaseModel):
-    token: str
-    party: str
+    try:
+        text = _asyncio.run(bot_svc._send_consolidated_reminder(
+            sample_biz, entry, dry_run=True))
+    except Exception:
+        log.exception("preview failed")
+        return {"message": ""}
+    return {"message": text or ""}
 
 
 @router.post("/admin/send-now")

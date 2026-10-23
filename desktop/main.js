@@ -1105,6 +1105,24 @@ function setupAutoUpdate() {
   try { ({ autoUpdater } = require('electron-updater')); }
   catch (e) { console.error('[update] electron-updater not available:', (e && e.message) || e); return; }
 
+  // Write the updater's own account of what happened. Without this its
+  // errors go to a console that does not exist in a packaged app, which is
+  // why "could not finish automatically" has never had a reason attached.
+  const updLog = path.join(USER_DATA, 'update.log');
+  const logLine = (level, msg) => {
+    try {
+      fs.appendFileSync(updLog,
+        `${new Date().toISOString()} [${level}] ${msg}\n`, 'utf8');
+    } catch (e) { /* logging must never break an update */ }
+  };
+  autoUpdater.logger = {
+    info: (m) => logLine('info', m),
+    warn: (m) => logLine('warn', m),
+    error: (m) => logLine('error', (m && m.stack) || m),
+    debug: () => {},
+  };
+  logLine('info', `--- ASVA ${app.getVersion()} starting update check ---`);
+
   autoUpdater.autoDownload = true;           // fetch quietly in the background
   // NEVER let electron-updater install silently on quit. Its built-in
   // quit-install runs inside before-quit as the process dies, so it CANNOT show
@@ -1124,6 +1142,13 @@ function setupAutoUpdate() {
   //      so clients do one clean FULL download for that jump instead of a giant
   //      delta; ordinary (agent-unchanged) releases publish the .blockmap = fast
   //      delta. See deploy note / BACKUP-style runbook.
+  //
+  // In practice no release has published a .blockmap, so every client asked for
+  // one, got a 404 (confirmed in the server log, for every version), and only
+  // then fell back to a full download. Asking for a file we have decided never
+  // to publish is a failure path running on every update for no benefit, so the
+  // differential step is off. Turn it back on the day blockmaps are published.
+  autoUpdater.disableDifferentialDownload = true;
   const notesOf = (info) => {
     const n = info && info.releaseNotes;
     if (!n) return '';
@@ -1141,8 +1166,12 @@ function setupAutoUpdate() {
   });
   autoUpdater.on('update-not-available', () => sendToWindow('update', { state: 'current' }));
   autoUpdater.on('error', (err) => {
-    console.error('[update] error:', (err && err.message) || err);
-    sendToWindow('update', { state: 'error' });
+    const why = (err && (err.message || err.code)) || String(err);
+    console.error('[update] error:', why);
+    logLine('error', why);
+    // Pass the reason to the window: "could not finish" with no cause is not
+    // something the owner can report and not something we can act on.
+    sendToWindow('update', { state: 'error', reason: String(why).slice(0, 160) });
   });
   // The owner presses "Restart to update" -> apply now.
   ipcMain.handle('install-update', () => {

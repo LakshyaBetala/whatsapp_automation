@@ -1525,10 +1525,18 @@ async def _open_bills_by_client(business_id: str) -> dict[str, dict]:
     return agg
 
 
-async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: bool = False) -> tuple[bool, str]:
+async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: bool = False,
+                                      dry_run: bool = False):
     """One reminder covering ALL of a party's open bills (single bill →
     bill number shown; multiple → itemised up to 4 + total). Returns
-    (sent, summary-line-for-owner)."""
+    (sent, summary-line-for-owner).
+
+    dry_run returns the composed text instead of sending it, so the owner's
+    Preview can show THIS message rather than a copy of it that drifts. The
+    composing above the send is untouched by the flag, which is the point:
+    a preview that is built differently from the send is how the preview ends
+    up showing a message the shop has not sent in months.
+    """
     client = entry["client"]
     name = client.get("name", "Customer")
     phone = client.get("whatsapp_number")
@@ -1644,11 +1652,17 @@ async def _send_consolidated_reminder(business: dict, entry: dict, *, priority: 
 
     if discount_line:
         lines += ["", discount_line]
-    if batch.get("line"):
-        lines += ["", batch["line"]]
+    # The batch's own line if it has one, else the shop's saved closing line.
+    # The second half was being dropped: Settings stores reminder_custom_line
+    # and shows it back, but nothing put it in the message.
+    closing = (batch.get("line") or business.get("reminder_custom_line") or "").strip()
+    if closing:
+        lines += ["", closing]
     lines += ["", ("Once paid, kindly reply PAID. Thank you."
                    if en else "Payment ho jaye to PAID reply karein. Dhanyavaad.")]
 
+    if dry_run:
+        return "\n".join(lines)
     result = await whatsapp.send_template(
         business_id=business["id"],
         to_number=phone,

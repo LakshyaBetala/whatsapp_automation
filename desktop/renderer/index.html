@@ -2010,8 +2010,9 @@ if (window.asva && window.asva.onUpdate) window.asva.onUpdate((u) => {
     // ALWAYS surface an update error (not only on a manual check) with the manual
     // installer, so a failed auto-download never silently leaves them behind.
     if (_dlStuckTimer) { clearTimeout(_dlStuckTimer); _dlStuckTimer = null; }
-    msg.textContent = en ? 'Update could not finish automatically. Download it manually below.'
-                         : 'Update apne aap poora nahi hua. Neeche se manually download karein.';
+    msg.textContent = (en ? 'Update could not finish automatically. Download it manually below.'
+                          : 'Update apne aap poora nahi hua. Neeche se manually download karein.')
+                      + (u.reason ? ' (' + u.reason + ')' : '');
     btn.style.display = 'none'; showManual(true); bar.style.display = 'flex';
     _manualCheck = false;
   } else {
