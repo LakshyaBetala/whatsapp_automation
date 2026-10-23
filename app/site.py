@@ -1004,13 +1004,13 @@ def _pricing() -> str:
     that covers your active debtors: customers with a WhatsApp number who still owe you.</p>
   <div class="plans" style="display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:26px">
    <div class="panel"><h3>Lite</h3><p class="price"><b>Rs 699</b> a month</p>
-    <p>Up to 150 active debtors. Bills and reminders on your own WhatsApp, the pay link, payments back into Tally and the owner assistant.</p></div>
+    <p>Up to 100 active debtors. Bills and reminders on your own WhatsApp, the pay link, payments back into Tally and the owner assistant.</p></div>
    <div class="panel"><h3>Collect</h3><p class="price"><b>Rs 999</b> a month</p>
-    <p>Up to 400 active debtors. Everything in Lite.</p></div>
+    <p>Up to 250 active debtors. Everything in Lite.</p></div>
    <div class="panel"><h3>Recover</h3><p class="price"><b>Rs 1,499</b> a month</p>
-    <p>Up to 1,000 active debtors. Adds automatic replies to customers, promise follow-up and multi-company.</p></div>
+    <p>Up to 500 active debtors. Adds automatic replies to customers, promise follow-up and multi-company.</p></div>
   </div>
-  <p class="undernote" style="margin-top:14px">More than 1,000 debtors? Message us for a Custom plan. No setup fee.</p>
+  <p class="undernote" style="margin-top:14px">More than 500 debtors? Message us for a Custom plan. No setup fee.</p>
   <div style="margin-top:22px;display:flex;gap:12px;flex-wrap:wrap">
     <a class="btn btn-p" href="/download">Start your 14-day free trial</a>
     <a class="btn" href="{WA_TRY}">Talk to us on WhatsApp</a>
@@ -1033,7 +1033,7 @@ def _pricing() -> str:
     return page_shell(
         path="/pricing",
         title="ASVA pricing | 14-day free trial, then from Rs 699 a month",
-        description="ASVA plans: Lite Rs 699 (150 active debtors), Collect Rs 999 (400), Recover Rs 1,499 (1,000). 14-day free trial, no setup fee. WhatsApp bills and payment reminders from your TallyPrime.",
+        description="ASVA plans: Lite Rs 699 (100 active debtors), Collect Rs 999 (250), Recover Rs 1,499 (500). 14-day free trial, no setup fee. WhatsApp bills and payment reminders from your TallyPrime.",
         keywords="ASVA pricing, ASVA free trial, Tally WhatsApp reminder price, payment reminder software India price, receivables software for Tally",
         body=body, jsonld=faq_ld)
 
@@ -1563,9 +1563,9 @@ Distributors and wholesalers selling on credit in India: electrical, hardware, c
 
 ## Pricing
 14-day free trial on the full product, then priced by active debtors (customers with a
-WhatsApp number who still owe money): Lite Rs 699 a month (150 active debtors), Collect
-Rs 999 (400), Recover Rs 1,499 (1,000, adds automatic customer replies, promise
-follow-up and multi-company). Custom pricing above 1,000. No setup fee.
+WhatsApp number who still owe money): Lite Rs 699 a month (100 active debtors), Collect
+Rs 999 (250), Recover Rs 1,499 (500, adds automatic customer replies, promise
+follow-up and multi-company). Custom pricing above 500. No setup fee.
 
 ## Key pages
 - Home: {b}/

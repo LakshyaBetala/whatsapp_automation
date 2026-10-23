@@ -54,7 +54,7 @@ def test_heartbeat_active_business(monkeypatch):
     assert hb["days_left"] == 24
     assert hb["messages_used"] == 270 and hb["messages_limit"] == 8000
     assert hb["messages_remaining"] == 8000 - 270
-    assert hb["active_debtors"] == 180 and hb["debtor_cap"] == 1000
+    assert hb["active_debtors"] == 180 and hb["debtor_cap"] == 500
     assert hb["over_debtor_cap"] is False
     assert hb["features"]["send"] is True
     assert hb["license_key"].startswith("ASVA-")
@@ -285,12 +285,12 @@ def test_new_plan_table():
     from app.models import PLAN_LIMITS, PLAN_LABELS, Plan, recommend_plan, plan_has_bot
     trio = (Plan.starter, Plan.growth, Plan.pro)
     assert [PLAN_LIMITS[p]["price"] for p in trio] == [699, 999, 1499]
-    assert [PLAN_LIMITS[p]["debtors"] for p in trio] == [150, 400, 1000]
+    assert [PLAN_LIMITS[p]["debtors"] for p in trio] == [100, 250, 500]
     assert [PLAN_LIMITS[p]["messages"] for p in trio] == [1200, 3200, 8000]
     assert [PLAN_LABELS[p] for p in trio] == ["Lite", "Collect", "Recover"]
     assert all(plan_has_bot(p) for p in Plan)
-    assert recommend_plan(150) == Plan.starter and recommend_plan(151) == Plan.growth
-    assert recommend_plan(401) == Plan.pro and recommend_plan(1001) == Plan.max
+    assert recommend_plan(100) == Plan.starter and recommend_plan(101) == Plan.growth
+    assert recommend_plan(251) == Plan.pro and recommend_plan(501) == Plan.max
 
 
 def test_months_zero_creates_a_fourteen_day_trial_on_full_features():
@@ -326,8 +326,8 @@ def test_paid_months_still_create_an_active_paid_cycle():
 def test_debtor_cap_notice():
     from app.models import Plan
     from app.services.license import debtor_cap_notice
-    assert debtor_cap_notice(380, Plan.growth) is None
-    msg = debtor_cap_notice(520, Plan.growth)
-    assert "520" in msg and "400" in msg and "120" in msg and "Recover" in msg
+    assert debtor_cap_notice(240, Plan.growth) is None
+    msg = debtor_cap_notice(320, Plan.growth)
+    assert "320" in msg and "250" in msg and "70" in msg and "Recover" in msg
     assert "—" not in msg and "–" not in msg
-    assert "Custom" in debtor_cap_notice(1500, Plan.pro)
+    assert "Custom" in debtor_cap_notice(800, Plan.pro)

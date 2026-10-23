@@ -90,7 +90,7 @@ def test_renewal_payment_line_team_only_is_clickable(monkeypatch):
     assert "https://wa.me/919344110272" in line and "upi://" not in line
 
 
-def _sc_setup(monkeypatch, biz, left, live="active", debtors=320):
+def _sc_setup(monkeypatch, biz, left, live="active", debtors=200):
     from app.jobs import subscription_check as sc
     sent = []
     async def fake_notify(bid, text): sent.append(text)
@@ -116,7 +116,7 @@ def test_trial_notice_names_the_plan_by_debtors(monkeypatch):
     sc, sent = _sc_setup(monkeypatch, biz, left=2)
     asyncio.run(sc.run())
     assert sent and "trial" in sent[0] and "Collect" in sent[0]
-    assert "999" in sent[0] and "320" in sent[0]
+    assert "999" in sent[0] and "200" in sent[0]
     assert "—" not in sent[0] and "–" not in sent[0]
 
 

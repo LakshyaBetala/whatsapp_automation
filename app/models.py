@@ -74,10 +74,10 @@ class SyncType(str, Enum):
 # practice so a full Tally import is never blocked.
 # Plans (October 2026): a 14-day free trial on full features, then priced by
 # ACTIVE DEBTORS (parties with a WhatsApp number and an open bill):
-#   Lite     Rs699   -> 150 active debtors
-#   Collect  Rs999   -> 400 active debtors   (same features as Lite)
-#   Recover  Rs1499  -> 1000 active debtors  (+ AI replies, Recovery file, multi-company)
-#   Custom   -> above 1000, priced on request (price 0 = "contact us")
+#   Lite     Rs699   -> 100 active debtors
+#   Collect  Rs999   -> 250 active debtors   (same features as Lite)
+#   Recover  Rs1499  -> 500 active debtors  (+ AI replies, Recovery file, multi-company)
+#   Custom   -> above 500, priced on request (price 0 = "contact us")
 # "bot" = the ASVA owner assistant (LIST/BILL/photo/digest on WhatsApp); every
 # plan includes it, along with the pay link and payment reconciliation.
 # "daily_cap" = how many customer reminders this plan may send PER DAY. It is a
@@ -86,9 +86,9 @@ class SyncType(str, Enum):
 # (see reminder_sweep priority drip). A new number is warmed up UNDER this (ramp
 # over ~7 days). Higher tiers clear a large debtor book faster.
 PLAN_LIMITS: dict[Plan, dict[str, int]] = {
-    Plan.starter: {"debtors": 150, "messages": 1200, "clients": 1000000, "price": 699, "bot": 1, "daily_cap": 50},
-    Plan.growth: {"debtors": 400, "messages": 3200, "clients": 1000000, "price": 999, "bot": 1, "daily_cap": 100},
-    Plan.pro: {"debtors": 1000, "messages": 8000, "clients": 1000000, "price": 1499, "bot": 1, "daily_cap": 150},
+    Plan.starter: {"debtors": 100, "messages": 1200, "clients": 1000000, "price": 699, "bot": 1, "daily_cap": 50},
+    Plan.growth: {"debtors": 250, "messages": 3200, "clients": 1000000, "price": 999, "bot": 1, "daily_cap": 100},
+    Plan.pro: {"debtors": 500, "messages": 8000, "clients": 1000000, "price": 1499, "bot": 1, "daily_cap": 150},
     Plan.max: {"debtors": 5000, "messages": 40000, "clients": 1000000, "price": 0, "bot": 1, "daily_cap": 300},
 }
 
