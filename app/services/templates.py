@@ -258,7 +258,8 @@ TEMPLATES: dict[tuple[str, Lang], dict[str, str]] = {
             "Bill number: {invoice_number}\n"
             "Amount: {amount}\n"
             "Date: {date}\n\n"
-            "Pay via UPI: {upi_link}\n\n"
+            "Pay online (UPI, GPay, PhonePe or bank transfer):\n"
+            "{upi_link}\n\n"
             "The bill PDF is attached. Thank you!"
         ),
     },

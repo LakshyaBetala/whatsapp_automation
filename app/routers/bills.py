@@ -146,7 +146,17 @@ async def _generate_and_deliver(
         return
 
     try:
-        lang = Lang(client.get("language") or "hi")
+        # English unless the OWNER chose Hinglish. This used to fall back to
+        # Hindi whenever the customer had no language of their own - nearly all
+        # of them - so the Hinglish bill went out whatever the shop's setting
+        # said. An explicitly set regional language still wins, because someone
+        # chose it on purpose.
+        _cl = (client.get("language") or "").strip().lower()
+        if _cl in ("gu", "mr"):
+            tpl_key, lang = "invoice", Lang(_cl)
+        else:
+            _english = str(biz.get("msg_language") or "").lower() != "hinglish"
+            tpl_key, lang = ("invoice_en" if _english else "invoice"), Lang.hi
         plan = Plan(biz.get("plan", "starter"))
         invoice_num = bill.get("invoice_number") or bill_id[:8]
         amount_str = inr(Decimal(str(bill["amount"])))
@@ -179,14 +189,27 @@ async def _generate_and_deliver(
             lines += ["", "Once paid, kindly reply PAID. Thank you."]
             body = "\n".join(lines)
         else:
+            # The pay page, not the bare VPA. "Pay via UPI: shop@ybl" is not
+            # tappable and not payable - the customer has to retype it into an
+            # app. The signed /pay page opens in any browser and hands off to
+            # whatever UPI app they already have.
+            from app.services import upi as _upi2
+            bill_pay_link = ""
+            if biz.get("upi_vpa"):
+                try:
+                    bill_pay_link = _upi2.pay_page_url(
+                        bill["business_id"], Decimal(str(bill["amount"])),
+                        invoice_num, client_id=client.get("id"))
+                except Exception:
+                    bill_pay_link = ""
             tpl_name, body = render(
-                "invoice", lang,
+                tpl_key, lang,
                 client=client.get("name", "Customer"),
                 business=shop_name,
                 invoice_number=invoice_num,
                 amount=amount_str,
                 date=inv_date.strftime("%d-%m-%Y"),
-                upi_link=biz.get("upi_vpa") or "",
+                upi_link=bill_pay_link,
                 pdf_url="",   # never dump a storage URL into the message body
             )
 

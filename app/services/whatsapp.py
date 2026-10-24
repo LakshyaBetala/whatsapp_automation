@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import uuid
 from typing import Optional
 
 import httpx
@@ -133,6 +134,8 @@ async def send_message(
     payload = {
         "phone": to_number,
         "message": message_text,
+        # Lets wa_service refuse a duplicate if this exact send is retried.
+        "client_msg_id": str(uuid.uuid4()),
     }
     if pdf_base64:
         payload["pdf_base64"] = pdf_base64

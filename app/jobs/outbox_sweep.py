@@ -142,9 +142,14 @@ async def run() -> None:
         if sent > 0:
             await asyncio.sleep(random.uniform(settings.send_gap_min_s, settings.send_gap_max_s))
 
+        # Same row id, every attempt: a ReadTimeout means the request ARRIVED
+        # and we just did not hear back, so the retry below is only safe
+        # because wa_service recognises this key and refuses to send twice.
+        send_payload = dict(r["payload"] or {})
+        send_payload["client_msg_id"] = r["id"]
         try:
             async with httpx.AsyncClient(timeout=60) as http:
-                resp = await http.post(f"{settings.openwa_url}/api/wa/send", json=r["payload"],
+                resp = await http.post(f"{settings.openwa_url}/api/wa/send", json=send_payload,
                                        headers=whatsapp.wa_auth_headers())
                 resp.raise_for_status()
                 data = resp.json()

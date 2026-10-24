@@ -99,7 +99,14 @@ def pull(db, business_id: str, limit: int = PULL_LIMIT, *, caller: str = "laptop
         if m and m.get("type") == "reminder" and m.get("client_id") in held:
             _hold(db, business_id, r["id"], r.get("message_db_id"))
             continue
-        out.append({"id": r["id"], "payload": r["payload"],
+        # The outbox row id IS the idempotency key: it is stable across every
+        # retry and re-pull of this row, so wa_service can recognise a repeat
+        # and decline to send it twice. Without this, an ack lost on a flaky
+        # network (exactly when WhatsApp is reconnecting) re-delivered the
+        # message - the "sent twice" owners report.
+        pay = dict(r["payload"] or {})
+        pay["client_msg_id"] = r["id"]
+        out.append({"id": r["id"], "payload": pay,
                     "attempts": int(r.get("attempts") or 0)})
     return out
 

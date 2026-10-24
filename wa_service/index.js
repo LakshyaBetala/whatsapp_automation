@@ -75,6 +75,38 @@ const AUTH_DIR = path.join(AUTH_ROOT, '.baileys_auth', `session-${SESSION_ID}`);
 // whenever it is cleanly connected, and restore that snapshot instead of wiping
 // when the primary is corrupt or a stream error would otherwise force a re-scan.
 const AUTH_BAK = AUTH_DIR + '.bak';
+
+// ── Send-once ledger ────────────────────────────────────────────────────
+// The backend retries a send whenever it does not hear a clean answer, and a
+// ReadTimeout is exactly that: the request ARRIVED and we simply did not hear
+// back in time. WhatsApp had already taken the message. Retrying it delivered
+// the reminder a second time, which is the "sent twice" the owners report -
+// and it happened most around a reconnect, when answers are slowest.
+//
+// So every send may carry a client_msg_id (the outbox row id, stable across
+// every retry of that row). The first time we see one we send and remember the
+// result; every later request with the same id returns that result WITHOUT
+// sending. Kept outside AUTH_DIR on purpose: a session wipe must not reopen
+// the duplicate window.
+const SENT_ONCE = path.join(AUTH_ROOT, '.baileys_auth', `sent-once-${SESSION_ID}.json`);
+const SENT_TTL_MS = 24 * 60 * 60 * 1000;
+let sentOnce = new Map();
+try {
+    const raw = JSON.parse(fs.readFileSync(SENT_ONCE, 'utf8'));
+    const cut = Date.now() - SENT_TTL_MS;
+    for (const [k, v] of Object.entries(raw)) if (v && v.at > cut) sentOnce.set(k, v);
+} catch (e) { /* first run, or unreadable: start empty */ }
+
+function rememberSent(id, result) {
+    if (!id) return;
+    sentOnce.set(id, { at: Date.now(), result });
+    const cut = Date.now() - SENT_TTL_MS;
+    for (const [k, v] of sentOnce) if (!v || v.at <= cut) sentOnce.delete(k);
+    try {
+        fs.mkdirSync(path.dirname(SENT_ONCE), { recursive: true });
+        fs.writeFileSync(SENT_ONCE, JSON.stringify(Object.fromEntries(sentOnce)), 'utf8');
+    } catch (e) { console.warn('send-once ledger not saved:', e.message); }
+}
 let restoredFromBackup = false;   // restore at most once per process, then trust it
 function _credsOk(dir) {
     try { JSON.parse(fs.readFileSync(path.join(dir, 'creds.json'), 'utf8')); return true; }
@@ -726,9 +758,17 @@ app.post('/api/wa/send', requireKey, async (req, res) => {
     if (!clientReady || !sock) {
         return res.status(503).json({ success: false, error: 'WhatsApp not ready' });
     }
-    const { phone, message, pdf_base64, pdf_name, media_base64, media_type, media_name } = req.body;
+    const { phone, message, pdf_base64, pdf_name, media_base64, media_type, media_name,
+            client_msg_id } = req.body;
     if (!phone || !message) {
         return res.status(400).json({ success: false, error: 'Missing phone or message' });
+    }
+    // Already delivered under this id: answer with the original result and do
+    // NOT send again. This is what makes a backend retry safe.
+    const prior = client_msg_id ? sentOnce.get(client_msg_id) : null;
+    if (prior && prior.at > Date.now() - SENT_TTL_MS) {
+        console.log(`Duplicate send suppressed (client_msg_id=${client_msg_id}).`);
+        return res.json({ ...prior.result, deduped: true });
     }
     try {
         const { d, jid: rawJid } = digitsToJid(phone);
@@ -739,7 +779,9 @@ app.post('/api/wa/send', requireKey, async (req, res) => {
             const r = await sock.onWhatsApp(d);
             if (!(r && r[0] && r[0].exists)) {
                 console.warn(`Skip send: ${d} is not on WhatsApp`);
-                return res.json({ success: false, error: 'not_on_whatsapp', skipped: true });
+                const miss = { success: false, error: 'not_on_whatsapp', skipped: true };
+                rememberSent(client_msg_id, miss);   // a settled outcome, not a retry
+                return res.json(miss);
             }
             jid = r[0].jid;
         } catch (e) { console.warn(`Number check failed for ${d} (sending anyway):`, e.message); }
@@ -758,7 +800,10 @@ app.post('/api/wa/send', requireKey, async (req, res) => {
             sent = await sock.sendMessage(jid, { text: message });
         }
         if (sent && sent.key) cacheMsg(sent.key.id, sent.message);
-        res.json({ success: true, message: 'Message sent successfully' });
+        const ok = { success: true, message: 'Message sent successfully',
+                     messageId: (sent && sent.key && sent.key.id) || undefined };
+        rememberSent(client_msg_id, ok);
+        res.json(ok);
     } catch (error) {
         console.error('Error sending message:', error.message);
         res.status(500).json({ success: false, error: error.message });
