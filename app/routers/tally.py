@@ -448,6 +448,8 @@ async def import_outstanding(payload: TallyImportPayload):
     biz_cd = _biz_default_credit_days(db, biz)   # trade-category fallback credit period
     _sync_company_name(db, biz, payload.company_name)
 
+    from app.services import tally_freshness as _fresh
+    _fresh.stamp_sync(db, biz)   # the figures are current as of now
     clients_created = 0
     credit_balances = 0
     zero_balances = 0
@@ -603,6 +605,10 @@ async def sync_daybook(payload: TallySyncPayload, background_tasks: BackgroundTa
     # Liveness for the ops health monitor: the watcher posts here every ~60s.
     from app.services import license as _lic
     _lic.stamp_last_seen(db, biz)
+    # Distinct from last_seen, which the desktop heartbeat also stamps: this is
+    # the only thing that says the FIGURES are current.
+    from app.services import tally_freshness as _fresh
+    _fresh.stamp_sync(db, biz)
 
     sales_processed = 0
     new_bills = 0
@@ -1029,6 +1035,8 @@ def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: Bac
     from collections import defaultdict
     db = _verify_token(payload.business_id, payload.agent_token)
     biz = str(payload.business_id)
+    from app.services import tally_freshness as _fresh
+    _fresh.stamp_sync(db, biz)   # the figures are current as of now
     _sync_company_name(db, biz, payload.company_name)
     fy = _fy_start().isoformat()
 

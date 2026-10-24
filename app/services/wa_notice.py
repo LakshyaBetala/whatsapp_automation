@@ -35,6 +35,8 @@ RECENT_HOURS = 72       # "sending again" only closes a notice from the last 3 d
 
 DOWN = "wa_down_notice"
 BACK = "wa_back_notice"
+STALE = "tally_stale_notice"
+FRESH = "tally_fresh_notice"
 
 _DOWN_EN = (
     "{name}: your WhatsApp is not connected to ASVA right now, so bills and "
@@ -56,6 +58,36 @@ _DOWN_HI = (
 )
 _BACK_EN = ("{name}: your WhatsApp is connected again. Bills and reminders are "
             "going out from your number as usual.")
+
+# Stale figures. The owner has to be able to act on this without opening a
+# dashboard, so it says exactly what stopped, exactly what to do, and offers
+# the one answer only they can give.
+_STALE_EN = (
+    "{name}: ASVA last read your Tally {when}, so the outstanding figures are "
+    "now {days} days old.\n\n"
+    "I have PAUSED payment reminders. Chasing someone on {days}-day-old figures "
+    "risks asking a customer for money they have already paid.\n\n"
+    "To get the latest figures:\n"
+    "1. Open TallyPrime on the shop computer\n"
+    "2. Open ASVA and press Refresh\n"
+    "Reminders restart on their own within a minute. Nothing is lost.\n\n"
+    "If you would rather keep chasing on {when}'s figures for now, reply CHASE."
+)
+_STALE_HI = (
+    "{name}: ASVA ne aapki Tally {when} padhi thi, is liye outstanding ke "
+    "figures ab {days} din purane hain.\n\n"
+    "Maine payment reminders ROK diye hain. {days} din purane figures par chase "
+    "karne se aisa customer bhi maang baithega jisne paisa de diya hai.\n\n"
+    "Nayi figures ke liye:\n"
+    "1. Shop computer par TallyPrime kholiye\n"
+    "2. ASVA kholkar Refresh dabaiye\n"
+    "Reminders ek minute me apne aap chalu ho jayenge. Kuch nahi gaya.\n\n"
+    "Agar abhi {when} wale figures par hi chase karna hai to CHASE reply karein."
+)
+_FRESH_EN = ("{name}: Tally is synced again and the figures are current. "
+             "Payment reminders have restarted.")
+_FRESH_HI = ("{name}: Tally phir se sync ho gayi hai aur figures aaj ke hain. "
+             "Payment reminders chalu ho gaye hain.")
 _BACK_HI = ("{name}: aapka WhatsApp phir se connected hai. Bills aur reminders "
             "aapke number se jaise pehle ja rahe hain.")
 
@@ -141,6 +173,11 @@ async def run(db, problems: list[dict], health: dict) -> int:
         log.warning("wa_notice: could not load shops", exc_info=True)
         return 0
 
+    # Shops whose figures are too old to chase on. Own query, because the
+    # columns may predate migration 060 - see tally_freshness.stale_ids.
+    from app.services import tally_freshness as fresh
+    stale_ids = fresh.stale_ids(db, list(rows))
+
     sent = 0
     for bid, row in rows.items():
         biz = bizes.get(bid)
@@ -165,6 +202,30 @@ async def run(db, problems: list[dict], health: dict) -> int:
                 sent += 1
                 log.info("wa_notice: told %s their WhatsApp is disconnected", name)
             continue
+
+        # Figures too old to chase on: say what stopped and how to restart it.
+        if bid in stale_ids:
+            last = _last_notice(db, bid, STALE)
+            if last is not None and _mins(last) < REPEAT_HOURS * 60:
+                continue                   # already told today
+            full = bizes.get(bid) or {}
+            when = fresh.last_sync_label(full, english=english)
+            hrs = fresh.hours_since_sync(full)
+            text = (_STALE_EN if english else _STALE_HI).format(
+                name=name, when=when, days=int((hrs or 0) // 24) or 1)
+            if await _send(db, biz, STALE, text):
+                sent += 1
+                log.info("wa_notice: told %s their Tally figures are stale", name)
+            continue
+
+        # Synced again, and we had interrupted them about it: close that loop.
+        last_stale = _last_notice(db, bid, STALE)
+        if (last_stale is not None and _mins(last_stale) <= RECENT_HOURS * 60):
+            last_fresh = _last_notice(db, bid, FRESH)
+            if last_fresh is None or last_fresh < last_stale:
+                if await _send(db, biz, FRESH,
+                               (_FRESH_EN if english else _FRESH_HI).format(name=name)):
+                    sent += 1
 
         # Back up: close the loop, but only with an owner we interrupted.
         if row.get("wa_ready") is not True:

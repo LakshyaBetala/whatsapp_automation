@@ -396,6 +396,16 @@ async def run() -> None:
         if subs.live_status(b.get("plan_expires_on")) != "suspended"
         and not lic.is_dormant(b)
     }
+    # Tally has been shut too long to chase on these figures. A customer who
+    # paid on Tuesday must not be chased on Thursday for money they already
+    # sent - that is worse than sending nothing. Bills are unaffected (a bill
+    # the owner just made is new information, not a stale balance); only the
+    # reminder cadence pauses, and the owner is told why and how to fix it.
+    from app.services import tally_freshness as fresh
+    stale = fresh.stale_ids(db, list(businesses))
+    if stale:
+        log.info("Reminder sweep - holding %d shop(s) on stale Tally figures", len(stale))
+        businesses = {k: v for k, v in businesses.items() if k not in stale}
     if not businesses:
         log.info("Reminder sweep - nothing to do (no active/awake businesses)")
         return

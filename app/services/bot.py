@@ -651,6 +651,26 @@ async def handle(
         if upper in ("PROMISES", "PROMISE"):
             return await _handle_promises(business_id)
 
+        # ── CHASE (no name) - answer the stale-Tally question ────────
+        # The notice asks "keep chasing on <day>'s figures?" and this is the
+        # yes. CHASE <name> below keeps its own meaning (resume ONE party off a
+        # promise hold); only the bare verb answers the figures question.
+        if upper == "CHASE":
+            from app.services import tally_freshness as _fresh
+            row = (db.table("businesses")
+                   .select("last_tally_sync_at, tally_stale_ack_at")
+                   .eq("id", business_id).limit(1).execute()).data or [{}]
+            full = {**business, **(row[0] or {})}
+            if not _fresh.is_stale(full):
+                return ("Tally is already synced, so reminders are running on "
+                        "current figures. Nothing to do.\n\nTo resume one party who promised to pay, send CHASE and their name.")
+            _fresh.ack_stale(db, business_id)
+            when = _fresh.last_sync_label(full)
+            return (f"Right, carrying on with {when}'s figures. Reminders start "
+                    f"again from the next run.\n\nOpen TallyPrime and press Refresh in ASVA "
+                    f"whenever you can, and I will switch back to live figures "
+                    f"on my own.")
+
         # ── CHASE <name> - cancel a Promise-to-Pay hold, resume now ──
         chase_match = re.match(r"CHASE\s+(.+)", upper)
         if chase_match:
