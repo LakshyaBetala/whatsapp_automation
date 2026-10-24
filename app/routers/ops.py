@@ -339,6 +339,41 @@ class AssistantTogglePayload(BaseModel):
     enabled: bool
 
 
+class WaServerPayload(BaseModel):
+    admin_key: str = ""
+    business_id: str
+
+
+@router.post("/wa-server")
+def ops_wa_server(payload: WaServerPayload, request: Request):
+    """Move one shop's WhatsApp onto ASVA's server, from the operator's side.
+
+    The shop app has had this setting for months and not one owner found it:
+    every shop ran on laptop transport, which only delivers while that computer
+    is awake and linked, and queues expired unsent. Starting it here means the
+    operator can reserve the port on a phone call and the owner only has to
+    scan the code already waiting in their ASVA WhatsApp page.
+
+    Reserving a port does NOT redirect sending. wa_transport flips to "server"
+    only when the scan completes (wa_server.mark_connected), so a shop that
+    never scans keeps sending exactly as it does today.
+    """
+    if not _authed(request, payload.admin_key):
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+    from app.services import wa_server
+    db = require_db()
+    rows = (db.table("businesses").select("id, business_name")
+            .eq("id", payload.business_id).limit(1).execute()).data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="No such shop")
+    port = wa_server.request_server(db, payload.business_id)
+    log.info("Command Center: server WhatsApp reserved for %s (port %s)",
+             payload.business_id, port)
+    return {"ok": True, "port": port,
+            "name": rows[0].get("business_name") or "",
+            "next": "Ask the owner to open ASVA and scan the WhatsApp code now waiting there."}
+
+
 @router.post("/assistant/toggle")
 def ops_assistant_toggle(payload: AssistantTogglePayload):
     """Founder flips the global auto-pitch switch. Owner commands are unaffected."""
@@ -830,7 +865,7 @@ _PAGE_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
       <span class="tfcount" id="hcount"></span>
     </div>
     <div class="tablewrap"><table>
-      <thead><tr><th>Shop</th><th>Status</th><th>Agent</th><th>Version</th><th>WhatsApp</th>
+      <thead><tr><th>Shop</th><th>Status</th><th>Agent</th><th>Version</th><th>WhatsApp</th><th>Runs on</th>
         <th class="num">Sent</th><th class="num">Failed</th><th class="num">Blocked</th>
         <th class="num">Queued</th><th>Last seen</th></tr></thead>
       <tbody id="hrows"></tbody>
@@ -959,6 +994,13 @@ function _filterTable(rowsSel, inputId, ckId, countId){
   if(c)c.textContent=(q||prob)?(shown+' of '+total+' shown'):'';
 }
 function applyHFilter(){ _filterTable('#hrows','hfilter','hprob','hcount'); }
+
+async function toServer(id,name){
+  if(!confirm('Move "'+name+'" WhatsApp onto the ASVA server?\n\nA session starts here within a minute. Nothing changes for them until the owner scans the code in their ASVA WhatsApp page - sending keeps working as it does now until then.'))return;
+  const x=await post('/ops/wa-server',{business_id:id});
+  flash(x.ok?('Port '+x.j.port+' reserved. '+x.j.next):(x.j.detail||'Could not reserve'));
+  loadHealth();
+}
 function applySFilter(){ _filterTable('#rows','sfilter','sprob','scount'); }
 function renderIssues(alerts){
   const crit=alerts.filter(a=>a.severity==='critical');
@@ -1220,7 +1262,14 @@ async function loadHealth(){
       const vcur=(b.version&&b.version!=='-'&&b.version===d.server_version);
       const vcell=(!b.version||b.version==='-')?'<span class="muted">not reported</span>'
         :('<span'+(vcur?'':' class="warnv" title="Older than the server build - the shop will update when it next opens ASVA"')+'>'+esc(b.version)+'</span>');
-      const prob = !b.online || b.wa_ready===false || (b.failed_today>0) || (b.queued>0) || (b.status && b.status!=='active') || !!b.setup_problem;
+      // Laptop transport only delivers while the shop's own computer is awake
+      // and linked. It is the reason the first twelve shops' queues expired, so
+      // it is shown as a problem with a one-click fix, not as a neutral fact.
+      const onServer = b.wa_transport==='server';
+      const trans = onServer ? '<span class="muted">server</span>'
+        : '<span class="warnv" title="Only sends while the shop computer is on and linked">laptop</span>'
+          +' <button class="btn" style="padding:2px 7px;font-size:.82em" onclick="toServer(\''+b.id+'\',\''+esc(b.name).replace(/\\/g,'')+'\')">Move</button>';
+      const prob = !b.online || b.wa_ready===false || (b.failed_today>0) || (b.queued>0) || (b.status && b.status!=='active') || !!b.setup_problem || !onServer;
       // A shop can be online, current and sending, yet importing ZERO customers.
       // Flag it on the NAME so it cannot be mistaken for a healthy row.
       const setup = b.setup_problem
@@ -1230,12 +1279,13 @@ async function loadHealth(){
         '<td><span class="dot '+(b.online?'on':'off')+'"></span>'+(b.online?'online':'offline')+'</td>'+
         '<td>'+vcell+'</td>'+
         '<td>'+wa+'</td>'+
+        '<td>'+trans+'</td>'+
         '<td class="num">'+inr(b.sent_today)+'</td>'+
         '<td class="num '+(b.failed_today?'warnv':'')+'">'+inr(b.failed_today)+'</td>'+
         '<td class="num">'+inr(b.blocked_today)+'</td>'+
         '<td class="num '+(b.queued?'warnv':'')+'">'+inr(b.queued)+'</td>'+
         '<td>'+ago(b.last_seen_min)+'</td></tr>';
-    }).join('') || '<tr><td colspan="10" class="muted" style="padding:22px">No shops yet.</td></tr>';
+    }).join('') || '<tr><td colspan="11" class="muted" style="padding:22px">No shops yet.</td></tr>';
     applyHFilter();
   }catch(e){
     showBanner('down','Cannot reach the ASVA server. The backend may be down or restarting. It retries automatically.');

@@ -13,6 +13,7 @@ dashboard, the agent, and any future ops view all agree on one truth.
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import secrets
 from typing import Optional
 
@@ -20,6 +21,8 @@ from app.config import settings
 from app.models import PLAN_LABELS, PLAN_LIMITS, Plan, recommend_plan
 from app.services import i18n
 from app.services import subscription as subs
+
+log = logging.getLogger(__name__)
 
 
 def generate_license_key() -> str:
@@ -85,7 +88,25 @@ def create_business(db, *, owner_name: str, whatsapp_number: str,
         "onboarding_status": "active",
     }
     res = db.table("businesses").insert(row).execute()
-    return res.data[0] if getattr(res, "data", None) else row
+    created = res.data[0] if getattr(res, "data", None) else row
+
+    # Put the shop's WhatsApp on ASVA's server from minute one. Left to the
+    # owner to discover, this never happened: all twelve of the first shops ran
+    # on laptop transport, which only delivers while that computer is awake and
+    # linked, and their queues expired unsent. Requesting it here means the
+    # manager has a process (and therefore a QR) waiting before onboarding
+    # starts. Sending still goes to the laptop until the owner actually scans -
+    # mark_connected flips wa_transport - so this is additive and cannot
+    # double-send.
+    bid = created.get("id")
+    if bid:
+        try:
+            from app.services import wa_server
+            created["wa_port"] = wa_server.request_server(db, bid)
+        except Exception:
+            log.warning("new shop %s: could not reserve a server WhatsApp port", bid,
+                        exc_info=True)
+    return created
 
 
 def ensure_license_key(db, biz: dict) -> str:

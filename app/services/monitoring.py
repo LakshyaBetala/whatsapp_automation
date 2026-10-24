@@ -114,7 +114,8 @@ def build_health(db) -> dict:
 
     bizes = _paged(lambda: db.table("businesses").select(
         "id, business_name, plan, plan_expires_on, last_seen, agent_version, "
-        "whatsapp_number, wa_ready, wa_checked_at, outbox_pending, wa_transport"))
+        "whatsapp_number, wa_ready, wa_checked_at, outbox_pending, wa_transport, "
+        "created_at"))
     biz_by_id = {b["id"]: b for b in bizes}
 
     # Today's messages -> per business + totals, bucketed by outcome.
@@ -190,6 +191,10 @@ def build_health(db) -> dict:
             "id": bid, "name": b.get("business_name") or "(unnamed)",
             "status": status, "online": online, "last_seen_min": online_min,
             "never_seen": never_seen,
+            # How long since onboarding. A shop that never checked in at all is
+            # only "setup in progress" for so long; after that it is a dead
+            # install, and that is the single most common way a shop is lost.
+            "age_min": _mins_since(_parse_ts(b.get("created_at")), now),
             "version": b.get("agent_version") or "-",
             "wa_ready": wa_ready, "wa_stale": wa_min > (settings.wa_down_alert_min * 4),
             "sent_today": sent_today, "failed_today": drop_t.get(bid, 0),
@@ -243,18 +248,38 @@ def evaluate(health: dict) -> list[dict]:
         name = r["name"]
         if r["status"] == "suspended":
             continue                                   # expected, not an incident
+        dead_min = settings.dead_shop_alert_h * 60
         if r.get("never_seen"):
-            # Onboarded but the laptop has never connected yet - that is a setup
-            # step in progress, not an outage. Don't raise a scary offline alert
-            # (and never the "1000000000 min" nonsense).
+            # Onboarded but never once connected. For the first day that is a
+            # setup step in progress. After that it is an install that never
+            # started, which is how six of the first twelve shops were lost
+            # without anyone being told.
+            if r.get("age_min", 0) >= dead_min:
+                days = r["age_min"] // 1440
+                problems.append({"kind": "shop_never_started", "business_id": r["id"],
+                                 "severity": "critical",
+                                 "title": f"{name}: never connected since signup",
+                                 "body": f"Onboarded {days} day(s) ago and ASVA on their computer "
+                                         f"has never once reached the server. Nothing has been "
+                                         f"sent and nothing ever will be. Call them."})
             continue
         if not r["online"]:
             hrs = r["last_seen_min"] // 60
             ago = f"{hrs} hours" if hrs >= 1 else f"{r['last_seen_min']} min"
-            problems.append({"kind": "shop_offline", "business_id": r["id"], "severity": "warn",
-                             "title": f"{name}: agent offline",
-                             "body": f"No contact for {ago}. Tally push and queued sends are "
-                                     f"paused until the shop laptop is back on."})
+            if r["last_seen_min"] >= dead_min:
+                # A night or a Sunday is normal; a full day of silence is a shop
+                # quietly dying. Critical, because only criticals are emailed.
+                problems.append({"kind": "shop_dying", "business_id": r["id"],
+                                 "severity": "critical",
+                                 "title": f"{name}: silent for {hrs} hours",
+                                 "body": f"No contact for {ago}. Reminders are not going out and "
+                                         f"the queue is expiring unsent. This is what a shop "
+                                         f"looks like just before it is lost - call them today."})
+            else:
+                problems.append({"kind": "shop_offline", "business_id": r["id"], "severity": "warn",
+                                 "title": f"{name}: agent offline",
+                                 "body": f"No contact for {ago}. Tally push and queued sends are "
+                                         f"paused until the shop laptop is back on."})
         # wa_ready is last reported by the laptop; while it is off that value is
         # stale, and shop_offline already says why nothing sends. Telling the
         # owner to re-scan a WhatsApp that is merely asleep is wrong.

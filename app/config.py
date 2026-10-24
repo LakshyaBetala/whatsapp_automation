@@ -185,6 +185,7 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""                   # optional: set to send swallowed errors to Sentry
     # Thresholds for what counts as "needs attention".
     offline_alert_min: int = 20            # shop agent silent this long = offline
+    dead_shop_alert_h: int = 24            # silent (or never seen) this long = dying, emailed
     wa_down_alert_min: int = 15            # a WhatsApp session down this long
     outbox_backlog_alert: int = 25         # this many queued+aging = stuck
     fail_rate_alert_pct: int = 40          # today's failed/attempted above this
