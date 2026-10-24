@@ -35,6 +35,38 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["admin"])
 
 
+def _warmup_banner(biz: dict) -> str:
+    """While a new number is being warmed up, say so on the home page.
+
+    reminder_sweep._daily_cap ramps a new shop 20, 40, 60 ... up to the plan's
+    cap over its first week, because blasting a whole book from a number that
+    has never sent bulk is the surest way to get it blocked. Nothing told the
+    owner, so day one looks like a broken product: twenty messages out of five
+    hundred parties. This is the missing sentence, and it disappears by itself
+    once the ramp is done.
+    """
+    from app.jobs.reminder_sweep import _daily_cap
+    try:
+        created = _dt.date.fromisoformat(str(biz.get("created_at"))[:10])
+    except (TypeError, ValueError):
+        return ""
+    today = _today()
+    age = (today - created).days
+    if age < 0 or age >= 7:
+        return ""
+    cap_now = _daily_cap(biz, today)
+    full = _daily_cap({**biz, "created_at": (today - _dt.timedelta(days=99)).isoformat()}, today)
+    if cap_now >= full:
+        return ""                       # already at full speed; nothing to explain
+    return (
+        f'<div class="flash" style="display:block">'
+        f'<b>Day {age + 1}: warming up your WhatsApp number.</b> '
+        f'Today ASVA reminds up to {cap_now} customers, most overdue first, '
+        f'building up to {full} a day. This is deliberate: a new number that '
+        f'sends its whole list at once gets blocked by WhatsApp. '
+        f'Nothing is lost, everyone is reached.</div>')
+
+
 def _biz_by_token(token: str) -> dict:
     db = require_db()
     resp = (db.table("businesses")
@@ -44,7 +76,7 @@ def _biz_by_token(token: str) -> dict:
                     "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
                     "overdue_repeat_days, overdue_max_repeats, reminder_batches, plan_expires_on, "
                     "catchup_date, catchup_action, wa_ready, wa_checked_at, setup_problem, "
-                    "wa_transport")
+                    "wa_transport, created_at")
             .eq("agent_token", token).limit(1).execute())
     if not resp.data:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -4135,6 +4167,7 @@ def admin_today(token: str = Query(...), lang: str = Query("english")):
     biz = _biz_by_token(token)
     en = _is_en(lang)
     title = biz.get("business_name") or "ASVA"
+    warmup_banner = _warmup_banner(biz)
     # Shops whose WhatsApp still lives on this computer: one quiet line pointing
     # at the server move (reminders then go out with the laptop off).
     wa_banner = ("" if biz.get("wa_transport") == "server" else
@@ -4142,7 +4175,7 @@ def admin_today(token: str = Query(...), lang: str = Query("english")):
                  f'href="/admin/whatsapp?token={_h(token)}&lang={_h(lang)}">'
                  f'Keep reminders going when this computer is off: move WhatsApp to '
                  f'ASVA&#39;s server (2 minutes) &rarr;</a>')
-    body = wa_banner + """<div id="thead"><h1 class="hi">Loading...</h1></div>
+    body = warmup_banner + wa_banner + """<div id="thead"><h1 class="hi">Loading...</h1></div>
 <div id="tflash" class="flash"></div>
 <div id="twrap"><div class="sk" style="margin-top:18px"><i></i><i></i><i></i></div></div>
 
@@ -4503,13 +4536,13 @@ def admin_setup(token: str = Query(...), lang: str = Query("english")):
     cat_opts = "".join(f'<option value="{k}">{v}</option>' for k, v in CATEGORY_LABELS.items())
     body = f"""
 <h1>ASVA setup</h1>
-<div class="muted">{biz['business_name']} - chhote step, phir aap live.</div>
+<div class="muted">{biz['business_name']} - four quick questions, then you are live.</div>
 
 <div class="card" style="margin-top:20px;max-width:560px">
- <label>1. Aap kis line me ho? (Your trade)</label>
+ <label>1. What trade are you in?</label>
  <select id="cat" style="font:inherit;padding:10px 12px;border:1px solid #EAEAEA;border-radius:8px;background:#fff;width:100%;box-sizing:border-box">{cat_opts}</select>
- <div class="hint" style="margin-top:6px">Isse un customers ke liye credit din set hote hain jinke Tally me credit period nahi hai. Electricals = 60 din, aur bhi. Tally me jahan period hai wahan wahi chalega.</div>
- <label style="margin-top:16px">2. UPI ID (reminder me QR + link isi ka jayega)</label>
+ <div class="hint" style="margin-top:6px">This sets the credit period for customers who do not have one in Tally (electricals 60 days, and so on). Wherever Tally already has a period, Tally wins.</div>
+ <label style="margin-top:16px">2. UPI ID (every reminder carries this as a pay link and QR)</label>
  <input id="upi" value="{upi_cur}" placeholder="e.g. yourshop@okhdfcbank">
  <label>3. Message language</label>
  <div class="seg" id="lang" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
@@ -4527,6 +4560,12 @@ def admin_setup(token: str = Query(...), lang: str = Query("english")):
    <b>One step left: connect WhatsApp.</b><br>
    ASVA holds the connection on its own server, so reminders keep going out
    when this computer is off, asleep or being updated.
+   <div style="margin-top:10px">
+     <b>Your first week:</b> ASVA warms your number up slowly so WhatsApp never
+     blocks it. Day one reaches your 20 most overdue customers, and it builds up
+     from there until your whole list is covered. Seeing only a few go out on the
+     first day is ASVA working, not ASVA failing.
+   </div>
    <div style="margin-top:12px">
      <a href="/admin/whatsapp?token={_h(token)}&amp;lang={_h(lang)}"
         style="display:inline-block;background:#0a7d33;color:#fff;text-decoration:none;
@@ -4619,6 +4658,37 @@ def admin_whatsapp_disconnect(payload: TokenPayload):
     biz = _wa_biz(payload.token)
     ok = wa_server.release_server(require_db(), biz["id"], biz.get("wa_port"))
     return {"ok": True, "logged_out": ok}
+
+
+@router.post("/admin/whatsapp/relink")
+def admin_whatsapp_relink(payload: TokenPayload):
+    """Throw away this shop's server session and show a fresh QR.
+
+    The child binds 127.0.0.1 on the VPS, so the shop's app cannot reach it
+    directly; the backend proxies. Used when the phone says "could not link
+    device" and the only way out is a clean re-scan.
+    """
+    biz = _wa_biz(payload.token)
+    port = biz.get("wa_port")
+    if not port:
+        return {"ok": False, "detail": "No server session to relink yet."}
+    import httpx
+    try:
+        r = httpx.post(f"{wa_server.child_url(int(port))}/api/wa/relink",
+                       headers=wa_server._headers(), timeout=20.0)
+        ok = r.status_code == 200
+    except Exception:
+        log.warning("relink: child on port %s did not answer", port)
+        ok = False
+    # The old link is gone either way, so never leave the row claiming it is
+    # connected - that would keep the server delivering into a dead session.
+    # Transport stays as it is ON PURPOSE: flipping it to "laptop" here would
+    # hand the queue to a shop computer that no longer runs wa_service at all,
+    # and every send would fail until the re-scan. Left on "server", the queue
+    # simply waits for the new session, which mark_connected re-confirms.
+    require_db().table("businesses").update(
+        {"wa_ready": False}).eq("id", biz["id"]).execute()
+    return {"ok": ok}
 
 
 @router.get("/admin/whatsapp/status")

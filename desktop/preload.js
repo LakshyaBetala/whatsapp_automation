@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('asva', {
   pairFinish: (company) => ipcRenderer.invoke('pair-finish', company),
   openDashboard: () => ipcRenderer.invoke('open-dashboard'),
   waStatus: () => ipcRenderer.invoke('wa-status'),
+  waRelink: () => ipcRenderer.invoke('wa-relink'),
 
   // Connection doctor: {ok, checks:[{name, ok, detail}]}. One button that tells
   // the owner (or the operator, remotely) exactly which link is broken.

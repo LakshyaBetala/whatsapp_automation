@@ -22,6 +22,7 @@ let makeWASocket, useMultiFileAuthState, makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion, fetchLatestWaWebVersion, downloadMediaMessage,
     DisconnectReason;
 let _baileysReady = false;
+let banned = false;   // 403: WhatsApp blocked this number. Reconnecting cannot fix it.
 async function loadBaileys() {
     if (_baileysReady) return;
     const b = await import('@whiskeysockets/baileys');
@@ -619,9 +620,18 @@ async function start() {
                     return;
                 }
                 if (code === DisconnectReason.forbidden) {
-                    // 403: number blocked by WhatsApp. Nothing here fixes it.
-                    console.error('FORBIDDEN (403): WhatsApp has blocked this number. Re-scanning will not help.');
-                    scheduleRestart(300000);
+                    // 403: WhatsApp has blocked this number. Reconnecting cannot
+                    // fix it, and hammering a block is how a temporary one is
+                    // made permanent - so we STOP, and stay stopped, and say so
+                    // loudly enough that a human finds out. The old code logged
+                    // "re-scanning will not help" and then scheduled a restart
+                    // every five minutes anyway, for as long as the process ran.
+                    banned = true;
+                    clientReady = false;
+                    qrCodeData = null;
+                    console.error('FORBIDDEN (403): WhatsApp has BLOCKED this number. '
+                        + 'Halting - no further connection attempts will be made. '
+                        + 'Re-scanning will not help; this needs WhatsApp support.');
                     return;
                 }
                 if (!registered) {
@@ -688,7 +698,8 @@ function requireKey(req, res, next) {
 }
 
 app.get('/api/wa/status', requireKey, (req, res) => {
-    res.json({ ready: clientReady, qr: qrCodeData, registered, last_close_code: lastCloseCode });
+    res.json({ ready: clientReady, qr: qrCodeData, registered, banned,
+               last_close_code: lastCloseCode });
 });
 
 // ── Re-link: the ONE reliable escape hatch when linking goes wrong ──────
@@ -697,6 +708,7 @@ app.get('/api/wa/status', requireKey, (req, res) => {
 // (clears the server side), a clean local wipe, and a fresh QR - plus
 // removing the old entry in the phone's Linked Devices.
 app.post('/api/wa/relink', requireKey, async (req, res) => {
+    banned = false;   // a deliberate fresh start clears the halt
     console.log('RELINK requested: logging out, wiping session, fresh QR coming.');
     gen += 1;   // orphan the old socket first so nothing races the wipe
     try { if (sock) await sock.logout(); } catch (e) { /* best-effort: server may be unreachable */ }

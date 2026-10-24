@@ -44,9 +44,16 @@ def child_url(port: int) -> str:
 
 
 def phase(status: dict | None) -> str:
-    """What the owner should see: still starting, a QR to scan, or connected."""
+    """What the owner should see: still starting, a QR to scan, or connected.
+
+    "banned" outranks everything. WhatsApp has blocked the number, the child
+    has stopped trying, and showing a QR would send the owner to scan
+    something that cannot possibly work.
+    """
     if not status:
         return "starting"
+    if status.get("banned"):
+        return "banned"
     if status.get("ready"):
         return "connected"
     if status.get("qr"):

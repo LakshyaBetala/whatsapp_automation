@@ -205,7 +205,6 @@ function loadConfig() {
     appVersion: app.getVersion(),
     companies: companies.map((co) => ({ name: co.name, ...pageUrls(backend, co.token) })),
     ...base,
-    waShopUrl: 'http://localhost:3001/qr',
   };
 }
 const CONFIG = loadConfig();
@@ -387,7 +386,11 @@ function startAll() {
       if (upd && upd.stdout) console.log('[update]', upd.stdout.trim());
     } catch (e) { console.error('updater skipped:', (e && e.message) || e); }
   }
-  const toStart = DEV_DEMO ? ['whatsapp'] : Object.keys(SPECS);
+  // 'whatsapp' (the local :3001 service) is deliberately NOT started: the
+  // shop's session lives on ASVA's server. Running one here would compete for
+  // the same number and knock the server session offline with a 440. The spec
+  // is kept so DEV_DEMO can still run a local one.
+  const toStart = DEV_DEMO ? ['whatsapp'] : Object.keys(SPECS).filter((n) => n !== 'whatsapp');
   // STAGGER the heavy children instead of firing them in one tick.
   // Each agent service is a one-file PyInstaller exe that unpacks its whole
   // bundle to %TEMP% on every launch, and wa_service is a full Node runtime.
@@ -650,10 +653,10 @@ function applyUpdateAndQuit() {
 }
 
 // ── Health polling (done in main to avoid renderer CORS) ──────────────────
-function ping(url, cb) {
+function ping(url, cb, timeoutMs) {
   let req;
   try {
-    req = httpMod(url).get(url, { timeout: 2500, headers: { 'User-Agent': USER_AGENT } }, (res) => {
+    req = httpMod(url).get(url, { timeout: timeoutMs || 2500, headers: { 'User-Agent': USER_AGENT } }, (res) => {
       let body = '';
       res.on('data', (d) => (body += d));
       res.on('end', () => cb(res.statusCode === 200, body));
@@ -687,14 +690,33 @@ function httpPostJson(url, bodyObj, cb) {
   req.write(data); req.end();
 }
 
-function parseWa(ok, body) {
-  if (!ok) return { reachable: false, ready: false, qr: null };
-  try {
-    const d = JSON.parse(body);
-    return { reachable: true, ready: !!d.ready, qr: d.qr || null };
-  } catch (e) {
-    return { reachable: true, ready: false, qr: null };
-  }
+// ── WhatsApp lives on ASVA's server, not on this computer ────────────────
+// There used to be two QRs: this laptop's wa_service on :3001, and the shop's
+// own session on ASVA's server. The WhatsApp button only ever showed the
+// laptop one, so every shop that scanned ended up on laptop transport - which
+// only delivers while this computer is awake and linked, and whose queue then
+// expires unsent. Worse, a shop that somehow scanned BOTH had two processes
+// holding one number, which WhatsApp answers with a 440 and reads to the owner
+// as "it keeps disconnecting".
+//
+// So there is now ONE QR and it belongs to the server. The session is created
+// there by the scan itself - nothing is transferred afterwards, because a
+// Baileys session cannot be moved. This window only displays it.
+function waStatus(cb) {
+  if (!CONFIG.token || !CONFIG.backendUrl) return cb({ reachable: false, ready: false, qr: null });
+  const u = `${CONFIG.backendUrl}/admin/whatsapp/status?token=${encodeURIComponent(CONFIG.token)}`;
+  ping(u, (ok, body) => {
+    if (!ok) return cb({ reachable: false, ready: false, qr: null });
+    let d = {};
+    try { d = JSON.parse(body); } catch (e) { return cb({ reachable: true, ready: false, qr: null }); }
+    if (d.phase === 'not_started') {
+      // No session reserved yet (a fresh shop). Ask for one; the manager has a
+      // process up within a minute and the next poll shows its QR.
+      httpPostJson(`${CONFIG.backendUrl}/admin/whatsapp/start`, { token: CONFIG.token }, () => {});
+      return cb({ reachable: true, ready: false, qr: null });
+    }
+    cb({ reachable: true, ready: d.phase === 'connected', qr: d.qr || null });
+  }, 12000);   // a shop's uplink is slower than localhost ever was
 }
 
 // ── License heartbeat ─────────────────────────────────────────────────────
@@ -814,10 +836,9 @@ function pollStatus() {
     if (ok) { try { const v = JSON.parse(b).version; if (v) SERVER_VERSION = v; } catch (e) {} }
     done();
   });
-  ping('http://localhost:3001/api/wa/status', (ok, b) => {
-    const w = parseWa(ok, b);
+  waStatus((w) => {
     out.whatsapp = w.ready; out.whatsappReachable = w.reachable; out.whatsappQr = w.qr;
-    if (w.reachable) WA_READY = !!w.ready;   // only trust a real answer from :3001
+    if (w.reachable) WA_READY = !!w.ready;   // only trust a real answer
     done();
   });
   // Tally sync freshness for the top bar (label + dot colour + last-sync ISO).
@@ -1066,8 +1087,13 @@ ipcMain.handle('open-dashboard', () => {
   }
   return true;
 });
-ipcMain.handle('wa-status', () => new Promise((resolve) => {
-  ping('http://localhost:3001/api/wa/status', (ok, b) => resolve(parseWa(ok, b)));
+ipcMain.handle('wa-status', () => new Promise((resolve) => { waStatus(resolve); }));
+// Relink goes through the backend too: the shop's session lives on the server
+// and its child binds 127.0.0.1 there, so this window cannot reach it directly.
+ipcMain.handle('wa-relink', () => new Promise((resolve) => {
+  if (!CONFIG.token || !CONFIG.backendUrl) return resolve({ ok: false });
+  httpPostJson(`${CONFIG.backendUrl}/admin/whatsapp/relink`, { token: CONFIG.token },
+    (ok, body) => resolve({ ok: !!ok, body }));
 }));
 // Open a link in the owner's real browser (used by the "reinstall" bar to reach
 // the download page). Only ever opens http(s) - never a local file or command.
