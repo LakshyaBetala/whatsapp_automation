@@ -4524,7 +4524,14 @@ def admin_setup(token: str = Query(...), lang: str = Query("english")):
  </div>
  <div style="margin-top:20px"><button onclick="finish()">Finish setup</button><span id="msg" class="okmsg"></span></div>
  <div class="hint" id="donehint" style="display:none;margin-top:14px">
-   Ho gaya. Ab <b>WhatsApp Setup</b> tab me QR scan karein, phir Dashboard me "Sab ON" karke live ho jayein.
+   <b>One step left: connect WhatsApp.</b><br>
+   ASVA holds the connection on its own server, so reminders keep going out
+   when this computer is off, asleep or being updated.
+   <div style="margin-top:12px">
+     <a href="/admin/whatsapp?token={_h(token)}&amp;lang={_h(lang)}"
+        style="display:inline-block;background:#0a7d33;color:#fff;text-decoration:none;
+               padding:11px 18px;border-radius:8px;font-weight:600">Connect WhatsApp now</a>
+   </div>
  </div>
 </div>
 <style>.seg button{{background:#fff;color:#2F3437;border-radius:0}} .seg button.on{{background:#0a7d33;color:#fff}}</style>
