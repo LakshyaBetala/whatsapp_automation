@@ -3786,82 +3786,73 @@ def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str 
                        and (today - _dt.date.fromisoformat(str(b["due_date"])[:10])).days
                        > OVERDUE_WINDOW_DAYS] if not _dead else []
         _steps = "".join(
-            f'<div style="margin-bottom:14px"><div style="font-weight:700">{esc(h)}</div>'
-            f'<div class="hint" style="margin-top:3px">{esc(t)}</div></div>'
-            for h, t in _legal.procedure(_udyam))
+            f'<div class="lstep"><span class="ln">{n}</span><div>'
+            f'<div class="lsh">{esc(h)}</div><div class="lst">{esc(t)}</div>'
+            f'</div></div>'
+            for n, (h, t) in enumerate(_legal.procedure(_udyam), 1))
         _notice = _legal.notice_text(
             shop=_shop, shop_address=_lf.get("shop_address"), party=c["name"],
             bills=_actionable, total=sum(Decimal(str(b.get("outstanding") or 0))
                                          for b in _actionable),
             udyam_number=_udyam, today=today, oldest_days=lg["oldest_days"]) if _actionable else ""
 
+        # One sentence per state. Everything else is a button or a fold.
+        _days = lg["oldest_days"]
         if _dead:
-            _body = (
-                f'<div>About <b>{_inr(lg["lost"])}</b> of this party&rsquo;s balance is more than '
-                f'three years past its due date. A claim for the price of goods sold runs out '
-                f'around then, so this money cannot be recovered through a notice, the MSME '
-                f'portal or a court.</div>'
-                f'<div class="hint" style="margin-top:8px">Write it off in Tally and stop '
-                f'spending time on it. If this customer still buys from you, any fresh payment '
-                f'they make settles the newest bills, not these.</div>')
+            _body = (f'<div><b>{_inr(lg["lost"])}</b> is more than 3 years old. The law no '
+                     f'longer allows you to recover it. Write it off in Tally.</div>')
             _btns = ""
         else:
             _dl = lg["deadline"]
-            _urgent = (f'<div style="margin-top:8px;font-weight:700;color:#b3261e">'
-                       f'After that date this claim cannot be enforced, by notice or in '
-                       f'court. Even a part payment before then restarts the three years.</div>'
-                       if _dl else "")
-            _lost = (f'<div class="hint" style="margin-top:8px">A further '
-                     f'<b>{_inr(lg["lost"])}</b> on this party is already past three years and '
-                     f'cannot be recovered. Write that part off.</div>' if lg["lost"] else "")
-            _small = (f'<div class="hint" style="margin-top:8px">This is a small balance. A '
-                      f'notice will usually cost more than it brings back . Ask for any '
-                      f'part payment instead. Even Rs 500 restarts the three years from the day '
-                      f'it reaches you.</div>' if lg["state"] == _legal.SMALL else "")
-            _body = (
-                f'<div><b>{_inr(lg["amount"])}</b> has been past due for '
-                f'<b>{lg["oldest_days"]} days</b>, past the 300 days ASVA chases on '
-                f'WhatsApp. Reminders have stopped for this part of the balance.</div>'
-                f'{_urgent}{_small}{_lost}')
+            if lg["state"] == _legal.SMALL:
+                _line = (f'<div><b>{_inr(lg["amount"])}</b> is {_days} days overdue. A notice '
+                         f'costs more than this is worth, so ask for any part payment.</div>')
+            elif _dl:
+                _line = (f'<div><b>{_inr(lg["amount"])}</b> is {_days} days overdue. After '
+                         f'<b>{_dl.strftime("%d %b %Y")}</b> the law will not let you recover '
+                         f'it.</div>')
+            else:
+                _line = (f'<div><b>{_inr(lg["amount"])}</b> is {_days} days overdue. WhatsApp '
+                         f'reminders have stopped. A notice is the next step.</div>')
+            _lost = (f'<div class="hint" style="margin-top:6px">Another '
+                     f'<b>{_inr(lg["lost"])}</b> here is over 3 years old and cannot be '
+                     f'recovered.</div>' if lg["lost"] else "")
+            _body = _line + _lost
             _btns = (
-                f'<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">'
-                + (f'<button class="danger" onclick="openEscalate()">Send final WhatsApp demand</button>'
+                f'<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">'
+                + ('<button class="danger" onclick="openEscalate()">Send final demand</button>'
                    if (c.get("whatsapp_number") and open_bills) else '')
-                + (f'<button class="ntbtn" onclick="document.getElementById(\'noticemodal\').classList.add(\'show\')">'
-                   f'Legal notice draft</button>' if _notice else '')
-                + f'<button class="ntbtn" onclick="document.getElementById(\'stepsmodal\').classList.add(\'show\')">'
-                  f'What to do, step by step</button></div>')
+                + ('<button class="ntbtn" onclick="openM(\'noticemodal\')">Notice draft</button>'
+                   if _notice else '')
+                + '<button class="ntbtn" onclick="openM(\'stepsmodal\')">What to do</button></div>')
         _udy_line = "" if (_udyam or _dead) else (
-            f'<div class="hint" style="margin-top:12px;padding-top:10px;border-top:1px solid #f0e3e3">'
-            f'<b>You have no Udyam number saved.</b> With one, you can claim interest at three '
-            f'times the RBI bank rate under the MSMED Act and file on the free MSME dispute '
-            f'portal, which is the cheapest route there is. Registering costs nothing. '
-            f'<a href="/admin/accounts?token={_h(token)}&amp;lang={_h(lang)}">Add it in Settings</a>.</div>')
+            f'<div class="hint" style="margin-top:10px">No Udyam number saved. With one you can '
+            f'claim interest and file free on the MSME portal. '
+            f'<a href="/admin/accounts?token={_h(token)}&amp;lang={_h(lang)}">Add it</a>.</div>')
         legal_html = (
-            f'<div class="card" style="margin-bottom:18px;border-left:4px solid {lg["color"]};'
+            f'<div class="card lcard" style="border-left:4px solid {lg["color"]};'
             f'background:{"#f7f6f3" if _dead else "#fdecea"}">'
-            f'<div style="font-weight:700;color:{lg["color"]};margin-bottom:6px">'
-            f'{"&#9711;" if _dead else "&#9888;"}&nbsp; {esc(lg["label"])}</div>'
+            f'<div class="lhead" style="color:{lg["color"]}">{esc(lg["label"])}</div>'
             f'{_body}{_btns}{_udy_line}</div>')
         legal_modals = (
             f'<div class="modal" id="stepsmodal" onclick="if(event.target===this)closeM(\'stepsmodal\')">'
-            f'<div class="modalbox"><h3>Recovering an old debt</h3>'
-            f'<div class="hint" style="margin:0 0 12px">ASVA is not a law firm. These are the '
-            f'usual steps and who to contact; your advocate decides what fits your case.</div>'
-            f'<div class="scroll">{_steps}</div>'
-            f'<div class="mbtns" style="margin-top:14px"><button class="ntbtn" '
+            f'<div class="modalbox"><h3>What to do now</h3>'
+            f'<div class="scroll">{_steps}'
+            f'<details class="lmore"><summary>For your advocate</summary>'
+            f'<div class="lst" style="margin-top:8px;white-space:pre-line">'
+            f'{esc(_legal.procedure_detail(_udyam))}</div></details></div>'
+            f'<div class="mbtns"><button class="ntbtn" '
             f'onclick="closeM(\'stepsmodal\')">Close</button></div></div></div>'
             + (f'<div class="modal" id="noticemodal" onclick="if(event.target===this)closeM(\'noticemodal\')">'
                f'<div class="modalbox" style="max-width:760px">'
-               f'<h3>Demand notice (draft)</h3>'
-               f'<div class="hint" style="margin:0 0 12px">ASVA does not send this one. Service '
-               f'has to be provable and the notice has to be signed, so copy it to your '
-               f'advocate, who signs it and sends it by registered post AD.</div>'
+               f'<h3>Notice draft</h3>'
+               f'<div class="hint" style="margin:0 0 10px">Your advocate signs this and sends it '
+               f'by registered post AD. ASVA does not send it.</div>'
                f'<div class="scroll"><pre id="noticetext" style="white-space:pre;overflow-x:auto;'
                f'background:#f7f6f3;border:1px solid #eaeaea;border-radius:8px;padding:12px;'
                f'font-size:.82rem;line-height:1.5;font-family:ui-monospace,Consolas,monospace;'
                f'margin:0">{esc(_notice)}</pre></div>'
-               f'<div class="mbtns" style="margin-top:14px">'
+               f'<div class="mbtns">'
                f'<button class="ntbtn" onclick="closeM(\'noticemodal\')">Close</button>'
                f'<button id="noticecopy" onclick="copyNotice()">Copy the notice</button>'
                f'</div></div></div>' if _notice else ''))
@@ -4139,12 +4130,12 @@ async function toggleExcl() {{
   }} catch (e) {{}}
   btn.disabled = false;
 }}
-function openM(id) {{ document.getElementById(id).classList.add('show'); }}
 function closeM(id) {{ document.getElementById(id).classList.remove('show'); }}
 // Copy the demand-notice draft so it can be pasted into WhatsApp or email for
 // the advocate. The clipboard API is blocked in some embedded webviews, so when
 // it fails we select the text instead and say "press Ctrl+C" - the owner is
 // never left with a button that silently did nothing.
+function openM(id) {{ document.getElementById(id).classList.add('show'); }}
 function copyNotice() {{
   const pre = document.getElementById('noticetext');
   const btn = document.getElementById('noticecopy');
@@ -4372,6 +4363,17 @@ async function delParty() {{
  .modalbox label{display:block;font-size:.78rem;color:#787774;margin:14px 0 5px;text-transform:uppercase;letter-spacing:.04em}
  .modalbox input{font:inherit;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;width:100%;box-sizing:border-box}
  .mbtns{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+ /* The legal card: one heading, one sentence, one row of buttons. */
+ .lcard{margin-bottom:18px}
+ .lhead{font-weight:700;font-size:1.05rem;margin-bottom:5px}
+ .lstep{display:flex;gap:11px;padding:11px 0;border-top:1px solid #F0F0EE}
+ .lstep:first-child{border-top:0;padding-top:2px}
+ .ln{flex:none;width:23px;height:23px;border-radius:999px;background:#eaf7ee;color:#0a5d28;
+   font-weight:800;font-size:.78rem;display:flex;align-items:center;justify-content:center;margin-top:2px}
+ .lsh{font-weight:700;font-size:.97rem;color:#2F3437}
+ .lst{color:#787774;font-size:.88rem;line-height:1.5;margin-top:2px}
+ .lmore{margin-top:14px;border-top:1px solid #F0F0EE;padding-top:12px}
+ .lmore summary{cursor:pointer;color:#1f6c9f;font-size:.88rem}
  .tag{font-size:.75rem;border-radius:9999px;padding:2px 9px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
  .tag.ok{background:#edf3ec;color:#346538}
  .tag.warn{background:#fbf3db;color:#956400}
@@ -6086,7 +6088,10 @@ def admin_accounts(token: str = Query(...), lang: str = Query("english")):
  <div class="hint" style="margin:0">Only needed for a customer who is years past due. ASVA puts these on the demand notice it drafts for your advocate.</div>
  <label style="margin-top:16px">Udyam registration number</label>
  <input id="udyam" value="{val('udyam_number')}" placeholder="UDYAM-TN-00-0000000">
- <div class="hint" style="margin-top:8px">If your shop is registered as a micro or small enterprise, this unlocks the two things that matter most on an old debt: interest at <b>three times the RBI bank rate, compounded monthly</b> under section 16 of the MSMED Act, and the free government dispute portal at <b>odr.msme.gov.in</b>. On a debt a few years old that interest is often more than the bill. If you are not registered, it is free at <b>udyamregistration.gov.in</b> and takes a few minutes with your Aadhaar and PAN. Register before you need it: it does not revive a claim that has already run out of time.</div>
+ <div class="hint" style="margin-top:8px">Registered as a micro or small enterprise? This lets you claim interest and file free at <b>odr.msme.gov.in</b>. Not registered? It is free at <b>udyamregistration.gov.in</b>.</div>
+ <details style="margin-top:8px"><summary style="cursor:pointer;color:#1f6c9f;font-size:.86rem">Why this matters</summary>
+  <div class="hint" style="margin-top:6px">Section 16 of the MSMED Act gives you interest at three times the RBI bank rate, compounded monthly, from the day payment was due. On a debt a few years old that is often more than the bill itself. Register before you need it: it does not revive a claim that has already run out of time.</div>
+ </details>
  <label style="margin-top:16px">Shop address (as it should appear on a notice)</label>
  <textarea id="addr" rows="3" placeholder="12 Main Bazaar Road&#10;Chennai 600001" style="width:100%;font:inherit;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box">{val('shop_address')}</textarea>
  <div style="margin-top:18px"><button onclick="saveLegal()">Save</button><span id="lmsg" class="okmsg"></span></div>

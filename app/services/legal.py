@@ -61,11 +61,13 @@ SMALL = "small"
 TIME_BARRED = "time_barred"
 
 # Label + colour per state, so the dashboard and the party page cannot drift.
+# Four labels, short enough to sit in a table cell and plain enough that
+# nobody has to be told what "time barred" means.
 STATE_UI = {
-    ACT_NOW: ("Act before {deadline}", "#b3261e"),
-    NOTICE: ("Notice worth sending", "#c0392b"),
-    SMALL: ("Too small to chase", "#8a8a84"),
-    TIME_BARRED: ("Time barred - write off", "#787774"),
+    ACT_NOW: ("Last date {deadline}", "#b3261e"),
+    NOTICE: ("Send a legal notice", "#c0392b"),
+    SMALL: ("Too small for a notice", "#8a8a84"),
+    TIME_BARRED: ("Too old to recover", "#787774"),
 }
 
 
@@ -159,10 +161,10 @@ def party_legal(bills, today: _dt.date | None = None,
 
     label, color = STATE_UI[state]
     if state == SMALL and deadline is not None:
-        # Small AND expiring. "Too small to chase" alone would hide a date that
-        # is about to pass, so say both: the owner may still want the Rs 500
-        # part payment that buys another three years.
-        label = "Too small, expires {deadline}"
+        # Small AND expiring. "Too small for a notice" alone would hide a date
+        # about to pass, so say both: the owner may still want the Rs 500 part
+        # payment that buys another three years.
+        label = "Too small, last date {deadline}"
     return {
         "state": state,
         "label": label.format(deadline=deadline.strftime("%d %b %Y") if deadline else "soon"),
@@ -216,71 +218,68 @@ def is_micro_small(udyam_number: str | None) -> bool:
 
 
 def procedure(udyam_number: str | None = None) -> list[tuple[str, str]]:
-    """The steps, in order, for the owner to follow after the notice goes out.
-    (heading, what to do). Reflects the MSMED route when the shop is registered
-    under Udyam and the ordinary civil route when it is not."""
-    common_head = [
-        ("1. Check what is still in time",
-         "A claim for the price of goods sold runs out about three years after "
-         "the money became due. ASVA marks the parties where that is close. "
-         "Anything already past three years cannot be recovered - clear it out "
-         "of your books instead of spending money on it."),
-        ("2. Try for a part payment first",
-         "Any payment, however small, restarts the three years from the date it "
-         "is received. On a debt that is close to expiring this is cheaper and "
-         "faster than a notice: ask for whatever they will pay today, and get "
-         "it into the ledger before the date passes."),
-        ("3. Send the final demand on WhatsApp",
-         "ASVA sends this for you from your own number: the full ledger, the "
-         "total, and a line saying this is the last reminder before you "
-         "escalate. Most money that comes back, comes back here."),
+    """Four steps, one sentence each, in the order they are worth doing.
+
+    An earlier version of this ran to six steps of statute. Correct, and far
+    too much to read in a popup. What the owner needs is the order; the law
+    behind it is in `procedure_detail` for whoever he forwards this to.
+    """
+    steps = [
+        ("Ask for any payment, even Rs 500",
+         "Any payment restarts your three years from the day it reaches you. "
+         "On an old debt this is the cheapest thing you can do."),
+        ("Send the final WhatsApp demand",
+         "ASVA sends it from your own number with the full ledger. Most of the "
+         "money that comes back, comes back here."),
+        ("Get a notice signed and posted",
+         "ASVA writes the notice. Your advocate signs it and sends it by "
+         "registered post AD. Give them 15 days to pay."),
     ]
     if is_micro_small(udyam_number):
-        return common_head + [
-            ("4. Get the demand notice signed and served",
-             "ASVA drafts it with your ledger extract and the MSMED interest "
-             "claim. Your advocate signs it and sends it by registered post AD "
-             "(keep the receipt) and by email. Give them 15 days to pay."),
-            ("5. File on the MSME ODR portal",
-             "Your Udyam registration lets you file a delayed-payment case at "
-             "odr.msme.gov.in. MSME Samadhaan no longer takes new filings. "
-             "Under s.15 the buyer had to pay within 45 days (15 if there is no "
-             "written agreement), and under s.16 interest runs at three times "
-             "the RBI bank rate, compounded monthly - on an old debt that often "
-             "comes to more than the bill itself."),
-            ("6. Conciliation, then arbitration",
-             "The MSEFC conciliates first under s.18. If that fails it goes to "
-             "arbitration and makes an award. A buyer who wants to appeal an "
-             "award has to deposit 75% of it first, which is where most of the "
-             "pressure in this route actually comes from."),
-            ("Who to contact",
-             "MSME ODR portal: odr.msme.gov.in. Your District Industries Centre "
-             "runs the MSEFC for your district. For the notice itself, any "
-             "commercial advocate - this is routine work for them."),
-        ]
-    return common_head + [
-        ("4. Register under Udyam first - it is free",
-         "Without a Udyam registration you cannot claim the MSMED statutory "
-         "interest and you cannot use the MSME ODR portal, which is the "
-         "cheapest route there is. Registering at udyamregistration.gov.in "
-         "costs nothing and takes a few minutes with your Aadhaar and PAN. Add "
-         "the number in ASVA Settings and these steps change to the MSME route. "
-         "It does not help for a debt that has already expired, so do it now "
-         "rather than when you next need it."),
-        ("5. Get the demand notice signed and served",
-         "ASVA drafts it with your ledger extract. Your advocate signs it and "
-         "sends it by registered post AD (keep the receipt) and by email. Give "
-         "them 15 days to pay."),
-        ("6. Pre-institution mediation, then a summary suit",
-         "For a commercial claim, mediation under s.12A of the Commercial "
-         "Courts Act comes before filing, unless you need urgent interim "
-         "relief. If that fails, a summary suit under Order XXXVII CPC is the "
-         "fast route: the other side needs the court's permission even to "
-         "defend it."),
-        ("Who to contact",
-         "A commercial advocate for the notice and the filing. Udyam "
-         "registration: udyamregistration.gov.in."),
-    ]
+        steps.append((
+            "File free on the MSME portal",
+            "odr.msme.gov.in. Your Udyam registration also lets you claim "
+            "interest at three times the RBI bank rate, compounded monthly."))
+    else:
+        steps.append((
+            "Register on Udyam first, then file",
+            "Free at udyamregistration.gov.in. Without it you cannot claim the "
+            "MSMED interest or use the free MSME portal."))
+    return steps
+
+
+def procedure_detail(udyam_number: str | None = None) -> str:
+    """The statute behind the four steps, for the advocate rather than the
+    owner. Kept out of the way until someone asks for it."""
+    if is_micro_small(udyam_number):
+        return (
+            "Micro, Small and Medium Enterprises Development Act 2006. Under "
+            "s.15 the buyer had to pay within the agreed period and in any "
+            "case within 45 days of accepting the goods (15 days if there is "
+            "no written agreement). Under s.16 interest runs at three times "
+            "the RBI bank rate, compounded monthly, from the appointed day; on "
+            "a debt a few years old that is often more than the bill itself. "
+            "Under s.18 the Micro and Small Enterprises Facilitation Council "
+            "conciliates and then arbitrates, through the MSME online dispute "
+            "resolution portal at odr.msme.gov.in. MSME Samadhaan no longer "
+            "takes new filings. A buyer appealing an award has to deposit 75% "
+            "of it first. Your District Industries Centre runs the Council for "
+            "your district.\n\n"
+            "Time limit: a claim for the price of goods sold runs out about "
+            "three years after the money became due (Limitation Act 1963). A "
+            "part payment or a signed acknowledgment restarts it (ss.19 and "
+            "18), but only if it lands before the three years are up.")
+    return (
+        "Without a Udyam registration this is an ordinary civil claim. The "
+        "usual route is an advocate's demand notice, then pre-institution "
+        "mediation under s.12A of the Commercial Courts Act 2015 (required "
+        "unless you need urgent interim relief), then a summary suit under "
+        "Order XXXVII of the Code of Civil Procedure, where the defendant "
+        "needs the court's leave even to defend.\n\n"
+        "Time limit: a claim for the price of goods sold runs out about three "
+        "years after the money became due (Limitation Act 1963). A part "
+        "payment or a signed acknowledgment restarts it (ss.19 and 18), but "
+        "only if it lands before the three years are up.")
 
 
 def notice_text(*, shop: str, shop_address: str | None, party: str,

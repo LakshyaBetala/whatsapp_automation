@@ -45,7 +45,7 @@ def test_under_six_months_of_runway_is_act_now_and_names_the_date():
     assert st["deadline"] == TODAY + dt.timedelta(days=100)
     # The label must carry the date - "escalation required" is what we replaced.
     assert st["deadline"].strftime("%d %b %Y") in st["label"]
-    assert "Act before" in st["label"]
+    assert "Last date" in st["label"]
 
 
 def test_past_three_years_is_time_barred_and_counted_as_lost():
@@ -125,9 +125,17 @@ def test_runway_days_is_none_when_the_date_cannot_be_read():
 
 # ── The Udyam fork ────────────────────────────────────────────────────────
 
+def _route_text(udyam):
+    """Everything the owner is shown for this route: the four short steps the
+    popup lists, plus the statute folded away under them."""
+    return (" ".join(h + " " + t for h, t in legal.procedure(udyam))
+            + " " + legal.procedure_detail(udyam))
+
+
 def test_without_udyam_the_steps_tell_the_owner_to_register():
     steps = legal.procedure(None)
-    text = " ".join(h + " " + t for h, t in steps)
+    assert len(steps) == 4, "four steps, or it stops fitting on a laptop screen"
+    text = _route_text(None)
     assert "udyamregistration.gov.in" in text
     assert "Order XXXVII" in text          # the civil route
     assert "odr.msme.gov.in" not in text   # not available to them yet
@@ -135,7 +143,8 @@ def test_without_udyam_the_steps_tell_the_owner_to_register():
 
 def test_with_udyam_the_steps_route_to_the_msme_portal():
     steps = legal.procedure("UDYAM-TN-00-1234567")
-    text = " ".join(h + " " + t for h, t in steps)
+    assert len(steps) == 4
+    text = _route_text("UDYAM-TN-00-1234567")
     assert "odr.msme.gov.in" in text
     assert "Samadhaan no longer takes new filings" in text
     assert "75%" in text                   # the deposit that creates the pressure
@@ -146,7 +155,7 @@ def test_part_payment_comes_before_any_notice_in_the_steps():
     has to be offered first, whichever route the shop is on."""
     for udyam in (None, "UDYAM-TN-00-1234567"):
         heads = [h for h, _ in legal.procedure(udyam)]
-        part = next(i for i, h in enumerate(heads) if "part payment" in h.lower())
+        part = next(i for i, h in enumerate(heads) if "any payment" in h.lower())
         notice = next(i for i, h in enumerate(heads) if "notice" in h.lower())
         assert part < notice
 
@@ -328,12 +337,12 @@ def test_a_notice_worthy_party_gets_the_card_and_the_draft(_patch):
     _patch(OVERDUE_WINDOW_DAYS + 60, 48000)
     t = _html(maybe_await(admin.admin_party(token="tok", client_id="c1",
                                             lang="english")))
-    assert "Notice worth sending" in t
+    assert "Send a legal notice" in t
     assert 'id="noticemodal"' in t and 'id="stepsmodal"' in t
     assert "DRAFT" in t
-    assert "Send final WhatsApp demand" in t
+    assert "Send final demand" in t
     # No Udyam saved -> the card says so and links to Settings.
-    assert "no Udyam number saved" in t
+    assert "No Udyam number saved" in t
 
 
 def test_a_udyam_shop_sees_the_msme_route_instead(_patch):
@@ -341,23 +350,23 @@ def test_a_udyam_shop_sees_the_msme_route_instead(_patch):
     t = _html(maybe_await(admin.admin_party(token="tok", client_id="c1",
                                             lang="english")))
     assert "odr.msme.gov.in" in t
-    assert "no Udyam number saved" not in t
+    assert "No Udyam number saved" not in t
 
 
 def test_a_time_barred_party_is_told_to_write_it_off_not_to_send_a_notice(_patch):
     _patch(legal.LIMITATION_DAYS + 100, 48000)
     t = _html(maybe_await(admin.admin_party(token="tok", client_id="c1",
                                             lang="english")))
-    assert "Time barred" in t and "Write it off in Tally" in t
+    assert "Too old to recover" in t and "Write it off in Tally" in t
     assert 'id="noticemodal"' not in t       # drafting one would be a waste
-    assert "Send final WhatsApp demand" not in t
+    assert "Send final demand" not in t
 
 
 def test_a_party_still_in_the_cadence_sees_no_legal_card(_patch):
     _patch(30, 48000)
     t = _html(maybe_await(admin.admin_party(token="tok", client_id="c1",
                                             lang="english")))
-    for gone in ("Notice worth sending", "Time barred", "Act before"):
+    for gone in ("Send a legal notice", "Too old to recover", "Last date"):
         assert gone not in t
 
 
@@ -392,3 +401,15 @@ def test_a_time_barred_party_sorts_to_the_very_top(_patch):
     _patch(3 * 365 + 120, 84314)
     t = _html(maybe_await(admin.admin_page(token="tok", lang="english")))
     assert 'data-rw="-1"' in t
+
+
+def test_the_popup_stays_short_enough_to_read(_patch):
+    """It ran off the bottom of the window at six steps of statute. Four short
+    steps, and the law folded away under them for whoever gets forwarded it."""
+    _patch(OVERDUE_WINDOW_DAYS + 60, 48000)
+    t = _html(maybe_await(admin.admin_party(token="tok", client_id="c1",
+                                            lang="english")))
+    assert "<details class=\"lmore\">" in t
+    assert t.count('class="lstep"') == 4
+    for h, body in legal.procedure(None):
+        assert len(body) < 160, h       # one sentence, not a paragraph
