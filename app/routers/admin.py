@@ -27,7 +27,7 @@ from app.db import require_db
 from app.services import names
 from app.services import wa_server
 from app.services import ui_i18n as i18n
-from app.jobs.reminder_sweep import STYLE_CADENCE
+from app.jobs.reminder_sweep import OVERDUE_WINDOW_DAYS, STYLE_CADENCE
 from app.models import (DEFAULT_CREDIT_DAYS, PLAN_LABELS, PLAN_LIMITS, Plan,
                         recommend_plan)
 
@@ -139,6 +139,32 @@ def _past_the_ceiling(bills: list) -> bool:
     return False
 
 
+def _legal_fields(db, business_id: str) -> dict:
+    """udyam_number + shop_address, read on their own and never fatally.
+
+    They arrive in migration 062. Putting them in the main businesses select
+    would mean a box that has not run the migration yet loses every admin page,
+    not just the notice draft - so this is a separate, forgiving read.
+    """
+    try:
+        r = (db.table("businesses").select("udyam_number, shop_address")
+             .eq("id", business_id).limit(1).execute())
+        return (r.data or [{}])[0] or {}
+    except Exception:
+        return {}
+
+
+def _legal_state(bills: list, today: _dt.date | None = None) -> dict | None:
+    """The party's legal state once the cadence has run out, or None.
+
+    Sorting these parties by days overdue made every one of them look equally
+    urgent. What actually has a deadline is the three-year limitation period,
+    so the label comes from how much of that is left - see app/services/legal.py.
+    """
+    from app.services import legal
+    return legal.party_legal(bills, today)
+
+
 def _next_reminder(biz: dict, bills: list, credit_days: int, today: _dt.date,
                    anchor: _dt.date | None = None):
     """(label, colour) for a party's next scheduled reminder across its open
@@ -165,8 +191,12 @@ def _next_reminder(biz: dict, bills: list, credit_days: int, today: _dt.date,
         # due, in which case another WhatsApp message is not the instrument it
         # needs, or it simply has no due date we can reason about. Say which:
         # "all reminders done" on a year-old debt reads as "nothing to do".
-        if _past_the_ceiling(bills):
-            return "Escalation required", "#b3261e"
+        # Which of the four legal states it is decides the wording, because
+        # "act before 12 Jan 2027" and "time barred, write off" are opposite
+        # instructions and both used to read "escalation required".
+        st = _legal_state(bills, today)
+        if st:
+            return st["label"], st["color"]
         return "All reminders done", "#999"
     kd = "Today" if best_date <= today else best_date.strftime("%d %b")
     color = "#c77b0a" if best_kind in ("overdue", "escalate") else "#0a7d33"
@@ -568,21 +598,27 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
             hh = "11:00"
         return f'{lang} {hh}'
 
-    def _batch_opts(cur: int) -> str:
-        # Label carries the batch's language + send time, so the owner can see
-        # (and Send Now confirms) which language/time a party's reminder uses,
-        # right in the assignment dropdown - no extra column needed.
-        return ''.join(
-            f'<option value="{i}"{" selected" if i == cur else ""}>{i + 1}. '
-            f'{(b["name"] or "").replace("&", "&amp;").replace("<", "&lt;")} · {_batch_lbl(b)}</option>'
-            for i, b in enumerate(batches))
+    # Assignment used to need four controls that fought each other: a dropdown
+    # on every row, a second dropdown in the toolbar, an Apply button, and the
+    # Reminder? checkbox doing double duty as "which rows does Apply mean".
+    # Now there is ONE control. The chip in the Batch column IS the button; it
+    # opens a list of batches and saves the moment one is picked. The same list
+    # opened from the column header assigns every row currently shown, which is
+    # what the search box and the tabs are already for.
+    batch_meta = json.dumps([
+        {"i": i, "name": (b.get("name") or f"Batch {i + 1}"), "lbl": _batch_lbl(b)}
+        for i, b in enumerate(batches)])
+    # Five tints so the Batch column can be read down the page at a glance.
+    BTINT = ["#eaf7ee", "#e1f3fe", "#fbf3db", "#fdebec", "#eee9fb"]
+    BINK = ["#0a5d28", "#1f6c9f", "#8a6100", "#9f2f2d", "#54399c"]
 
-    batch_bulk = (f'<div class="bulk-assign-wrap" style="display:inline-flex;align-items:center;gap:6px;background:#f4f9f4;border:1px solid #c9dfc9;border-radius:6px;padding:3px 8px;margin-left:8px">'
-                  f'<span style="font-size:0.85em;color:#2c5a2c;font-weight:600">Assign:</span>'
-                  f'<select id="bulkbatch" style="padding:4px 6px;font-size:0.9em;border:1px solid #c9dfc9;border-radius:4px">{_batch_opts(0)}</select>'
-                  f'<button onclick="assignChecked()" class="btn-apply" style="padding:4px 10px;font-size:0.9em;background:#0a7d33;color:#fff;border:0;border-radius:4px;cursor:pointer">Apply</button>'
-                  f'</div>'
-                  if multi_batch else '')
+    def _bchip(cid: str, cur: int) -> str:
+        nm = (batches[cur].get("name") or f"Batch {cur + 1}")
+        nm = nm.replace("&", "&amp;").replace("<", "&lt;")
+        return (f'<button class="bchip" data-cid="{cid}" data-b="{cur}" '
+                f'style="background:{BTINT[cur % 5]};color:{BINK[cur % 5]}" '
+                f'title="Click to change the batch for this party">'
+                f'<b>{cur + 1}</b> {nm}</button>')
 
     rows = []
     for c in clients:
@@ -630,11 +666,23 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
         else:
             rl, rc = _next_reminder(biz, cbills, cd_val, today, _client_anchor(c))
             rem_badge = f'<span class="rbadge" style="color:{rc};border-color:{rc}">{rl}</span>'
+        # Days of limitation runway left on this party's soonest-expiring open
+        # bill. Rows that are still inside the cadence sort last - they have no
+        # decision pending.
+        _lgs = _legal_state(cbills, today) if cbills else None
+        if _lgs and _lgs.get("deadline"):
+            rw = (_lgs["deadline"] - today).days
+        elif _lgs and _lgs["state"] == "time_barred":
+            rw = -1
+        elif _lgs:
+            rw = 9000
+        else:
+            rw = 99999
         cur_batch = int(c.get("reminder_batch") or 0)
         if cur_batch >= len(batches):
             cur_batch = 0
-        batch_cell = (f'<select class="bsel" data-cid="{c["id"]}">{_batch_opts(cur_batch)}</select>'
-                      if multi_batch else f'<span class="rbadge none">{cur_batch + 1}</span>')
+        batch_cell = (_bchip(c["id"], cur_batch) if multi_batch
+                      else f'<span class="rbadge none">{cur_batch + 1}</span>')
         _xs = "border-radius:5px;padding:4px 9px;font-size:.85em;cursor:pointer"
         if is_excl:
             actions = (f'<button class="exclbtn" data-cid="{c["id"]}" data-party="{nm_attr}" '
@@ -646,7 +694,8 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
                        f'data-exclude="1" title="Move to the do-not-chase list" '
                        f'style="background:#fbf3db;color:#8a6100;border:1px solid #e2c46a;{_xs}">Exclude</button>')
         rows.append(
-            f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" data-src="{src}" data-home="{home}">'
+            f'<tr data-name="{cname.lower()}" data-amt="{float(out)}" data-od="{od}" '
+            f'data-rw="{rw}" data-src="{src}" data-home="{home}">'
             f'<td class="c-rem" data-label="Reminder?"><input type="checkbox" class="cb" value="{c["id"]}" {checked}></td>'
             f'<td class="c-party"><a class="plink" href="/admin/party?token={token}&client_id={c["id"]}&lang={lang}">{cname}</a></td>'
             f'<td class="amt" data-label="Baaki">{out_str}</td>'
@@ -768,6 +817,28 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
  .termbtn{{padding:4px 10px;font-size:.85em}}
  .plink{{color:#1f6c9f;text-decoration:none;font-weight:600}}
  .plink:hover{{text-decoration:underline}}
+ .bchip{{border:1px solid rgba(0,0,0,.10);border-radius:999px;padding:4px 11px;font-size:.84em;
+   cursor:pointer;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;font:inherit;
+   font-size:.84em;line-height:1.3}}
+ .bchip b{{font-weight:800;margin-right:4px}}
+ .bchip:hover{{filter:brightness(.96);border-color:rgba(0,0,0,.22)}}
+ .bchip.saving{{opacity:.5;cursor:default}}
+ .bhead{{background:#fff;border:1px solid #d7ddd7;border-radius:999px;color:#1f6c9f;
+   font-size:.82em;padding:2px 9px;margin-left:6px;cursor:pointer;text-transform:none;letter-spacing:0}}
+ .bhead:hover{{background:#f1f6f1}}
+ /* The batch picker: one list, opened from a row chip or from the column head. */
+ .bpop{{position:absolute;z-index:12;display:none;background:#fff;border:1px solid #e3e7e2;
+   border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.14);min-width:270px;max-width:320px;overflow:hidden}}
+ .bpop.show{{display:block}}
+ .bpophd{{padding:10px 14px;font-size:.8em;color:#787774;border-bottom:1px solid #f0f0ee;background:#fbfbfa}}
+ .bpopitem{{position:relative;display:block;width:100%;text-align:left;background:#fff;border:0;
+   border-bottom:1px solid #f4f4f2;padding:11px 30px 11px 14px;cursor:pointer;font:inherit;
+   font-size:.92em;color:#2F3437}}
+ .bpopitem:hover{{background:#f4f9f4}}
+ .bpopitem .bl{{display:block;font-size:.82em;color:#787774;margin-top:2px}}
+ .bpopitem.cur{{background:#f1f8f3}}
+ .bpopitem.cur::after{{content:'✓';position:absolute;right:12px;top:50%;
+   transform:translateY(-50%);color:#0a7d33;font-weight:700}}
  .rbadge{{display:inline-block;font-size:.8em;border:1px solid #ccc;border-radius:12px;padding:2px 9px;white-space:nowrap}}
  .rbadge.off{{color:#999;border-color:#ddd;background:#f5f5f5}}
  .rbadge.none{{color:#bbb;border:0}}
@@ -828,16 +899,17 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
   <option value="od">Overdue: zyada din pehle</option>
   <option value="name">Naam: A to Z</option>
   <option value="name_owe">Naam: A to Z (baaki wale)</option>
+  <option value="legal">Needs a decision: running out of time first</option>
  </select>
  <button onclick="setAll(true)" title="Sabko reminder ON karo">Sab ON</button>
  <button onclick="setAll(false)" title="Sabko reminder OFF karo">Sab OFF</button>
  <button id="save" onclick="save()">Save list</button>
  <button onclick="dueToday()" title="Aaj kaun ko reminder jayega dekhein">Aaj kaun?</button>
- {batch_bulk}
  <span id="msg"></span>
 </div>
+<div class="bpop" id="bpop"><div class="bpophd" id="bpophd"></div><div id="bpoplist"></div></div>
 <div class="tablewrap">
-<table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Agla reminder</th><th>Batch</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
+<table id="ptable"><tr><th>Reminder?</th><th>Party</th><th>Baaki</th><th>Overdue</th><th>Agla reminder</th><th>Batch{' <button class="bhead" onclick="event.stopPropagation();openBatchPop(null,this)" title="Put every party shown below into one batch">all shown</button>' if multi_batch else ''}</th><th>Credit days</th><th>WhatsApp</th><th>Actions</th></tr>
 {''.join(rows)}
 </table>
 </div>
@@ -1007,6 +1079,7 @@ function sortRows() {{
   OWING_ONLY = (key === 'name_owe');   // this option also filters to debtors
   const rows = [...document.querySelectorAll('#ptable tr[data-name]')];
   rows.sort((a, b) => {{
+    if (key === 'legal') return parseFloat(a.dataset.rw || 99999) - parseFloat(b.dataset.rw || 99999);
     if (key === 'name' || key === 'name_owe') return a.dataset.name.localeCompare(b.dataset.name);
     if (key === 'od') return parseFloat(b.dataset.od) - parseFloat(a.dataset.od);
     return parseFloat(b.dataset.amt) - parseFloat(a.dataset.amt);
@@ -1292,31 +1365,88 @@ async function catchup(action) {{
 }}
 checkCatchup();
 
-// ── Reminder batch assignment (per-row select + bulk on checked rows) ──
-async function assignBatch(sel) {{
-  const cid = sel.dataset.cid, batch = parseInt(sel.value);
-  sel.disabled = true;
+// ── Batch assignment: one control, two scopes ──────────────────
+// The chip in the Batch column opens this list and saves on the pick - no
+// dropdown to change, no Apply to remember, and nothing to tick first. Opened
+// from the column header instead, it assigns every row currently shown, so the
+// search box and the tabs ARE the bulk selection.
+function esc(s){{ return String(s==null?'':s).replace(/[&<>]/g, m => ({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[m])); }}
+const BATCHES = {batch_meta};
+const BTINT = ['#eaf7ee','#e1f3fe','#fbf3db','#fdebec','#eee9fb'];
+const BINK  = ['#0a5d28','#1f6c9f','#8a6100','#9f2f2d','#54399c'];
+let BPOP_TARGET = null;      // a chip element, or null = every row shown
+
+function shownChips() {{
+  return [...document.querySelectorAll('#ptable tr[data-name]')]
+    .filter(r => r.style.display !== 'none')
+    .map(r => r.querySelector('.bchip')).filter(Boolean);
+}}
+function openBatchPop(chip, anchor) {{
+  BPOP_TARGET = chip;
+  const pop = document.getElementById('bpop');
+  const cur = chip ? parseInt(chip.dataset.b) : -1;
+  const n = chip ? 1 : shownChips().length;
+  document.getElementById('bpophd').textContent = chip
+    ? 'Batch for this party'
+    : 'Put all ' + n + ' parties shown into';
+  document.getElementById('bpoplist').innerHTML = BATCHES.map(b =>
+    '<button class="bpopitem' + (b.i === cur ? ' cur' : '') + '" data-i="' + b.i + '">' +
+    '<b>' + (b.i + 1) + '.</b> ' + esc(b.name) +
+    '<span class="bl">' + esc(b.lbl) + '</span></button>').join('');
+  [...pop.querySelectorAll('.bpopitem')].forEach(it =>
+    it.onclick = () => pickBatch(parseInt(it.dataset.i)));
+  // Place it under whatever was clicked, pulled back inside the window.
+  const r = anchor.getBoundingClientRect();
+  pop.classList.add('show');
+  const w = pop.offsetWidth;
+  pop.style.left = Math.max(8, Math.min(r.left + window.scrollX, window.innerWidth - w - 10)) + 'px';
+  pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+}}
+function closeBatchPop() {{
+  document.getElementById('bpop').classList.remove('show');
+  BPOP_TARGET = null;
+}}
+document.addEventListener('click', ev => {{
+  if (ev.target.closest('#bpop') || ev.target.closest('.bchip') || ev.target.closest('.bhead')) return;
+  closeBatchPop();
+}});
+document.addEventListener('keydown', ev => {{ if (ev.key === 'Escape') closeBatchPop(); }});
+
+function paintChip(chip, i) {{
+  const b = BATCHES[i] || {{i: i, name: 'Batch ' + (i + 1)}};
+  chip.dataset.b = i;
+  chip.innerHTML = '<b>' + (i + 1) + '</b> ' + esc(b.name);
+  chip.style.background = BTINT[i % 5];
+  chip.style.color = BINK[i % 5];
+}}
+async function pickBatch(i) {{
+  const chips = BPOP_TARGET ? [BPOP_TARGET] : shownChips();
+  const bulk = !BPOP_TARGET;
+  closeBatchPop();
+  if (!chips.length) return;
+  if (bulk && !confirm('Put all ' + chips.length + ' parties shown into batch ' +
+      (i + 1) + ' (' + (BATCHES[i] || {{}}).name + ')?')) return;
+  const ids = chips.map(ch => ch.dataset.cid);
+  chips.forEach(ch => ch.classList.add('saving'));
+  const msg = document.getElementById('msg');
+  msg.textContent = 'Saving...';
   try {{
     const r = await fetch('/admin/assign-batch', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify({{token: TOKEN, client_ids: [cid], batch: batch}})}});
-    if (!r.ok) alert('Batch assign fail');
-  }} catch (e) {{ alert('Batch assign fail'); }}
-  sel.disabled = false;
+      body: JSON.stringify({{token: TOKEN, client_ids: ids, batch: i}})}});
+    if (!r.ok) throw new Error('http');
+    chips.forEach(ch => paintChip(ch, i));
+    msg.textContent = chips.length === 1
+      ? 'Saved'
+      : chips.length + ' parties → batch ' + (i + 1);
+  }} catch (e) {{
+    msg.textContent = 'Could not save. Check your connection and try again.';
+  }}
+  chips.forEach(ch => ch.classList.remove('saving'));
+  setTimeout(() => {{ if (msg.textContent.indexOf('Could not') < 0) msg.textContent = ''; }}, 3000);
 }}
-document.querySelectorAll('.bsel').forEach(s => s.onchange = () => assignBatch(s));
+document.querySelectorAll('.bchip').forEach(ch =>
+  ch.onclick = (ev) => {{ ev.stopPropagation(); openBatchPop(ch, ch); }});
 
-async function assignChecked() {{
-  const ids = [...document.querySelectorAll('.cb:checked')].map(c => c.value);
-  if (!ids.length) {{ alert('Pehle parties tick karein.'); return; }}
-  const batch = parseInt(document.getElementById('bulkbatch').value);
-  if (!confirm(ids.length + ' parties ko Batch ' + (batch + 1) + ' me daalein?')) return;
-  const r = await fetch('/admin/assign-batch', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-    body: JSON.stringify({{token: TOKEN, client_ids: ids, batch: batch}})}});
-  const d = await r.json();
-  if (r.ok) {{ document.getElementById('msg').textContent = '✓ ' + (d.assigned || 0) + ' -> Batch ' + (batch + 1);
-    setTimeout(() => location.reload(), 900); }}
-  else document.getElementById('msg').textContent = 'Assign failed';
-}}
 
 // ── Per-party credit days + read-only reminder schedule ──────────────
 const BASE_CADENCE = {base_cadence_json};   // reminder timing is ASVA's logic
@@ -3637,6 +3767,111 @@ def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str 
             f'Roz bhejne ka time: <b>{send_hh}</b> ({esc(_sched_batch["name"])}). Aane wale:</div>'
             f'<div class="chips">{chips}</div></div>')
 
+    # ── Past the cadence: the legal card ──────────────────────────────
+    # Once the 300-day window is spent, another WhatsApp message is not the
+    # instrument this debt needs. What it needs is a decision, and the clock
+    # that decides is the three-year limitation period, not the days overdue.
+    # So this card leads with the deadline, offers the draft, and - for a debt
+    # already past three years - tells the owner to stop spending on it.
+    from app.services import legal as _legal
+    legal_html = legal_modals = ""
+    lg = _legal.party_legal(open_bills, today)
+    if lg:
+        _lf = _legal_fields(db, biz["id"])
+        _udyam = (_lf.get("udyam_number") or "").strip()
+        _shop = names.clean_business(biz["business_name"])
+        _dead = lg["state"] == _legal.TIME_BARRED
+        _actionable = [b for b in open_bills
+                       if (_legal.runway_days(b.get("due_date"), today) or 0) > 0
+                       and (today - _dt.date.fromisoformat(str(b["due_date"])[:10])).days
+                       > OVERDUE_WINDOW_DAYS] if not _dead else []
+        _steps = "".join(
+            f'<div style="margin-bottom:14px"><div style="font-weight:700">{esc(h)}</div>'
+            f'<div class="hint" style="margin-top:3px">{esc(t)}</div></div>'
+            for h, t in _legal.procedure(_udyam))
+        _notice = _legal.notice_text(
+            shop=_shop, shop_address=_lf.get("shop_address"), party=c["name"],
+            bills=_actionable, total=sum(Decimal(str(b.get("outstanding") or 0))
+                                         for b in _actionable),
+            udyam_number=_udyam, today=today, oldest_days=lg["oldest_days"]) if _actionable else ""
+
+        if _dead:
+            _body = (
+                f'<div>About <b>{_inr(lg["lost"])}</b> of this party&rsquo;s balance is more than '
+                f'three years past its due date. A claim for the price of goods sold runs out '
+                f'around then, so this money cannot be recovered through a notice, the MSME '
+                f'portal or a court.</div>'
+                f'<div class="hint" style="margin-top:8px">Write it off in Tally and stop '
+                f'spending time on it. If this customer still buys from you, any fresh payment '
+                f'they make settles the newest bills, not these.</div>')
+            _btns = ""
+        else:
+            _dl = lg["deadline"]
+            _urgent = (f'<div style="margin-top:8px;font-weight:700;color:#b3261e">'
+                       f'After that date this claim cannot be enforced, by notice or in '
+                       f'court. Even a part payment before then restarts the three years.</div>'
+                       if _dl else "")
+            _lost = (f'<div class="hint" style="margin-top:8px">A further '
+                     f'<b>{_inr(lg["lost"])}</b> on this party is already past three years and '
+                     f'cannot be recovered. Write that part off.</div>' if lg["lost"] else "")
+            _small = (f'<div class="hint" style="margin-top:8px">This is a small balance. A '
+                      f'notice will usually cost more than it brings back . Ask for any '
+                      f'part payment instead. Even Rs 500 restarts the three years from the day '
+                      f'it reaches you.</div>' if lg["state"] == _legal.SMALL else "")
+            _body = (
+                f'<div><b>{_inr(lg["amount"])}</b> has been past due for '
+                f'<b>{lg["oldest_days"]} days</b>, past the 300 days ASVA chases on '
+                f'WhatsApp. Reminders have stopped for this part of the balance.</div>'
+                f'{_urgent}{_small}{_lost}')
+            _btns = (
+                f'<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">'
+                + (f'<button class="danger" onclick="openEscalate()">Send final WhatsApp demand</button>'
+                   if (c.get("whatsapp_number") and open_bills) else '')
+                + (f'<button class="ntbtn" onclick="document.getElementById(\'noticemodal\').classList.add(\'show\')">'
+                   f'Legal notice draft</button>' if _notice else '')
+                + f'<button class="ntbtn" onclick="document.getElementById(\'stepsmodal\').classList.add(\'show\')">'
+                  f'What to do, step by step</button></div>')
+        _udy_line = "" if (_udyam or _dead) else (
+            f'<div class="hint" style="margin-top:12px;padding-top:10px;border-top:1px solid #f0e3e3">'
+            f'<b>You have no Udyam number saved.</b> With one, you can claim interest at three '
+            f'times the RBI bank rate under the MSMED Act and file on the free MSME dispute '
+            f'portal, which is the cheapest route there is. Registering costs nothing. '
+            f'<a href="/admin/accounts?token={_h(token)}&amp;lang={_h(lang)}">Add it in Settings</a>.</div>')
+        legal_html = (
+            f'<div class="card" style="margin-bottom:18px;border-left:4px solid {lg["color"]};'
+            f'background:{"#f7f6f3" if _dead else "#fdecea"}">'
+            f'<div style="font-weight:700;color:{lg["color"]};margin-bottom:6px">'
+            f'{"&#9711;" if _dead else "&#9888;"}&nbsp; {esc(lg["label"])}</div>'
+            f'{_body}{_btns}{_udy_line}</div>')
+        legal_modals = (
+            f'<div class="modal" id="stepsmodal" onclick="if(event.target===this)closeM(\'stepsmodal\')">'
+            f'<div class="modalbox"><h3>Recovering an old debt</h3>'
+            f'<div class="hint" style="margin:0 0 12px">ASVA is not a law firm. These are the '
+            f'usual steps and who to contact; your advocate decides what fits your case.</div>'
+            f'<div class="scroll">{_steps}</div>'
+            f'<div class="mbtns" style="margin-top:14px"><button class="ntbtn" '
+            f'onclick="closeM(\'stepsmodal\')">Close</button></div></div></div>'
+            + (f'<div class="modal" id="noticemodal" onclick="if(event.target===this)closeM(\'noticemodal\')">'
+               f'<div class="modalbox" style="max-width:760px">'
+               f'<h3>Demand notice (draft)</h3>'
+               f'<div class="hint" style="margin:0 0 12px">ASVA does not send this one. Service '
+               f'has to be provable and the notice has to be signed, so copy it to your '
+               f'advocate, who signs it and sends it by registered post AD.</div>'
+               f'<div class="scroll"><pre id="noticetext" style="white-space:pre;overflow-x:auto;'
+               f'background:#f7f6f3;border:1px solid #eaeaea;border-radius:8px;padding:12px;'
+               f'font-size:.82rem;line-height:1.5;font-family:ui-monospace,Consolas,monospace;'
+               f'margin:0">{esc(_notice)}</pre></div>'
+               f'<div class="mbtns" style="margin-top:14px">'
+               f'<button class="ntbtn" onclick="closeM(\'noticemodal\')">Close</button>'
+               f'<button id="noticecopy" onclick="copyNotice()">Copy the notice</button>'
+               f'</div></div></div>' if _notice else ''))
+
+    # Past the cadence the KPI must stop promising a reminder there will never
+    # be, and show the decision instead.
+    next_kpi_l = "Agla reminder"
+    if lg:
+        next_label, next_color, next_kpi_l = lg["label"], lg["color"], "Next step"
+
     # Reminder batch selector (only meaningful when the shop has >1 batch).
     from app.services.batches import get_batches
     pbatches = get_batches(biz)
@@ -3745,8 +3980,10 @@ def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str 
   <div class="card kpi"><div class="n">{_inr(open_total)}</div><div class="l">Total baaki</div></div>
   <div class="card kpi"><div class="n">{len(open_bills)}</div><div class="l">Open bills</div></div>
   <div class="card kpi"><div class="n">{cd_val or '-'}</div><div class="l">Credit days</div></div>
-  <div class="card kpi"><div class="n" style="font-size:1rem;color:{next_color}">{next_label}</div><div class="l">Agla reminder</div></div>
+  <div class="card kpi"><div class="n" style="font-size:1rem;color:{next_color}">{next_label}</div><div class="l">{next_kpi_l}</div></div>
 </div>
+
+{legal_html}
 
 {scorecard_html}
 
@@ -3795,6 +4032,8 @@ def admin_party(token: str = Query(...), client_id: str = Query(...), lang: str 
     </div>
   </div>
 </div>
+
+{legal_modals}
 
 {timeline_html}
 
@@ -3902,6 +4141,23 @@ async function toggleExcl() {{
 }}
 function openM(id) {{ document.getElementById(id).classList.add('show'); }}
 function closeM(id) {{ document.getElementById(id).classList.remove('show'); }}
+// Copy the demand-notice draft so it can be pasted into WhatsApp or email for
+// the advocate. The clipboard API is blocked in some embedded webviews, so when
+// it fails we select the text instead and say "press Ctrl+C" - the owner is
+// never left with a button that silently did nothing.
+function copyNotice() {{
+  const pre = document.getElementById('noticetext');
+  const btn = document.getElementById('noticecopy');
+  const done = (m) => {{ btn.textContent = m; setTimeout(() => {{ btn.textContent = 'Copy the notice'; }}, 2500); }};
+  try {{
+    navigator.clipboard.writeText(pre.textContent).then(() => done('Copied'), () => {{
+      const r = document.createRange(); r.selectNodeContents(pre);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      done('Selected - press Ctrl+C');
+    }});
+  }} catch (e) {{ done('Select the text and press Ctrl+C'); }}
+}}
+
 // Escalate = owner-approved formal reminder to THIS party. Preview first, then
 // the owner decides. ASVA never sends this on its own.
 async function openEscalate() {{
@@ -4627,32 +4883,65 @@ def admin_setup(token: str = Query(...), lang: str = Query("english")):
     """First-run wizard for a new shop: UPI + language + a starter batch in one
     screen, then a pointer to scan WhatsApp. Reuses /admin/accounts/save and
     /admin/batches. Existing shops can ignore it."""
-    from app.models import CATEGORY_LABELS
+    from app.models import CATEGORY_CREDIT_DAYS, CATEGORY_LABELS
     biz = _biz_by_token(token)
     upi_cur = (biz.get("upi_vpa") or "").replace('"', "&quot;")
-    cat_opts = "".join(f'<option value="{k}">{v}</option>' for k, v in CATEGORY_LABELS.items())
+    # Every choice control on this page carries an EXPLICIT colour. The shared
+    # _CSS sets button{color:#fff} for the green primary, and a choice button
+    # that forgets to restate its own colour renders white on white, so the
+    # owner cannot read what they are picking.
+    cat_opts = "".join(
+        f'<option value="{k}" style="color:#2F3437;background:#fff">{v} &middot; '
+        f'{CATEGORY_CREDIT_DAYS.get(k, 30)} days</option>'
+        for k, v in CATEGORY_LABELS.items())
+    cat_days = json.dumps(CATEGORY_CREDIT_DAYS)
     body = f"""
-<h1>ASVA setup</h1>
-<div class="muted">{biz['business_name']} - four quick questions, then you are live.</div>
+<div style="font-weight:800;letter-spacing:.18em;font-size:.78rem;color:#0a7d33">ASVA</div>
+<h1 style="margin:6px 0 4px">Let us set up {_h(names.clean_business(biz['business_name']))}</h1>
+<div class="muted">Four answers, about a minute. You can change any of it later from the
+Reminders tab, and nothing goes out to a customer until you have seen it.</div>
 
-<div class="card" style="margin-top:20px;max-width:560px">
- <label>1. What trade are you in?</label>
- <select id="cat" style="font:inherit;padding:10px 12px;border:1px solid #EAEAEA;border-radius:8px;background:#fff;width:100%;box-sizing:border-box">{cat_opts}</select>
- <div class="hint" style="margin-top:6px">This sets the credit period for customers who do not have one in Tally (electricals 60 days, and so on). Wherever Tally already has a period, Tally wins.</div>
- <label style="margin-top:16px">2. UPI ID (every reminder carries this as a pay link and QR)</label>
- <input id="upi" value="{upi_cur}" placeholder="e.g. yourshop@okhdfcbank">
- <label>3. Message language</label>
- <div class="seg" id="lang" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
-   <button type="button" data-v="english" class="on" style="border:0;padding:9px 16px;cursor:pointer">English</button>
-   <button type="button" data-v="hinglish" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">Hinglish</button>
- </div>
- <label style="margin-top:16px">4. Reminder tone</label>
- <div class="seg" id="tone" style="display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;margin-top:6px">
-   <button type="button" data-v="gentle" style="border:0;padding:9px 16px;cursor:pointer">Gentle</button>
-   <button type="button" data-v="standard" class="on" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">Standard</button>
-   <button type="button" data-v="firm" style="border:0;border-left:1px solid #EAEAEA;padding:9px 16px;cursor:pointer">Firm</button>
- </div>
- <div style="margin-top:20px"><button onclick="finish()">Finish setup</button><span id="msg" class="okmsg"></span></div>
+<div class="card" style="margin-top:20px;max-width:620px">
+ <div class="sq"><span class="sn">1</span><div class="sb">
+   <div class="st">What do you sell?</div>
+   <div class="hint" style="margin:2px 0 8px">Used only for customers whose credit period is
+   not set in Tally. Wherever Tally has one, Tally always wins.</div>
+   <select id="cat">{cat_opts}</select>
+   <div class="hint" style="margin-top:8px">A customer with no period in Tally will get
+   <b id="cdshow">60</b> days to pay.</div>
+ </div></div>
+
+ <div class="sq"><span class="sn">2</span><div class="sb">
+   <div class="st">Which UPI ID should customers pay into?</div>
+   <div class="hint" style="margin:2px 0 8px">Every reminder carries this as a tappable pay
+   link and a QR code. This is what turns a reminder into a payment.</div>
+   <input id="upi" value="{upi_cur}" placeholder="yourshop@okhdfcbank">
+ </div></div>
+
+ <div class="sq"><span class="sn">3</span><div class="sb">
+   <div class="st">What language should your customers get?</div>
+   <div class="hint" style="margin:2px 0 8px">Your own screens stay in the language you picked
+   at the top. This is only what the customer reads.</div>
+   <div class="seg" id="lang">
+     <button type="button" data-v="english" class="on">English</button>
+     <button type="button" data-v="hinglish">Hinglish</button>
+   </div>
+ </div></div>
+
+ <div class="sq"><span class="sn">4</span><div class="sb">
+   <div class="st">How should the reminders sound?</div>
+   <div class="hint" style="margin:2px 0 8px">Gentle sends 3 reminders across a bill, Standard
+   5 and Firm 6. All three stay polite: ASVA never gets harsher on its own.</div>
+   <div class="seg" id="tone">
+     <button type="button" data-v="gentle">Gentle</button>
+     <button type="button" data-v="standard" class="on">Standard</button>
+     <button type="button" data-v="firm">Firm</button>
+   </div>
+ </div></div>
+
+ <div style="margin-top:22px;padding-top:18px;border-top:1px solid #EAEAEA">
+   <button onclick="finish()" style="font-size:1.05rem;padding:13px 26px">Save and continue</button>
+   <span id="msg" class="okmsg"></span></div>
  <div class="hint" id="donehint" style="display:none;margin-top:14px">
    <b>One step left: connect WhatsApp.</b><br>
    ASVA holds the connection on its own server, so reminders keep going out
@@ -4670,9 +4959,27 @@ def admin_setup(token: str = Query(...), lang: str = Query("english")):
    </div>
  </div>
 </div>
-<style>.seg button{{background:#fff;color:#2F3437;border-radius:0}} .seg button.on{{background:#0a7d33;color:#fff}}</style>
+<style>
+ .sq{{display:flex;gap:14px;padding:18px 0;border-top:1px solid #F0F0EE}}
+ .sq:first-child{{border-top:0;padding-top:4px}}
+ .sb{{flex:1;min-width:0}}
+ .st{{font-weight:700;font-size:1.02rem;color:#2F3437}}
+ .sn{{flex:none;width:28px;height:28px;border-radius:999px;background:#eaf7ee;color:#0a5d28;
+   font-weight:800;font-size:.9rem;display:flex;align-items:center;justify-content:center;margin-top:1px}}
+ #cat{{font:inherit;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;
+   background:#fff;color:#2F3437;width:100%;max-width:360px;box-sizing:border-box}}
+ #upi{{max-width:360px}}
+ .seg{{display:inline-flex;border:1px solid #EAEAEA;border-radius:8px;overflow:hidden;flex-wrap:wrap}}
+ /* Explicit colour on BOTH states. The shared button rule is white-on-green,
+    and a choice button that inherits it is unreadable on this white card. */
+ .seg button{{background:#fff;color:#2F3437;border:0;border-radius:0;padding:10px 18px;cursor:pointer}}
+ .seg button + button{{border-left:1px solid #EAEAEA}}
+ .seg button:hover{{background:#F4F9F4}}
+ .seg button.on{{background:#0a7d33;color:#fff}}
+</style>
 <script>
 const TOKEN = {token!r};
+const CAT_DAYS = {cat_days};
 
 // ── Busy guard ───────────────────────────────────────────────────────────
 // The desktop shell reads window.__ASVA_DIRTY__ before it reloads this webview
@@ -4696,6 +5003,12 @@ function _asvaBusy(){{
 setInterval(function(){{ try{{ window.__ASVA_DIRTY__ = _asvaBusy(); }}catch(e){{}} }}, 500);
 
 let LANG = 'english', TONE = 'standard';
+function showCd() {{
+  const d = CAT_DAYS[document.getElementById('cat').value];
+  document.getElementById('cdshow').textContent = d || 30;
+}}
+document.getElementById('cat').addEventListener('change', showCd);
+showCd();
 document.querySelectorAll('#lang button').forEach(b => b.onclick = () => {{
   LANG = b.dataset.v; document.querySelectorAll('#lang button').forEach(x => x.classList.toggle('on', x===b)); }});
 document.querySelectorAll('#tone button').forEach(b => b.onclick = () => {{
@@ -4708,7 +5021,9 @@ async function finish() {{
         category: document.getElementById('cat').value}})}});
     await fetch('/admin/batches', {{method:'POST', headers:{{'Content-Type':'application/json'}},
       body: JSON.stringify({{token: TOKEN, batches: [{{name:'Standard', style:TONE, lang:LANG, disc:0, upi:'', line:''}}]}})}});
-    msg.textContent = 'Saved'; document.getElementById('donehint').style.display = 'block';
+    msg.textContent = 'Saved';
+    const h = document.getElementById('donehint');
+    h.style.display = 'block'; h.scrollIntoView({{behavior: 'smooth', block: 'center'}});
   }} catch (e) {{ msg.textContent = 'Save failed'; }}
 }}
 </script>"""
@@ -5734,6 +6049,9 @@ def admin_accounts(token: str = Query(...), lang: str = Query("english")):
     if not biz.data:
         raise HTTPException(status_code=401, detail="Invalid token")
     b = biz.data[0]
+    # Separate, forgiving read: migration 062 may not have run on this box yet,
+    # and Settings must not 500 just because the notice fields are missing.
+    b = {**_legal_fields(db, b["id"]), **b}
     share_on = bool(b.get("share_data", True))
 
     def val(k):
@@ -5762,6 +6080,16 @@ def admin_accounts(token: str = Query(...), lang: str = Query("english")):
  <input id="bank" value="{val('bank_name')}" placeholder="State Bank of India">
  <div class="hint">UPI na ho to reminder me ye bank details (A/C + IFSC) bheji jayengi.</div>
  <div style="margin-top:18px"><button onclick="save()">Save</button><span id="msg" class="okmsg"></span></div>
+</div>
+<div class="card" style="margin-top:16px;max-width:560px">
+ <h3 style="margin:0 0 4px">Recovering old debts</h3>
+ <div class="hint" style="margin:0">Only needed for a customer who is years past due. ASVA puts these on the demand notice it drafts for your advocate.</div>
+ <label style="margin-top:16px">Udyam registration number</label>
+ <input id="udyam" value="{val('udyam_number')}" placeholder="UDYAM-TN-00-0000000">
+ <div class="hint" style="margin-top:8px">If your shop is registered as a micro or small enterprise, this unlocks the two things that matter most on an old debt: interest at <b>three times the RBI bank rate, compounded monthly</b> under section 16 of the MSMED Act, and the free government dispute portal at <b>odr.msme.gov.in</b>. On a debt a few years old that interest is often more than the bill. If you are not registered, it is free at <b>udyamregistration.gov.in</b> and takes a few minutes with your Aadhaar and PAN. Register before you need it: it does not revive a claim that has already run out of time.</div>
+ <label style="margin-top:16px">Shop address (as it should appear on a notice)</label>
+ <textarea id="addr" rows="3" placeholder="12 Main Bazaar Road&#10;Chennai 600001" style="width:100%;font:inherit;padding:11px 12px;border:1px solid #EAEAEA;border-radius:8px;box-sizing:border-box">{val('shop_address')}</textarea>
+ <div style="margin-top:18px"><button onclick="saveLegal()">Save</button><span id="lmsg" class="okmsg"></span></div>
 </div>
 <div class="card" style="margin-top:16px;max-width:560px">
  <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;font-weight:600">
@@ -5802,6 +6130,15 @@ async function saveShare() {{
   m.textContent = r.ok ? '  Saved' : '  Failed';
   setTimeout(() => {{ m.textContent = ''; }}, 2500);
 }}
+async function saveLegal() {{
+  const m = document.getElementById('lmsg'); m.textContent = 'Saving...';
+  const r = await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{token: TOKEN,
+      udyam_number: document.getElementById('udyam').value,
+      shop_address: document.getElementById('addr').value}})}});
+  m.textContent = r.ok ? 'Saved' : 'Save failed';
+  setTimeout(() => {{ m.textContent = ''; }}, 2500);
+}}
 async function save() {{
   document.getElementById('msg').textContent = 'Saving...';
   const r = await fetch('/admin/accounts/save', {{method:'POST', headers:{{'Content-Type':'application/json'}},
@@ -5836,6 +6173,8 @@ class AccountsPayload(BaseModel):
     share_data: Optional[bool] = None
     category: Optional[str] = None
     default_credit_days: Optional[int] = None
+    udyam_number: Optional[str] = None
+    shop_address: Optional[str] = None
 
 
 @router.post("/admin/accounts/save")
@@ -5851,10 +6190,11 @@ def admin_accounts_save(payload: AccountsPayload):
         "upi_vpa_3": payload.upi_vpa_3, "bank_account_name": payload.bank_account_name,
         "bank_account_no": payload.bank_account_no, "bank_ifsc": payload.bank_ifsc,
         "bank_name": payload.bank_name,
+        "udyam_number": payload.udyam_number, "shop_address": payload.shop_address,
     }
     for k, v in text_fields.items():
         if v is not None:
-            cleaned = v.strip().upper() if k == "bank_ifsc" else v.strip()
+            cleaned = v.strip().upper() if k in ("bank_ifsc", "udyam_number") else v.strip()
             update[k] = cleaned or None
     if payload.share_data is not None:
         update["share_data"] = bool(payload.share_data)

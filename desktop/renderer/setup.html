@@ -14,9 +14,15 @@
   .brand{font-weight:800;letter-spacing:.18em;font-size:.8rem;color:#2f8f52;margin-bottom:8px}
   h1{font-size:1.7rem;margin:0 0 8px;font-weight:700}
   p.sub{color:#5d6b62;margin:0 0 24px;font-size:1.02rem;line-height:1.5}
-  .steps{display:flex;gap:8px;margin-bottom:26px}
+  .steps{display:flex;gap:8px;margin-bottom:8px}
   .pip{height:4px;flex:1;background:#e3e7e2;border-radius:999px}
   .pip.on{background:#2f8f52}
+  /* Name the three steps instead of showing three bare bars: a shop owner on
+     screen one should be able to see the whole job is short. */
+  .steplbl{display:flex;gap:8px;margin-bottom:24px;font-size:.74rem;
+     text-transform:uppercase;letter-spacing:.06em;color:#9aa8a0}
+  .steplbl span{flex:1}
+  .steplbl span.on{color:#2f8f52;font-weight:700}
   input[type=text]{width:100%;font-size:1.9rem;letter-spacing:.14em;text-align:center;padding:16px;
         border:2px solid #d6ddd7;border-radius:12px;font-family:ui-monospace,Menlo,monospace;
         text-transform:uppercase;outline:none}
@@ -28,12 +34,16 @@
   .err{background:#fdecea;border:1px solid #f5c6c0;color:#9f2f2d;padding:12px 14px;
        border-radius:10px;margin-top:16px;font-size:.95rem;display:none}
   .list{display:flex;flex-direction:column;gap:10px;max-height:280px;overflow-y:auto;margin-top:6px}
-  /* Dark text REQUIRED here: the base `button` rule sets color:#fff, which on the
-     white .co background made the company name invisible at first sync. */
+  /* Dark text REQUIRED here, on every state and on anything nested inside: the
+     base `button` rule sets color:#fff, which on the white .co background made
+     the company name invisible at first sync. Any choice control added to this
+     window has to restate its own colour the same way. */
   .co{border:2px solid #d6ddd7;border-radius:10px;padding:15px 16px;cursor:pointer;font-size:1.05rem;
       background:#fff;color:#1d2420;text-align:left;width:100%;margin:0;font-weight:600}
-  .co:hover{border-color:#2f8f52;background:#f7faf8}
+  .co:hover,.co:focus{border-color:#2f8f52;background:#f7faf8;color:#1d2420;outline:none}
   .co.sel{border-color:#2f8f52;background:#f1f8f3;color:#1d2420}
+  .co *{color:#1d2420}
+  .co .sub2{display:block;font-size:.84rem;color:#5d6b62;font-weight:400;margin-top:3px}
   .qrbox{text-align:center;padding:10px}
   .qrbox img{width:260px;height:260px;border:1px solid #e3e7e2;border-radius:12px;background:#fff}
   .hint{color:#5d6b62;font-size:.92rem;margin-top:14px;line-height:1.55}
@@ -46,11 +56,15 @@
 <div class="card">
   <div class="brand">ASVA</div>
   <div class="steps"><div class="pip on" id="p1"></div><div class="pip" id="p2"></div><div class="pip" id="p3"></div></div>
+  <div class="steplbl"><span class="on" id="l1">1. Your code</span><span id="l2">2. Your company</span><span id="l3">3. WhatsApp</span></div>
 
   <!-- Step 1: the code -->
   <section id="s1">
-    <h1>Enter your setup code</h1>
-    <p class="sub">The person who set up ASVA for you will read out an 8 character code.</p>
+    <h1>Welcome to ASVA</h1>
+    <p class="sub">Three short steps and ASVA starts sending your bills and chasing
+    your payments on WhatsApp. Nothing is sent to a customer until you have seen it.</p>
+    <p class="sub" style="margin-bottom:10px">To begin, enter the 8 character code
+    the person who set up ASVA read out to you.</p>
     <input type="text" id="code" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" autofocus>
     <div class="err" id="e1"></div>
     <button id="b1">Connect</button>
@@ -88,6 +102,7 @@ function show(n){
   for (const i of [1,2,3]) {
     $('s'+i).style.display = (i===n) ? '' : 'none';
     $('p'+i).className = 'pip' + (i<=n ? ' on' : '');
+    $('l'+i).className = (i<=n ? 'on' : '');
   }
 }
 function fail(box, msg){ const e=$(box); e.textContent=msg; e.style.display='block'; }
