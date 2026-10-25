@@ -58,7 +58,6 @@
         }
       ],
       "icon": "icon.ico",
-      "publisherName": "Almmatix",
       "artifactName": "ASVA-Setup-${version}.${ext}"
     },
     "nsis": {

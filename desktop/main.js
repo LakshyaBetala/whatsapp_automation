@@ -1149,6 +1149,13 @@ function setupAutoUpdate() {
   };
   logLine('info', `--- ASVA ${app.getVersion()} starting update check ---`);
 
+  // DO NOT add publisherName to build.win in package.json without also adding a
+  // real code-signing certificate. electron-updater runs its Authenticode check
+  // only when publisherName is set, and these builds are unsigned - so the check
+  // could never pass, and EVERY auto-update died with "not signed by the
+  // application owner ... signerCertificate null". That was the original reason
+  // five releases in a row ended in a manual reinstall. Integrity is still
+  // enforced: latest.yml carries the sha512 and is served over HTTPS.
   autoUpdater.autoDownload = true;           // fetch quietly in the background
   // NEVER let electron-updater install silently on quit. Its built-in
   // quit-install runs inside before-quit as the process dies, so it CANNOT show
