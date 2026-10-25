@@ -145,21 +145,61 @@ def release_server(db, business_id: str, port: int | None) -> bool:
 
 
 def shops_for_manager(db) -> list:
-    """The shop processes the manager should run: requested, with a port, and
-    not suspended (a suspended shop sends nothing, so its process stops)."""
+    """The shop processes the manager should run.
+
+    A LINKED shop runs permanently: that session is how its bills and reminders
+    go out, and how its customers' replies come back.
+
+    An UNLINKED shop runs only while someone is actually looking at the QR.
+    A Baileys process costs ~86 MB whether or not a session exists, and before
+    this a shop that reserved a port and never scanned burned that much
+    indefinitely - RISHAB held 86 MB for five days showing a QR nobody was
+    watching. Opening the WhatsApp page refreshes wa_server_requested_at on
+    every poll, so the window stays open while the page is open and closes by
+    itself a quarter of an hour after it is shut.
+
+    A suspended shop sends nothing, so its process stops either way.
+    """
     rows = (db.table("businesses")
-            .select("id, wa_port, agent_token, plan_expires_on, wa_server_requested_at")
+            .select("id, wa_port, agent_token, plan_expires_on, "
+                    "wa_server_requested_at, wa_linked_at")
             .execute()).data or []
+    cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(
+        minutes=settings.wa_pair_window_min)
     out = []
     for r in rows:
         if not r.get("wa_port") or not r.get("agent_token"):
             continue
-        if "wa_server_requested_at" in r and not r.get("wa_server_requested_at"):
-            continue
         if subs.live_status(r.get("plan_expires_on")) == "suspended":
             continue
+        if r.get("wa_linked_at"):
+            out.append({"business_id": r["id"], "port": int(r["wa_port"]),
+                        "token": r["agent_token"]})
+            continue
+        asked = _parse_ts(r.get("wa_server_requested_at"))
+        if asked is None or asked < cutoff:
+            continue                      # nobody is waiting on this QR
         out.append({"business_id": r["id"], "port": int(r["wa_port"]), "token": r["agent_token"]})
     return out
+
+
+def _parse_ts(ts):
+    if not ts:
+        return None
+    try:
+        d = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=_dt.timezone.utc)
+
+
+def touch_request(db, business_id: str) -> None:
+    """Someone is on the QR screen right now: hold the pairing window open."""
+    try:
+        db.table("businesses").update(
+            {"wa_server_requested_at": _now_iso()}).eq("id", business_id).execute()
+    except Exception:
+        log.debug("could not refresh the pairing window for %s", business_id, exc_info=True)
 
 
 def manager_request_allowed(client_host: str, headers) -> bool:

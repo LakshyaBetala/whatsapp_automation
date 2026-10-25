@@ -4696,6 +4696,11 @@ def admin_whatsapp_status(token: str = Query(...)):
     biz = _wa_biz(token)
     if not biz.get("wa_server_requested_at") or not biz.get("wa_port"):
         return {"phase": "not_started", "transport": biz.get("wa_transport") or "laptop"}
+    # Someone is on the QR screen: hold the pairing window open. An unlinked
+    # session costs ~86 MB and is stopped a quarter of an hour after the last
+    # poll, so this is what keeps it alive while the owner is actually looking.
+    if not biz.get("wa_linked_at"):
+        wa_server.touch_request(require_db(), biz["id"])
     st = wa_server.status_sync(biz["wa_port"])
     ph = wa_server.phase(st)
     if ph == "connected" and biz.get("wa_transport") != "server":

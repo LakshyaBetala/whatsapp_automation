@@ -188,6 +188,7 @@ class Settings(BaseSettings):
     dead_shop_alert_h: int = 24            # silent (or never seen) this long = dying, emailed
     tally_stale_hold_h: int = 72           # no Tally sync this long = hold reminders (0 = off)
     tally_stale_ack_h: int = 48            # how long the owner's 'chase anyway' answer stands
+    wa_pair_window_min: int = 15           # an UNLINKED shop's session runs only this long after it is asked for
     wa_down_alert_min: int = 15            # a WhatsApp session down this long
     outbox_backlog_alert: int = 25         # this many queued+aging = stuck
     fail_rate_alert_pct: int = 40          # today's failed/attempted above this

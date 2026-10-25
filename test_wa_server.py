@@ -60,9 +60,61 @@ def test_mark_connected_flips_transport_and_stamps_link_once():
 
 def test_manager_list_skips_suspended_shops(monkeypatch):
     monkeypatch.setattr(wa_server.subs, "live_status", lambda exp: "suspended" if exp == "old" else "active")
-    db = DB([{"id": "b1", "wa_port": 4101, "agent_token": "t1", "plan_expires_on": "2099-01-01"},
-             {"id": "b2", "wa_port": 4102, "agent_token": "t2", "plan_expires_on": "old"}])
+    db = DB([{"id": "b1", "wa_port": 4101, "agent_token": "t1", "plan_expires_on": "2099-01-01",
+              "wa_linked_at": "2026-10-01T00:00:00+00:00"},
+             {"id": "b2", "wa_port": 4102, "agent_token": "t2", "plan_expires_on": "old",
+              "wa_linked_at": "2026-10-01T00:00:00+00:00"}])
     assert wa_server.shops_for_manager(db) == [{"business_id": "b1", "port": 4101, "token": "t1"}]
+
+
+# ── an unlinked session runs only while someone is watching the QR ───────
+# A Baileys process costs ~86 MB whether or not a session exists. RISHAB held
+# that for five days showing a QR nobody was looking at.
+def _row(**over):
+    r = {"id": "b1", "wa_port": 4101, "agent_token": "t1",
+         "plan_expires_on": "2099-01-01", "wa_linked_at": None,
+         "wa_server_requested_at": None}
+    r.update(over)
+    return r
+
+
+def _ago(minutes):
+    import datetime as dt
+    return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes)).isoformat()
+
+
+def test_a_linked_shop_always_runs():
+    """That session is how its bills go out; it must never be stopped."""
+    db = DB([_row(wa_linked_at="2026-10-01T00:00:00+00:00",
+                  wa_server_requested_at=_ago(99999))])
+    assert len(wa_server.shops_for_manager(db)) == 1
+
+
+def test_an_unlinked_shop_runs_while_the_qr_page_is_open():
+    db = DB([_row(wa_server_requested_at=_ago(2))])
+    assert len(wa_server.shops_for_manager(db)) == 1
+
+
+def test_an_unlinked_shop_stops_once_nobody_is_looking():
+    from app.config import settings
+    db = DB([_row(wa_server_requested_at=_ago(settings.wa_pair_window_min + 5))])
+    assert wa_server.shops_for_manager(db) == [],         "86 MB held for a QR nobody is watching"
+
+
+def test_a_shop_that_never_asked_does_not_run():
+    assert wa_server.shops_for_manager(DB([_row()])) == []
+
+
+def test_a_bad_timestamp_does_not_start_a_session():
+    """Unparseable means unknown, and an unlinked unknown is not worth 86 MB."""
+    assert wa_server.shops_for_manager(DB([_row(wa_server_requested_at="nonsense")])) == []
+
+
+def test_polling_the_qr_page_holds_the_window_open():
+    db = DB([])
+    wa_server.touch_request(db, "b1")
+    name, patch, filters = db.updates[-1]
+    assert patch["wa_server_requested_at"] and ("id", "b1") in filters
 
 
 def test_internal_guard_needs_localhost_key_and_no_tunnel_headers(monkeypatch):
