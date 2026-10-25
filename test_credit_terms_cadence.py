@@ -326,10 +326,31 @@ def test_cadence_markers_do_not_count_as_a_send(monkeypatch):
     assert len(_run(monkeypatch, biz, bills, messages=markers)) == 1
 
 
+def test_a_pre_due_nudge_is_gated_too(monkeypatch):
+    """Gating only the overdue kind left the worse case untouched: a party
+    still inside its credit period with a few bills on different dates fired
+    on 26, 27, 31 Oct, 3 Nov... Safe to gate because the message already
+    itemises every open bill, so a second one inside the gap repeats itself."""
+    inv = (TODAY - timedelta(days=20)).isoformat()
+    due = (TODAY + timedelta(days=40)).isoformat()       # 60-day term, not due yet
+    client = {"id": "c1", "name": "Omsakthi", "whatsapp_number": "919443284711",
+              "language": "hi", "reminders_enabled": True, "credit_days": 60,
+              "reminder_batch": None, "reminder_anchor": None, "created_at": inv}
+    bills = [{"id": "b1", "invoice_number": "S-1", "amount": 5000.0,
+              "outstanding": 5000.0, "status": "pending", "due_date": due,
+              "invoice_date": inv, "business_id": "biz1", "client_id": "c1",
+              "clients": client}]
+    biz, _ = _fixture()
+    recent = [{"id": "m1", "client_id": "c1", "business_id": "biz1",
+               "type": "reminder", "template_name": "manual_remind_hi",
+               "created_at": (TODAY - timedelta(days=3)).isoformat()}]
+    assert _run(monkeypatch, biz, bills, messages=recent) == []
+
+
 def test_an_owner_escalation_is_never_held_back(monkeypatch):
     """The gap protects the customer. Holding the owner's own alert would hide
     a debt that has run out of reminders entirely."""
     import inspect
     from app.jobs import reminder_sweep as rs
     src = inspect.getsource(rs.run)
-    assert 'if "escalate" not in kinds and "overdue" in kinds:' in src
+    assert 'if "escalate" not in kinds:' in src

@@ -659,14 +659,24 @@ async def run() -> None:
             if not triggers or not entry_bills:
                 continue
 
-            # ONE overdue message per party per party_repeat_days. Ten bills
-            # on ten invoice dates used to mean ten tracks and a customer
-            # chased three times in four days; the party's own term now sets
-            # the pace. Owner escalations are never gated - that message goes
-            # to the owner, and holding it would hide a debt that has run out
-            # of reminders.
+            # ONE customer message per party per party_repeat_days, whatever
+            # kind of point triggered it. Ten bills on ten invoice dates used
+            # to mean ten independent tracks: PINEMA was queued for 27, 29 and
+            # 30 Oct, and parties still INSIDE their credit period were worse
+            # (Omsakthi: 26, 27, 31 Oct, 3, 4 Nov) because gating only the
+            # overdue kind left every pre-due nudge colliding.
+            #
+            # Gating every kind is safe precisely because the message is
+            # CONSOLIDATED: it already itemises every open bill under one
+            # total, so a second message inside the gap only repeats what the
+            # first one said. A new bill is not silenced by this either - it
+            # gets its own bill_notice when it is created, which is a separate
+            # channel and is not gated.
+            #
+            # Owner escalations are never held: that one goes to the owner, and
+            # delaying it would hide a debt that has run out of reminders.
             kinds = {k for _, _, k in triggers}
-            if "escalate" not in kinds and "overdue" in kinds:
+            if "escalate" not in kinds:
                 prev = last_send.get(client_id)
                 gap = party_repeat_days(biz, client.get("credit_days"))
                 if prev is not None and (today - prev).days < gap:
