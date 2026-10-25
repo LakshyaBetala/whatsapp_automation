@@ -621,11 +621,25 @@ async def run() -> None:
                 except (TypeError, ValueError):
                     anchor = None
 
-            # Which bills have a cadence point due today that was never sent?
-            triggers: list[tuple[dict, int, str]] = []   # (bill, day, kind)
+            # The party's schedule comes from ONE bill: the earliest due of its
+            # open bills. Every bill used to run its own curve, which for a
+            # party with ten bills meant ten overlapping tracks - PINEMA was
+            # queued for 27, 29 and 30 Oct, and a party still inside its credit
+            # period was worse (Omsakthi: 26, 27, 31 Oct, 3, 4 Nov).
+            #
+            # Thinning that with a party-level minimum gap looked right and was
+            # not: it also ate a single bill's own designed curve, cutting the
+            # five pre-due nudges to three (a 60-day term kept days 6, 30, 60
+            # and dropped 14 and 42). One driving bill keeps all five AND makes
+            # a collision impossible, because there is only ever one curve.
+            #
+            # Nothing is hidden by this. The message itemises every open bill
+            # under one total whichever bill triggered it, and a new bill still
+            # gets its own bill_notice when it is created.
             entry_bills: list[dict] = []
             total = Decimal(0)
             oldest_days = 0
+            driver: tuple | None = None       # (due_date, invoice_date, bill)
             for bill in sorted(p["bills"], key=lambda b: str(b.get("invoice_date"))):
                 try:
                     invoice_date = date.fromisoformat(str(bill["invoice_date"]))
@@ -636,7 +650,13 @@ async def run() -> None:
                 entry_bills.append(bill)
                 total += Decimal(str(bill["outstanding"]))
                 oldest_days = max(oldest_days, (today - invoice_date).days)
+                if driver is None or due_date < driver[0]:
+                    driver = (due_date, invoice_date, bill)
 
+            # Does the driving bill have a point due today that never went out?
+            triggers: list[tuple[dict, int, str]] = []   # (bill, day, kind)
+            if driver is not None:
+                due_date, invoice_date, bill = driver
                 overdue_from = None
                 if anchor and anchor > due_date:
                     overdue_from = (anchor - invoice_date).days
@@ -649,34 +669,29 @@ async def run() -> None:
                     overdue_from=overdue_from,
                 )
                 applicable = latest_reached_point(points, (today - invoice_date).days)
-                if applicable is None:
-                    continue
-                day, kind = applicable
-                if await _already_sent(bill["id"], day):
-                    continue
-                triggers.append((bill, day, kind))
+                if applicable is not None:
+                    day, kind = applicable
+                    if not await _already_sent(bill["id"], day):
+                        triggers.append((bill, day, kind))
 
             if not triggers or not entry_bills:
                 continue
 
-            # ONE customer message per party per party_repeat_days, whatever
-            # kind of point triggered it. Ten bills on ten invoice dates used
-            # to mean ten independent tracks: PINEMA was queued for 27, 29 and
-            # 30 Oct, and parties still INSIDE their credit period were worse
-            # (Omsakthi: 26, 27, 31 Oct, 3, 4 Nov) because gating only the
-            # overdue kind left every pre-due nudge colliding.
+            # A floor under the overdue track, kept as insurance rather than as
+            # the mechanism. One driving bill already spaces the overdue track
+            # by party_repeat_days, but the driver CHANGES when a bill is paid
+            # or when a Tally refresh moves a due date, and a new driver can
+            # have a point due immediately. This stops that landing on a
+            # customer who heard from us three days ago.
             #
-            # Gating every kind is safe precisely because the message is
-            # CONSOLIDATED: it already itemises every open bill under one
-            # total, so a second message inside the gap only repeats what the
-            # first one said. A new bill is not silenced by this either - it
-            # gets its own bill_notice when it is created, which is a separate
-            # channel and is not gated.
+            # Pre-due nudges are deliberately not floored: they are the party's
+            # own designed curve (days 6, 14, 30, 42, 60 of a 60-day term) and
+            # flooring them is exactly the mistake described above.
             #
             # Owner escalations are never held: that one goes to the owner, and
             # delaying it would hide a debt that has run out of reminders.
             kinds = {k for _, _, k in triggers}
-            if "escalate" not in kinds:
+            if "escalate" not in kinds and "overdue" in kinds:
                 prev = last_send.get(client_id)
                 gap = party_repeat_days(biz, client.get("credit_days"))
                 if prev is not None and (today - prev).days < gap:

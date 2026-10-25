@@ -326,13 +326,27 @@ def test_cadence_markers_do_not_count_as_a_send(monkeypatch):
     assert len(_run(monkeypatch, biz, bills, messages=markers)) == 1
 
 
-def test_a_pre_due_nudge_is_gated_too(monkeypatch):
-    """Gating only the overdue kind left the worse case untouched: a party
-    still inside its credit period with a few bills on different dates fired
-    on 26, 27, 31 Oct, 3 Nov... Safe to gate because the message already
-    itemises every open bill, so a second one inside the gap repeats itself."""
-    inv = (TODAY - timedelta(days=20)).isoformat()
-    due = (TODAY + timedelta(days=40)).isoformat()       # 60-day term, not due yet
+def test_a_single_bill_keeps_all_five_pre_due_nudges():
+    """The reason the schedule is driven by ONE bill rather than thinned by a
+    party-level gap. A 14-day gap on a 60-day term eats days 14 and 42 and
+    leaves three touches, not the five the cadence is built to send."""
+    pts = [d for d, k in cadence_points([3, 7, 15, 21, 30], 7, 3,
+                                        credit_days=60, due_offset=60) if k == "nudge"]
+    gap = party_repeat_days({"overdue_repeat_days": 7}, 60)
+    thinned, last = [], None
+    for d in pts:
+        if last is None or d - last >= gap:
+            thinned.append(d)
+            last = d
+    assert pts == [6, 14, 30, 42, 60]
+    assert thinned == [6, 30, 60], "a gap over the nudges costs two of the five"
+
+
+def test_a_pre_due_nudge_is_not_held_back_by_a_recent_send(monkeypatch):
+    """A party inside its credit period runs its own curve. The gap applies to
+    the overdue track, where the spacing is the point, not to the nudges."""
+    inv = (TODAY - timedelta(days=14)).isoformat()
+    due = (TODAY + timedelta(days=46)).isoformat()       # 60-day term, not due yet
     client = {"id": "c1", "name": "Omsakthi", "whatsapp_number": "919443284711",
               "language": "hi", "reminders_enabled": True, "credit_days": 60,
               "reminder_batch": None, "reminder_anchor": None, "created_at": inv}
@@ -344,7 +358,28 @@ def test_a_pre_due_nudge_is_gated_too(monkeypatch):
     recent = [{"id": "m1", "client_id": "c1", "business_id": "biz1",
                "type": "reminder", "template_name": "manual_remind_hi",
                "created_at": (TODAY - timedelta(days=3)).isoformat()}]
-    assert _run(monkeypatch, biz, bills, messages=recent) == []
+    assert len(_run(monkeypatch, biz, bills, messages=recent)) == 1
+
+
+def test_the_earliest_due_bill_drives_the_schedule(monkeypatch):
+    """Ten bills, one curve. The oldest debt sets the pace; the message still
+    carries every bill, so the newer ones are not hidden by this."""
+    biz, _ = _fixture()
+    client = {"id": "c1", "name": "Pinema Agency", "whatsapp_number": "919443284711",
+              "language": "hi", "reminders_enabled": True, "credit_days": 60,
+              "reminder_batch": None, "reminder_anchor": None,
+              "created_at": (TODAY - timedelta(days=200)).isoformat()}
+    bills = []
+    for i, age in enumerate((200, 160, 120, 80)):
+        bills.append({"id": f"b{i}", "invoice_number": f"S-{i}", "amount": 1000.0,
+                      "outstanding": 1000.0, "status": "overdue",
+                      "invoice_date": (TODAY - timedelta(days=age)).isoformat(),
+                      "due_date": (TODAY - timedelta(days=age - 60)).isoformat(),
+                      "business_id": "biz1", "client_id": "c1", "clients": client})
+    sends = _run(monkeypatch, biz, bills)
+    assert len(sends) == 1, "four bills must not mean four tracks"
+    assert len(sends[0]["bills"]) == 4, "the one message still itemises them all"
+    assert float(sends[0]["total"]) == 4000.0
 
 
 def test_an_owner_escalation_is_never_held_back(monkeypatch):
@@ -353,4 +388,4 @@ def test_an_owner_escalation_is_never_held_back(monkeypatch):
     import inspect
     from app.jobs import reminder_sweep as rs
     src = inspect.getsource(rs.run)
-    assert 'if "escalate" not in kinds:' in src
+    assert 'if "escalate" not in kinds and "overdue" in kinds:' in src

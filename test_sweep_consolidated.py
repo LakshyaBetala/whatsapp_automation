@@ -108,11 +108,17 @@ def test_sweep_sends_one_consolidated_message_per_party(monkeypatch):
     entry = sends[0]
     assert len(entry["bills"]) == 3
     assert float(entry["total"]) == 21000.0
-    # and all 3 (bill, day) cadence points marked -> nothing re-fires
+    # ONE marker, for the bill that drove the schedule. The party's cadence now
+    # comes from its earliest-due open bill instead of from every bill at once
+    # (ten bills used to mean ten overlapping tracks), so only that bill has a
+    # point to mark. Marking the other two would record a reminder for a point
+    # that was never the reason anything went out - and when b1 is paid, b2
+    # becomes the driver and latest_reached_point returns just its newest
+    # point, so nothing stacks up either.
     markers = [m for m in fake.writes["messages"] if m.get("template_name") == "cadence_marker"]
-    assert len(markers) == 3
-    assert {m["bill_id"] for m in markers} == {"b1", "b2", "b3"}
-    assert all(m["reminder_day"] == 37 for m in markers)
+    assert len(markers) == 1
+    assert markers[0]["bill_id"] in {"b1", "b2", "b3"}
+    assert markers[0]["reminder_day"] == 37
 
 
 def test_sweep_failed_send_marks_nothing(monkeypatch):
