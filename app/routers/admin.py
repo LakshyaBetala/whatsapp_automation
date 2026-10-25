@@ -121,6 +121,24 @@ def _client_points(biz: dict, bill: dict, credit_days: int, anchor: _dt.date | N
     return inv, pts
 
 
+def _past_the_ceiling(bills: list) -> bool:
+    """Is any of this party's open bills past the last reminder ASVA will send?
+
+    Reads the stored due date only. A bill with no due date we can parse is not
+    counted, because this decides whether the owner is told to escalate, and
+    that must never rest on a guessed date.
+    """
+    from app.jobs.reminder_sweep import needs_legal_escalation
+    for b in bills:
+        try:
+            due = _dt.date.fromisoformat(str(b.get("due_date"))[:10])
+        except (TypeError, ValueError):
+            continue
+        if needs_legal_escalation(due):
+            return True
+    return False
+
+
 def _next_reminder(biz: dict, bills: list, credit_days: int, today: _dt.date,
                    anchor: _dt.date | None = None):
     """(label, colour) for a party's next scheduled reminder across its open
@@ -143,8 +161,14 @@ def _next_reminder(biz: dict, bills: list, credit_days: int, today: _dt.date,
                     best_kind = kind
                 break
     if best_date is None:
-        return "Sab reminder ho gaye", "#999"
-    kd = "Aaj" if best_date <= today else best_date.strftime("%d %b")
+        # No cadence point left. Either the debt has run the full 300 days past
+        # due, in which case another WhatsApp message is not the instrument it
+        # needs, or it simply has no due date we can reason about. Say which:
+        # "all reminders done" on a year-old debt reads as "nothing to do".
+        if _past_the_ceiling(bills):
+            return "Escalation required", "#b3261e"
+        return "All reminders done", "#999"
+    kd = "Today" if best_date <= today else best_date.strftime("%d %b")
     color = "#c77b0a" if best_kind in ("overdue", "escalate") else "#0a7d33"
     tag = "overdue" if best_kind in ("overdue", "escalate") else "reminder"
     return f"{kd} ({tag})", color
@@ -1301,10 +1325,16 @@ function schedText(cd) {{
   cd = cd || 30;
   const days = BASE_CADENCE.map(d => Math.max(1, Math.min(cd, Math.round(d * cd / 30))));
   const uniq = [...new Set(days)];
+  // Must stay the same arithmetic as party_repeat_days() in reminder_sweep.py.
+  // These two formulas disagreed for months: this screen scaled on the party's
+  // credit days and said 14, while the engine scaled on the BILL's stored term,
+  // which Tally left at 0, so it actually sent every 7.
   const ov = Math.max(7, Math.round(7 * cd / 30));
-  return 'Reminder in dino par jayega (bill ke baad):\\n  ' + uniq.join(', ') + ' din\\n' +
-         'Due date ke baad har ~' + ov + ' din ek overdue reminder.\\n\\n' +
-         '(Timing ASVA khud set karta hai. Aap sirf credit days badal sakte hain.)';
+  return 'Reminders go out on these days after the bill:\\n  day ' + uniq.join(', ') + '\\n' +
+         'Then one overdue reminder every ' + ov + ' days, for this party as a\\n' +
+         'whole however many bills are open, up to 300 days past due.\\n' +
+         'After that ASVA stops and asks you to escalate.\\n\\n' +
+         '(ASVA sets the timing. You only set the credit days.)';
 }}
 function openTerms(btn) {{
   TERM_CID = btn.dataset.cid;
@@ -1346,6 +1376,15 @@ def admin_reminders(token: str = Query(...), lang: str = Query("english")):
 
     festivals = sorted(str(d) for d in (biz.get("blackout_dates") or []))
     festivals_json = json.dumps(festivals)
+
+    # The weekly off day was being wiped on every holiday save (the JS posted a
+    # hardcoded null), and the sweep never read it anyway, so no shop has ever
+    # had one. Render the stored value so saving holidays stops destroying it.
+    from app.models import resolve_default_credit_days
+    _woff = biz.get("weekly_off_day")
+    woff_json = json.dumps(_woff if _woff is not None else None)
+    send_on_holidays_js = "true" if biz.get("send_on_holidays") else "false"
+    default_credit_days = resolve_default_credit_days(biz)
 
     upi_vpa = biz.get("upi_vpa") or ""
     upi_vpa_2 = biz.get("upi_vpa_2") or ""
@@ -1578,14 +1617,37 @@ Ek party = EK message: saare bills jodkar, total + QR ke saath.</details>
  </div>
 
  <div class="card">
-  <h3>Holidays</h3>
+  <h3>Closed days</h3>
+  <div style="margin-bottom:10px">
+   <label for="woff">Weekly off</label>
+   <select id="woff">
+    <option value="">Open every day</option>
+    <option value="0">Monday</option><option value="1">Tuesday</option>
+    <option value="2">Wednesday</option><option value="3">Thursday</option>
+    <option value="4">Friday</option><option value="5">Saturday</option>
+    <option value="6">Sunday</option>
+   </select>
+  </div>
   <div class="calwrap">
    <div class="calhead"><button onclick="calMove(-1)">&#9664;</button><span id="calLabel"></span><button onclick="calMove(1)">&#9654;</button></div>
    <div id="calGrid" class="calgrid"></div>
   </div>
-  <div class="hint">Aage ki date par tap = holiday (red). Us din reminder skip, agle working day jayega.</div>
+  <div class="hint">Tap a future date to mark it a holiday (red). Reminders skip that day and go out on the next working day instead.</div>
   <div id="holist" class="holist"></div>
-  <div style="margin-top:10px"><button id="savehol" onclick="saveHolidays()">Save holidays</button><span id="setmsg"></span></div>
+  <label style="display:block;margin-top:12px">
+   <input type="checkbox" id="sendhol"> Send reminders on my off day and holidays too
+  </label>
+  <div class="hint">Leave this unticked and a reminder due on a closed day waits for the next working day. Tick it if you trade through Sundays and festivals.</div>
+  <div style="margin-top:14px">
+   <label for="defcd">Credit days when Tally does not say</label>
+   <select id="defcd">
+    <option value="30">30 days</option>
+    <option value="45">45 days</option>
+    <option value="60">60 days</option>
+   </select>
+   <div class="hint">Tally only stores a credit period on some ledgers. This fills the blanks. A party whose days you set yourself, or that Tally does report, is never changed.</div>
+  </div>
+  <div style="margin-top:10px"><button id="savehol" onclick="saveHolidays()">Save</button><span id="setmsg"></span></div>
  </div>
  </div>
  
@@ -1686,12 +1748,26 @@ const _now = new Date();
 calY = _now.getFullYear(); calM = _now.getMonth();
 renderCal();
 
+// Fill the three controls from what is stored, so a save never silently
+// discards a setting the owner is not currently looking at. This posted a
+// hardcoded weekly_off_day:null, which wiped the off day on every holiday save.
+(function initClosedDays() {{
+  const woff = {woff_json};
+  document.getElementById('woff').value = (woff === null ? '' : String(woff));
+  document.getElementById('sendhol').checked = {send_on_holidays_js};
+  document.getElementById('defcd').value = String({default_credit_days});
+}})();
+
 async function saveHolidays() {{
   document.getElementById('setmsg').textContent = 'Saving...';
+  const raw = document.getElementById('woff').value;
   const r = await fetch('/admin/settings', {{method:'POST', headers:{{'Content-Type':'application/json'}},
     body: JSON.stringify({{
       token: TOKEN,
-      weekly_off_day: null, blackout_dates: FEST
+      weekly_off_day: raw === '' ? null : parseInt(raw, 10),
+      blackout_dates: FEST,
+      send_on_holidays: document.getElementById('sendhol').checked,
+      default_credit_days: parseInt(document.getElementById('defcd').value, 10)
     }})}});
   document.getElementById('setmsg').textContent = r.ok ? 'Saved' : 'Save failed';
 }}
@@ -2126,6 +2202,8 @@ class SettingsPayload(BaseModel):
     reminder_custom_line: Optional[str] = None
     msg_language: Optional[str] = None     # hinglish | english
     discount_pct: Optional[float] = None   # early-payment discount, 0-50
+    send_on_holidays: Optional[bool] = None   # true = chase on the off day too
+    default_credit_days: Optional[int] = None  # 30 | 45 | 60 ... fallback term
 
 
 @router.post("/admin/settings")
@@ -2152,11 +2230,15 @@ def admin_settings(payload: SettingsPayload):
     update["blackout_dates"] = sorted(clean)
 
     # Style also writes the matching cadence (the sweep reads reminder_cadence).
-    style = (payload.reminder_style or "standard").lower()
-    if style not in STYLE_CADENCE:
-        style = "standard"
-    update["reminder_style"] = style
-    update["reminder_cadence"] = STYLE_CADENCE[style]
+    # Only when the caller actually sent one: this used to default to "standard"
+    # and write it on every save, so saving a holiday reset a shop's cadence.
+    style = (biz.get("reminder_style") or "standard").lower()
+    if payload.reminder_style is not None:
+        style = payload.reminder_style.lower()
+        if style not in STYLE_CADENCE:
+            style = "standard"
+        update["reminder_style"] = style
+        update["reminder_cadence"] = STYLE_CADENCE[style]
 
     if payload.reminder_hour is not None:
         h = int(payload.reminder_hour)
@@ -2176,6 +2258,19 @@ def admin_settings(payload: SettingsPayload):
             raise HTTPException(status_code=400, detail="discount_pct must be 0-50")
         update["discount_pct"] = round(d, 2)
 
+    if payload.send_on_holidays is not None:
+        update["send_on_holidays"] = bool(payload.send_on_holidays)
+
+    # The fallback credit period for parties Tally gives no BillCreditPeriod for.
+    # Changing it does NOT touch a party whose term the owner set by hand, nor
+    # one Tally reports a real term for - it only fills the blanks, on the next
+    # refresh. Capped at a year: a "credit period" longer than that is a write-off.
+    if payload.default_credit_days is not None:
+        cd = int(payload.default_credit_days)
+        if not (1 <= cd <= 365):
+            raise HTTPException(status_code=400, detail="default_credit_days must be 1-365")
+        update["default_credit_days"] = cd
+
     db.table("businesses").update(update).eq("id", biz["id"]).execute()
 
     return {
@@ -2185,6 +2280,8 @@ def admin_settings(payload: SettingsPayload):
         "reminder_hour": update.get("reminder_hour"),
         "blackout_count": len(clean),
         "discount_pct": update.get("discount_pct"),
+        "send_on_holidays": update.get("send_on_holidays"),
+        "default_credit_days": update.get("default_credit_days"),
     }
 
 

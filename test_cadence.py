@@ -12,6 +12,7 @@ from app.jobs.reminder_sweep import (
     cadence_points,
     latest_reached_point,
     DEFAULT_CADENCE,
+    OVERDUE_WINDOW_DAYS,
 )
 
 
@@ -23,11 +24,15 @@ def test_30_day_term_is_the_authored_cadence():
     pts = kinds(cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=30, due_offset=30))
     for d in (3, 7, 15, 21, 30):
         assert pts[d] == "nudge"
-    # Overdue repeats every 7 days until PAID or 200 days past due -
+    # Overdue repeats every 7 days until PAID or OVERDUE_WINDOW_DAYS past due -
     # not just 3 times (the party keeps hearing until they pay).
     assert pts[37] == "overdue" and pts[44] == "overdue" and pts[58] == "overdue"
-    assert pts[30 + 196] == "overdue"           # last repeat inside the window
-    assert pts[30 + 7 * 29] == "escalate"       # then tell the owner (day 233)
+    # Derived from the constant, not hardcoded: the window moved from 200 to 300
+    # once we found parties whose oldest debt had aged out of the cadence and
+    # gone silent forever, and this test should follow the constant next time.
+    last = 30 + 7 * (OVERDUE_WINDOW_DAYS // 7)
+    assert pts[last] == "overdue"               # last repeat inside the window
+    assert pts[last + 7] == "escalate"          # then tell the owner
 
 
 def test_90_day_term_scales_up():
@@ -38,7 +43,9 @@ def test_90_day_term_scales_up():
     # Overdue spacing also scales: ~21 days (7 * 90/30), not the old fixed 7.
     assert pts[111] == "overdue"        # 90 + 21
     assert pts[174] == "overdue"        # still repeating inside the window
-    assert pts[90 + 21 * 10] == "escalate"   # window exhausted (day 300)
+    last = 90 + 21 * (OVERDUE_WINDOW_DAYS // 21)
+    assert pts[last] == "overdue"
+    assert pts[last + 21] == "escalate"      # window exhausted
     assert min(pts) == 9  # no day-3 nagging for a 90-day company
 
 
@@ -64,8 +71,9 @@ def test_one_day_term_goes_straight_to_overdue_track():
     pts = kinds(cadence_points(DEFAULT_CADENCE, 7, 3, credit_days=1, due_offset=1))
     assert pts[1] == "nudge"
     assert pts[8] == "overdue" and pts[15] == "overdue" and pts[22] == "overdue"
-    assert pts[1 + 196] == "overdue"        # keeps going inside the window
-    assert pts[1 + 7 * 29] == "escalate"    # day 204
+    last = 1 + 7 * (OVERDUE_WINDOW_DAYS // 7)
+    assert pts[last] == "overdue"           # keeps going inside the window
+    assert pts[last + 7] == "escalate"
 
 
 def test_points_sorted_and_deduped():
@@ -79,13 +87,15 @@ def test_points_sorted_and_deduped():
 
 def test_anchor_restarts_overdue_track_from_selection_day():
     """User spec: party overdue 225 days, selected today -> messages every 7
-    days from today until paid or day 425 (selection + 200), then escalate.
-    Here modelled with a 200-day-old bill: track runs from day 200."""
+    days from today until paid or OVERDUE_WINDOW_DAYS after the day it was
+    selected, then escalate. Modelled here with a 200-day-old bill, so the
+    track runs from day 200."""
     pts = kinds(cadence_points(DEFAULT_CADENCE, 7, 3,
                                credit_days=30, due_offset=30, overdue_from=200))
     assert pts[207] == "overdue" and pts[214] == "overdue" and pts[221] == "overdue"
-    assert pts[200 + 196] == "overdue"        # keeps repeating inside window
-    assert pts[200 + 7 * 29] == "escalate"    # ~selection + 200 days (403)
+    last = 200 + 7 * (OVERDUE_WINDOW_DAYS // 7)
+    assert pts[last] == "overdue"             # keeps repeating inside window
+    assert pts[last + 7] == "escalate"        # ~selection + the whole window
     assert 37 not in pts        # the old due-date-based overdue points are gone
 
 

@@ -168,7 +168,40 @@ CADENCE_BASE_DAYS = 30  # the cadence numbers are authored for a 30-day term
 # The overdue track keeps repeating until the party PAYS or this many days
 # after the track starts (due date, or the day the owner selected the party) -
 # whichever comes first. Then one final "call them yourself" owner escalation.
-OVERDUE_WINDOW_DAYS = 200
+OVERDUE_WINDOW_DAYS = 300
+
+# Past this many days after the due date, reminders have had their run and
+# the debt needs a different instrument, not another WhatsApp message. The
+# party page and the dashboard say so and offer the legal route; the cadence
+# itself stops at OVERDUE_WINDOW_DAYS, so the two line up by construction.
+LEGAL_ESCALATION_DAYS = 300
+
+
+def needs_legal_escalation(due_date: date | None, today: date | None = None) -> bool:
+    """Has this bill run past every reminder ASVA will ever send?
+
+    Measured from the DUE date, never the invoice date: a 60-day party is not
+    one day late on the day you invoice them. Unknown due date -> False,
+    because this flag puts "escalation required" in front of the owner and
+    must only ever fire on a date we actually read."""
+    if due_date is None:
+        return False
+    return ((today or _today_ist()) - due_date).days > LEGAL_ESCALATION_DAYS
+
+
+def party_repeat_days(biz: dict, credit_days: int | None) -> int:
+    """How many days apart this PARTY's overdue messages may be.
+
+    Same scaling the per-bill engine uses (a long-credit trade is not nagged
+    on a 30-day trade's rhythm), but anchored on the party's credit period
+    instead of one bill's term - so the answer is the same for every one of
+    that party's bills. 30-day terms -> 7, 45 -> 11, 60 -> 14, 90 -> 21."""
+    base = int(biz.get("overdue_repeat_days") or 7)
+    try:
+        cd = max(1, int(credit_days or CADENCE_BASE_DAYS))
+    except (TypeError, ValueError):
+        cd = CADENCE_BASE_DAYS
+    return max(base, round(base * cd / CADENCE_BASE_DAYS))
 
 
 def cadence_points(
@@ -244,6 +277,46 @@ def latest_reached_point(
         if days_since_invoice >= day:
             applicable = (day, kind)
     return applicable
+
+
+def _last_real_send(db, biz_ids: list, today: date) -> dict:
+    """{client_id: date} of each party's most recent ACTUAL reminder.
+
+    Cadence markers are excluded on purpose: a marker records that one
+    bill's point was covered, and a single send writes several of them.
+    Counting markers would read one message as many, and the party-level
+    gap would never open.
+
+    Best-effort - on any failure the gap simply does not apply this run,
+    which reverts to the old per-bill behaviour rather than silencing a
+    whole shop."""
+    if not biz_ids:
+        return {}
+    # The widest gap we can produce is a 365-day term (85 days); 120 covers it.
+    since = (today - timedelta(days=120)).isoformat()
+    out: dict = {}
+    try:
+        rows = (db.table("messages")
+                .select("client_id, created_at")
+                .eq("type", MessageType.reminder.value)
+                .neq("template_name", "cadence_marker")
+                .gte("created_at", since)
+                .in_("business_id", list(biz_ids))
+                .execute()).data or []
+    except Exception:
+        log.debug("last-real-send prefetch failed - party gap off this run", exc_info=True)
+        return {}
+    for r in rows:
+        cid = r.get("client_id")
+        if not cid:
+            continue
+        try:
+            d = date.fromisoformat(str(r["created_at"])[:10])
+        except (TypeError, ValueError):
+            continue
+        if cid not in out or d > out[cid]:
+            out[cid] = d
+    return out
 
 
 async def _already_sent(bill_id: str, reminder_day: int) -> bool:
@@ -371,6 +444,7 @@ async def run() -> None:
         .select(
             "id, business_name, whatsapp_number, plan, blackout_dates, "
             "reminders_enabled, upi_vpa, reminder_cadence, weekly_off_day, "
+            "send_on_holidays, "
             "reminder_style, reminder_custom_line, reminder_hour, msg_language, "
             "bank_account_name, bank_account_no, bank_ifsc, bank_name, "
             "discount_pct, overdue_repeat_days, overdue_max_repeats, plan_expires_on, "
@@ -462,6 +536,9 @@ async def run() -> None:
     # spent across every hourly run - not reset each hour (which drained a
     # whole backlog within the send window).
     sent_per_biz: dict[str, int] = _parties_sent_today(db, list(businesses.keys()), today)
+    # Party-level overdue spacing: one overdue message per party per
+    # party_repeat_days, measured from its last real send (never per bill).
+    last_send: dict = _last_real_send(db, list(businesses.keys()), today)
     # Per-business daily cap (plan-based + warm-up), computed once per business.
     cap_by_biz: dict[str, int] = {}
 
@@ -515,10 +592,20 @@ async def run() -> None:
             if client.get("excluded"):
                 skipped += 1
                 continue
-            # Holiday (calendar-marked) pauses the day; catch-up next working day.
-            if today.isoformat() in [str(d) for d in (biz.get("blackout_dates") or [])]:
-                skipped += 1
-                continue
+            # The shop's weekly off day and its marked holidays both push the
+            # reminder to the next working day rather than dropping it:
+            # latest_reached_point returns that same point tomorrow, so
+            # nothing is lost and nothing stacks. A shop that trades through
+            # Sundays and festivals ticks "send on holidays" and neither
+            # check applies.
+            if not biz.get("send_on_holidays"):
+                off = biz.get("weekly_off_day")
+                if off is not None and today.weekday() == int(off):
+                    skipped += 1
+                    continue
+                if today.isoformat() in [str(d) for d in (biz.get("blackout_dates") or [])]:
+                    skipped += 1
+                    continue
             # Per-batch SEND TIME: wait until this party's batch hour.
             batch = resolve_batch(biz, client.get("reminder_batch"))
             bh = batch_hour(biz, batch)
@@ -571,6 +658,20 @@ async def run() -> None:
 
             if not triggers or not entry_bills:
                 continue
+
+            # ONE overdue message per party per party_repeat_days. Ten bills
+            # on ten invoice dates used to mean ten tracks and a customer
+            # chased three times in four days; the party's own term now sets
+            # the pace. Owner escalations are never gated - that message goes
+            # to the owner, and holding it would hide a debt that has run out
+            # of reminders.
+            kinds = {k for _, _, k in triggers}
+            if "escalate" not in kinds and "overdue" in kinds:
+                prev = last_send.get(client_id)
+                gap = party_repeat_days(biz, client.get("credit_days"))
+                if prev is not None and (today - prev).days < gap:
+                    skipped += 1
+                    continue
 
             # Missed-hour catch-up: this party's batch hour passed with NO
             # sweep run (ASVA/laptop was off). Late sends need the owner's

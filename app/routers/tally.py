@@ -249,6 +249,34 @@ def _verify_token(business_id: uuid.UUID, agent_token: str):
     return db
 
 
+def due_from_terms(invoice_date: str, credit_days, fallback_days: int) -> str:
+    """The due date for a bill whose credit period Tally did not report.
+
+    Tally carries BILLCREDITPERIOD on the LEDGER, not on every bill, so the
+    bill-wise outstanding export almost always omits it. Falling back to the
+    bill date - what we used to do - silently stamped a 0-day term on every
+    open bill of every party, and that term then drove the due date, the
+    overdue count, the whole reminder cadence and the chase ranking. One shop
+    read 222 days overdue on a bill that was 162, never sent a single pre-due
+    reminder, and chased one party 5 days before its money was even due.
+
+    The party's own credit_days is the honest answer; the shop's default (the
+    owner's setting, else its trade-category norm) backs it up. Returns the
+    invoice date unchanged if it will not parse, because a due date we cannot
+    compute must become neither a crash nor a guess.
+    """
+    try:
+        cd = int(credit_days or fallback_days)
+    except (TypeError, ValueError):
+        cd = fallback_days
+    if cd <= 0:
+        cd = fallback_days
+    try:
+        return (date.fromisoformat(str(invoice_date)[:10]) + timedelta(days=cd)).isoformat()
+    except (TypeError, ValueError):
+        return invoice_date
+
+
 def _biz_default_credit_days(db, business_id) -> int:
     """The shop's fallback credit period (trade category / explicit override) for
     parties with no Tally BillCreditPeriod. Best-effort -> 30."""
@@ -1221,6 +1249,10 @@ def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: Bac
         if prev is not None and na < prev - 0.99:
             payments.append((cid, round(prev - na, 2), na))
 
+    def _terms_due(inv: str, cid: str) -> str:
+        """This party's due date for a bill Tally gave no credit period for."""
+        return due_from_terms(inv, (clients_by_id.get(cid) or {}).get("credit_days"), biz_cd)
+
     for cid in target_ids:
         bl = incoming.get(cid, [])
         lb = ledger_bal.get(cid, 0.0)
@@ -1236,7 +1268,8 @@ def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: Bac
             seen[base] = n + 1
             vnum = base if n == 0 else f"{base}#{n + 1}"
             inv = b.bill_date or fy
-            bill_rows.append((vnum, ref[:60], round(float(b.amount), 2), inv, b.due_date or inv))
+            bill_rows.append((vnum, ref[:60], round(float(b.amount), 2), inv,
+                              b.due_date or _terms_due(inv, cid)))
         bill_sum = round(sum(r[2] for r in bill_rows), 2)
 
         reconciles = bill_rows and (not use_ledger or abs(bill_sum - lb) <= 1.0)
