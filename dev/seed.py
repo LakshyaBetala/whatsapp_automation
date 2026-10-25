@@ -67,6 +67,11 @@ DEBTORS = [
     ("Meenakshi Traders",      201500, "919812300010", 60),
     ("Deepak Electric House",   55000, None,           30),
     ("Priya Wholesale",        173000, "919812300012", 30),
+    # Two debts the cadence has already given up on, so the demo (and the
+    # legal screens) have something past 300 days to show. No opening
+    # balance - their age comes from the dated sales vouchers below.
+    ("Shanthi Hardware",            0, "919812300013", 45),
+    ("Old Metal Mart",              0, "919812300014", 30),
 ]
 
 
@@ -102,6 +107,11 @@ def seed() -> None:
         {"voucher_number": "S-1004", "party_name": "Lakshmi Enterprises","date": d(20), "amount": 25000, "voucher_type": "Sales"},
         {"voucher_number": "S-1005", "party_name": "Ganesh Distributors","date": d(10), "amount": 80000, "voucher_type": "Sales"},
         {"voucher_number": "S-1006", "party_name": "Ravi Trading Co",    "date": d(5),  "amount": 30000, "voucher_type": "Sales"},
+        # Past the 300-day cadence, still inside the three-year limitation:
+        # "Notice worth sending".
+        {"voucher_number": "S-0901", "party_name": "Shanthi Hardware",   "date": d(430), "amount": 48000, "voucher_type": "Sales"},
+        # Past three years: unenforceable, so the party page says write it off.
+        {"voucher_number": "S-0801", "party_name": "Old Metal Mart",     "date": d(1200), "amount": 26000, "voucher_type": "Sales"},
         {"voucher_number": "R-2001", "party_name": "Sri Balaji Traders", "date": d(3),  "amount": 60000, "voucher_type": "Receipt"},
         {"voucher_number": "R-2002", "party_name": "Anand Electricals",  "date": d(1),  "amount": 15000, "voucher_type": "Receipt"},
     ]
