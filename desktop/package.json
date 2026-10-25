@@ -1,6 +1,6 @@
 {
   "name": "asva-desktop",
-  "version": "2.2.9",
+  "version": "2.2.10",
   "description": "ASVA - reads Tally, sends bills and reminders on the shop's own WhatsApp.",
   "author": "Almmatix",
   "main": "main.js",
@@ -30,7 +30,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "ASVA 2.2.9.\n\nWhatsApp now lives on ASVA's server instead of this computer. Bills and reminders keep going out when the shop PC is off, asleep or restarting.\n\nOne QR, not two. Scan it once in ASVA and you are connected.\n\nA reminder can no longer go out twice if the network hiccups mid-send."
+      "releaseNotes": "ASVA 2.2.10.\n\nUpdates are now a 10 MB download instead of 148 MB. ASVA was still shipping the old on-this-computer WhatsApp service, which version 2.2.9 stopped using - so nine tenths of every update was for something that never ran.\n\nASVA also keeps the computer awake while an update downloads, so a laptop going to sleep no longer kills it halfway."
     },
     "files": [
       "main.js",
@@ -40,15 +40,6 @@
       "icon.png"
     ],
     "extraResources": [
-      {
-        "from": "../wa_service",
-        "to": "wa_service",
-        "filter": [
-          "**/*",
-          "!node_modules/.cache/**",
-          "!.baileys_auth/**"
-        ]
-      },
       {
         "from": "../dist_agent",
         "to": "agent",

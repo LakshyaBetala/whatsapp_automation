@@ -1181,17 +1181,44 @@ function setupAutoUpdate() {
     if (Array.isArray(n)) return n.map((x) => (x && x.note) || x).join('\n');
     return String(n);
   };
-  autoUpdater.on('update-available', (info) =>
-    sendToWindow('update', { state: 'downloading', version: info && info.version, notes: notesOf(info) }));
+  // A laptop sliding into standby mid-download is what "Network I/O
+  // suspended" means: Windows pulls the network out from under the request and
+  // electron-updater gives up instead of resuming. Hold the machine awake for
+  // as long as a download is actually in flight, and never longer.
+  const { powerSaveBlocker } = require('electron');
+  let dlBlocker = null;
+  const holdAwake = () => {
+    try {
+      if (dlBlocker === null) {
+        dlBlocker = powerSaveBlocker.start('prevent-app-suspension');
+        logLine('info', 'power save blocker on for the download');
+      }
+    } catch (e) { /* never let this stop an update */ }
+  };
+  const letSleep = () => {
+    try {
+      if (dlBlocker !== null && powerSaveBlocker.isStarted(dlBlocker)) {
+        powerSaveBlocker.stop(dlBlocker);
+      }
+    } catch (e) { /* ignore */ }
+    dlBlocker = null;
+  };
+
+  autoUpdater.on('update-available', (info) => {
+    holdAwake();
+    sendToWindow('update', { state: 'downloading', version: info && info.version, notes: notesOf(info) });
+  });
   autoUpdater.on('download-progress', (p) =>
     sendToWindow('update', { state: 'downloading', percent: Math.round((p && p.percent) || 0) }));
   autoUpdater.on('update-downloaded', (info) => {
+    letSleep();
     updateReady = true;                        // closing the window now applies it
     pendingUpdateVersion = (info && info.version) || '';  // shown on the updating splash
     sendToWindow('update', { state: 'ready', version: info && info.version, notes: notesOf(info) });
   });
-  autoUpdater.on('update-not-available', () => sendToWindow('update', { state: 'current' }));
+  autoUpdater.on('update-not-available', () => { letSleep(); sendToWindow('update', { state: 'current' }); });
   autoUpdater.on('error', (err) => {
+    letSleep();
     const why = (err && (err.message || err.code)) || String(err);
     console.error('[update] error:', why);
     logLine('error', why);

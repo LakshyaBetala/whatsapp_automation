@@ -1286,6 +1286,10 @@ hardenAllWebviews();   // wire crash-recovery on every tab's webview up front
 // "What's new" so the owner sees what changed (the update BAR shows it before
 // restart; this shows it AFTER, when they are on the new build).
 const WHATS_NEW = {
+  '2.2.10': [
+    'Updates are now about 10 MB instead of 148. ASVA was still shipping the old on-this-computer WhatsApp service that version 2.2.9 stopped using, so nine tenths of every update was for something that never ran.',
+    'ASVA keeps the computer awake while an update downloads, so a laptop going to sleep no longer kills it halfway through.',
+  ],
   '2.2.9': [
     "WhatsApp now lives on ASVA's server instead of this computer. Bills and reminders keep going out when the shop PC is off, asleep or restarting - the main reason messages used to sit unsent for days.",
     'One QR, not two. Scan it once in ASVA and you are connected; there is no second WhatsApp hiding on this machine to compete with it and knock you offline.',
