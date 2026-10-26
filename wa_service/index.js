@@ -108,7 +108,6 @@ function rememberSent(id, result) {
         fs.writeFileSync(SENT_ONCE, JSON.stringify(Object.fromEntries(sentOnce)), 'utf8');
     } catch (e) { console.warn('send-once ledger not saved:', e.message); }
 }
-let restoredFromBackup = false;   // restore at most once per process, then trust it
 function _credsOk(dir) {
     try { JSON.parse(fs.readFileSync(path.join(dir, 'creds.json'), 'utf8')); return true; }
     catch (e) { return false; }
@@ -487,7 +486,7 @@ async function start() {
         // Torn-write recovery: if the primary session is corrupt (e.g. killed
         // mid-save on an auto-update) but a good backup exists, restore it so we
         // resume WITHOUT a re-scan instead of showing a fresh QR.
-        if (!_credsOk(AUTH_DIR) && restoreAuthFromBackup()) restoredFromBackup = true;
+        if (!_credsOk(AUTH_DIR)) restoreAuthFromBackup();
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
         registered = !!(state.creds && state.creds.registered);
         const version = await waWebVersion();
@@ -521,9 +520,14 @@ async function start() {
             auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
         });
 
+        // Save only. This used to also recompute `registered` from creds on every
+        // update, so one update where the flag read falsy silently un-paired us in
+        // memory - and the 500 handler, which was guarded on `registered`, then
+        // skipped its retries and wiped a perfectly good session. `registered` is
+        // a fact about what is on disk: set at start, set on connect, cleared only
+        // where we actually delete the session.
         sock.ev.on('creds.update', () => {
             if (myGen !== gen) return;
-            registered = !!(sock.authState && sock.authState.creds && sock.authState.creds.registered);
             saveCreds();
         });
 
@@ -580,35 +584,33 @@ async function start() {
                     return;
                 }
                 if (code === DisconnectReason.badSession) {
-                    // 500: often a TRANSIENT WhatsApp stream error, not a truly dead
-                    // session. Wiping on the first one destroys a working, unattended
-                    // login and drops into an endless QR loop nobody is there to scan
-                    // (the exact failure seen in the field). So reconnect with the
-                    // SAME creds a few times first; only wipe if it keeps failing.
-                    if (registered && badSessionFails < BAD_SESSION_MAX) {
-                        badSessionFails += 1;
-                        const delay = Math.min(5000 * badSessionFails, 60000);
-                        console.log(`Stream error (500) - reconnecting WITHOUT re-scan `
-                            + `(attempt ${badSessionFails}/${BAD_SESSION_MAX}, in ${Math.round(delay/1000)}s).`);
-                        scheduleRestart(delay);
-                        return;
-                    }
-                    // Before wiping, try the last-good backup once: a torn write
-                    // from an update-time kill shows up as a persistent 500.
-                    if (!restoredFromBackup && restoreAuthFromBackup()) {
-                        restoredFromBackup = true;
-                        badSessionFails = 0;
+                    // 500 is a stream error, and on the server it arrives like
+                    // clockwork about 50 minutes into every session. Wiping on it
+                    // is what actually killed the shop: three sessions in a row
+                    // were deleted at the 50 minute mark, and each wipe turned a
+                    // reconnect that would have cost five seconds into a QR that
+                    // nobody was standing there to scan. The number went dark for
+                    // 32 hours and the reminder queue expired behind it.
+                    //
+                    // So a 500 never deletes anything now. It reconnects with the
+                    // same creds, forever, backing off to a minute. Only WhatsApp
+                    // saying 401 (loggedOut), or the owner pressing relink, may
+                    // delete a session - because those are the only two cases
+                    // where somebody has actually decided the session is over.
+                    badSessionFails += 1;
+                    // Every few failures, fall back to the last-good snapshot once
+                    // more: a torn write also surfaces as a persistent 500, and
+                    // the restore used to be allowed only once per process, so the
+                    // safety net stopped existing after the first time it fired.
+                    if (badSessionFails % BAD_SESSION_MAX === 0 && restoreAuthFromBackup()) {
                         console.log('Repeated 500s - restored last-good session, retrying without a re-scan.');
                         scheduleRestart(2000);
                         return;
                     }
-                    try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (e) {}
-                    try { fs.rmSync(AUTH_BAK, { recursive: true, force: true }); } catch (e) {}
-                    registered = false;
-                    reconnectFails = 0;
-                    badSessionFails = 0;
-                    console.log('Session bad after repeated retries: wiped, a fresh QR will appear.');
-                    scheduleRestart(2000);
+                    const delay = Math.min(5000 * badSessionFails, 60000);
+                    console.log(`Stream error (500) - reconnecting WITHOUT re-scan `
+                        + `(attempt ${badSessionFails}, in ${Math.round(delay / 1000)}s).`);
+                    scheduleRestart(delay);
                     return;
                 }
                 if (code === DisconnectReason.connectionReplaced) {
