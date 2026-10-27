@@ -78,9 +78,15 @@ async def _drain(db, shop: dict) -> None:
         shop["wa_transport"] = "server"
     if shop.get("wa_transport") != "server":
         return                      # still being linked; the laptop keeps sending
+    # `registered` separates "nobody has scanned" from "the socket dropped and
+    # is coming back in five seconds". Without it the monitor emails the owner
+    # "re-scan the QR" for a reconnect, and re-scanning is now the one action
+    # that destroys a healthy session. None when the child did not answer: we
+    # do not know, so we do not claim it needs a scan.
+    patch = {"wa_ready": ready, "wa_checked_at": _now().isoformat(),
+             "wa_needs_scan": (not st.get("registered")) if st else None}
     try:
-        db.table("businesses").update(
-            {"wa_ready": ready, "wa_checked_at": _now().isoformat()}).eq("id", bid).execute()
+        db.table("businesses").update(patch).eq("id", bid).execute()
     except Exception:
         log.debug("wa_ready update failed for %s", bid, exc_info=True)
     if not ready:

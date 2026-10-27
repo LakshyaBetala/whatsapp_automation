@@ -218,14 +218,33 @@ def test_cadence_markers_are_not_counted_as_sent():
     assert h["traffic"][-1]["sent"] == 1
 
 
-def test_server_shop_whatsapp_down_alerts_even_with_the_laptop_off():
+def _server_shop(**kw):
+    row = {"id": "s", "name": "ServerShop", "status": "active", "online": False,
+           "last_seen_min": 900, "wa_ready": False, "wa_transport": "server", "queued": 0,
+           "queue_oldest_min": 0, "sent_today": 0, "failed_today": 0, "blocked_today": 0}
+    row.update(kw)
+    return {"businesses": [row]}
+
+
+def test_server_shop_with_no_linked_whatsapp_alerts_even_with_the_laptop_off():
     """Its WhatsApp runs on ASVA's server, so the laptop being off says nothing
-    about it: a down server WhatsApp is a real outage."""
-    health = {"businesses": [
-        {"id": "s", "name": "ServerShop", "status": "active", "online": False,
-         "last_seen_min": 900, "wa_ready": False, "wa_transport": "server", "queued": 0,
-         "queue_oldest_min": 0, "sent_today": 0, "failed_today": 0, "blocked_today": 0},
-    ]}
-    problems = monitoring.evaluate(health)
+    about it: no linked session there is a real outage."""
+    problems = monitoring.evaluate(_server_shop(wa_needs_scan=True))
     wa = [p for p in problems if p["kind"] == "wa_down"]
     assert wa and "server" in wa[0]["body"].lower()
+    assert "scan" in wa[0]["body"].lower()
+
+
+def test_a_reconnecting_server_session_is_not_an_alert():
+    """The session is paired and the socket merely dropped; it is back in
+    seconds. Telling the owner to re-scan this one is how a healthy session
+    gets destroyed, because a re-scan wipes it."""
+    assert [p for p in monitoring.evaluate(_server_shop(wa_needs_scan=False))
+            if p["kind"] == "wa_down"] == []
+
+
+def test_an_unanswered_shop_process_is_not_called_a_scan_problem():
+    """wa_needs_scan is None when the child did not answer. We do not know, so
+    we do not send the owner to the QR page on a guess."""
+    assert [p for p in monitoring.evaluate(_server_shop(wa_needs_scan=None))
+            if p["kind"] == "wa_down"] == []
