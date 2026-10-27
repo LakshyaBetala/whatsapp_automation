@@ -337,10 +337,17 @@ function forceRestart(why, delayMs = 1000) {
 //    Phone says "linked", we say ready, but the ws is not open -> restart.
 // 2. Stuck: not ready, no QR on screen, no progress for 3+ minutes -> restart.
 //    (A QR on screen = waiting for a human. That is never "stuck".)
+let watchTicks = 0;
 setInterval(() => {
     try {
         if (clientReady) {
             lastProgressAt = Date.now();
+            // Refresh the last-good snapshot every 5 minutes. It used to be
+            // taken once, three seconds after connecting, so a session that
+            // died fifty minutes later restored a copy that was fifty minutes
+            // of key rotations out of date - which bought one more connection
+            // and then failed the same way.
+            if (++watchTicks % 5 === 0) backupAuth();
             const wsOpen = sock && sock.ws && sock.ws.isOpen !== false;
             if (!wsOpen) forceRestart('zombie socket (marked ready but ws is closed)');
             return;

@@ -112,7 +112,11 @@ async function reconcile() {
     for (const s of shops) {
         const c = children.get(s.business_id);
         if (!c) startChild(s);
-        else if (c.port !== s.port || c.token !== s.token) { stopChild(s.business_id); startChild(s); }
+        // Port or token changed. Only stop it here: SIGTERM is asynchronous, so
+        // spawning the replacement in the same breath put two Baileys processes
+        // on one auth directory, which corrupts the session. The next poll sees
+        // no child and starts it cleanly.
+        else if (c.port !== s.port || c.token !== s.token) stopChild(s.business_id);
     }
 }
 
