@@ -72,7 +72,9 @@ class OutboxDB:
 
 def _record(monkeypatch):
     seen = []
-    monkeypatch.setattr(markers, "settle", lambda db, mid, delivered: seen.append((mid, delivered)))
+    monkeypatch.setattr(markers, "settle",
+                        lambda db, mid, delivered, permanent=False:
+                        seen.append((mid, delivered, permanent)))
     return seen
 
 
@@ -81,14 +83,32 @@ def test_laptop_ack_sent_settles_delivered(monkeypatch):
     seen = _record(monkeypatch)
     monkeypatch.setattr(outbox, "_cleanup_pdf", lambda db, mid: None)
     outbox.ack(OutboxDB({"id": "o1", "message_db_id": "m1"}), "b1", "o1", "sent")
-    assert seen == [("m1", True)]
+    assert seen == [("m1", True, False)]
 
 
 def test_laptop_ack_failed_settles_not_delivered(monkeypatch):
     from app.services import outbox
     seen = _record(monkeypatch)
     outbox.ack(OutboxDB({"id": "o1", "message_db_id": "m1"}), "b1", "o1", "failed")
-    assert seen == [("m1", False)]
+    assert seen == [("m1", False, False)]   # transient: the marker goes, it retries
+
+
+def test_a_number_not_on_whatsapp_keeps_its_marker(monkeypatch):
+    """Deleting the marker means the next sweep chases the same dead number
+    again, every hour, forever - nine parties did exactly that 120 times."""
+    from app.services import outbox
+    seen = _record(monkeypatch)
+    outbox.ack(OutboxDB({"id": "o1", "message_db_id": "m1"}), "b1", "o1", "failed",
+               error="not_on_whatsapp")
+    assert seen == [("m1", False, True)]
+
+
+def test_an_unknown_error_is_still_treated_as_transient(monkeypatch):
+    from app.services import outbox
+    seen = _record(monkeypatch)
+    outbox.ack(OutboxDB({"id": "o1", "message_db_id": "m1"}), "b1", "o1", "failed",
+               error="socket hung up")
+    assert seen == [("m1", False, False)]
 
 
 def test_laptop_ack_still_queued_settles_nothing(monkeypatch):
@@ -102,7 +122,7 @@ def test_held_reminder_releases_its_markers(monkeypatch):
     from app.services import outbox
     seen = _record(monkeypatch)
     outbox._hold(OutboxDB({}), "b1", "o1", "m1")
-    assert seen == [("m1", False)]
+    assert seen == [("m1", False, False)]
 
 
 def test_server_sweep_mark_settles(monkeypatch):
@@ -112,7 +132,7 @@ def test_server_sweep_mark_settles(monkeypatch):
     db = OutboxDB({})
     outbox_sweep._mark(db, {"id": "o1", "message_db_id": "m1"}, "sent", 1, None)
     outbox_sweep._mark(db, {"id": "o2", "message_db_id": "m2"}, "failed", 3, "x")
-    assert seen == [("m1", True), ("m2", False)]
+    assert seen == [("m1", True, False), ("m2", False, False)]
 
 
 def test_stale_expiry_releases_markers(monkeypatch):
@@ -121,7 +141,7 @@ def test_stale_expiry_releases_markers(monkeypatch):
     row = {"id": "o1", "business_id": "b1", "message_db_id": "m1", "attempts": 0}
     monkeypatch.setattr("app.db.get_client", lambda: OutboxDB(row))
     asyncio.run(outbox_sweep.expire_stale())
-    assert ("m1", False) in seen
+    assert ("m1", False, False) in seen
 
 
 # ── the sweep links markers to the real message ───────────────────────────

@@ -23,6 +23,10 @@ log = logging.getLogger(__name__)
 
 PULL_LIMIT = 15
 
+# Failure reasons that an hour of waiting cannot change. Anything not in here
+# is transient and the reminder comes round again on the next sweep.
+PERMANENT_FAILS = frozenset({"not_on_whatsapp", "limit_reached", "subscription_suspended"})
+
 
 def _transport(db, business_id: str) -> str:
     """'server' when ASVA's server runs this shop's WhatsApp, else 'laptop'.
@@ -155,7 +159,10 @@ def _mark(db, business_id: str, row_id: str, status: str,
         except Exception:
             log.warning("Could not mirror outbox %s to messages", row_id)
     if status in ("sent", "failed"):
-        markers.settle(db, row.get("message_db_id"), delivered=status == "sent")
+        # A number with no WhatsApp account is not a retry candidate - see
+        # markers.settle for what deleting its marker used to cost.
+        markers.settle(db, row.get("message_db_id"), delivered=status == "sent",
+                       permanent=(error or "") in PERMANENT_FAILS)
     if status == "sent" and row.get("message_db_id"):
         _cleanup_pdf(db, row["message_db_id"])
     return True
