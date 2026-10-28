@@ -44,6 +44,31 @@ def recovered_between(db, business_id: str, start: _dt.date, end: _dt.date) -> D
         return Decimal(0)
 
 
+def billed_between(db, business_id: str, start: _dt.date, end: _dt.date) -> Decimal:
+    """Sum of bills raised in [start, end). The denominator nobody had.
+
+    Recovered on its own cannot tell "a quiet month" from "ASVA stopped
+    working": both look like a small number. Against what the shop actually
+    billed, the difference is obvious.
+    """
+    try:
+        rows = (db.table("bills").select("amount")
+                .eq("business_id", business_id)
+                .gte("invoice_date", start.isoformat())
+                .lt("invoice_date", end.isoformat()).execute()).data or []
+        return sum((Decimal(str(r.get("amount") or 0)) for r in rows), Decimal(0))
+    except Exception:
+        return Decimal(0)
+
+
+def collection_pct(collected: Decimal, billed: Decimal) -> int | None:
+    """Collected as a percentage of billed. None when there is nothing to
+    divide by, which is not the same as zero and must not read as a failure."""
+    if not billed or billed <= 0:
+        return None
+    return int(round(float(collected) / float(billed) * 100))
+
+
 def outstanding_total(db, business_id: str) -> Decimal:
     """Sum of what is still open (pending/partial/overdue). Best-effort -> 0."""
     try:
@@ -62,9 +87,19 @@ def build_proof(db, business_id: str, today: _dt.date | None = None) -> dict:
     m_start = _month_start(today)
     m_end = _next_month(m_start)
     l_start = _prev_month(m_start)
+    rec_now = recovered_between(db, business_id, m_start, m_end)
+    rec_prev = recovered_between(db, business_id, l_start, m_start)
+    billed_now = billed_between(db, business_id, m_start, m_end)
+    billed_prev = billed_between(db, business_id, l_start, m_start)
     return {
         "month": m_start.strftime("%B"),
-        "recovered_this_month": recovered_between(db, business_id, m_start, m_end),
-        "recovered_last_month": recovered_between(db, business_id, l_start, m_start),
+        "recovered_this_month": rec_now,
+        "recovered_last_month": rec_prev,
+        "billed_this_month": billed_now,
+        "billed_last_month": billed_prev,
+        # The one number that says whether ASVA is working: of what the shop
+        # billed, how much came back.
+        "collected_pct": collection_pct(rec_now, billed_now),
+        "collected_pct_last_month": collection_pct(rec_prev, billed_prev),
         "outstanding": outstanding_total(db, business_id),
     }

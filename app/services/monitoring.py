@@ -106,6 +106,13 @@ def stamp_job(db, name: str, ok: bool = True, detail: str | None = None) -> None
         pass
 
 
+# A shop too small to judge, and a baseline too weak to fall from, both produce
+# noise rather than signal - so the money alert only speaks when there is a real
+# drop from a real habit.
+COLLECT_FLOOR_RS = 50_000       # billed in the last 30 days, or not worth judging
+COLLECT_BASE_MIN_PCT = 25       # they were collecting before, so there is a fall
+
+
 def build_health(db) -> dict:
     now = _dt.datetime.now(_dt.timezone.utc)
     today_ist = _dt.datetime.now(IST).date()
@@ -157,6 +164,29 @@ def build_health(db) -> dict:
         age = _mins_since(_parse_ts(r.get("created_at")), now)
         q_oldest[bid] = max(q_oldest.get(bid, 0), age)
 
+    # Collection ratio: of what a shop billed, how much came back. A shop whose
+    # WhatsApp quietly broke keeps billing and stops collecting, and nothing
+    # else in here notices - one shop's ratio fell from 94% to 3% over three
+    # months while every other check stayed green. Last 30 days against the 90
+    # before it, because a single quiet month is not a signal.
+    cut_30 = (today_ist - _dt.timedelta(days=30)).isoformat()
+    cut_120 = (today_ist - _dt.timedelta(days=120)).isoformat()
+    billed_30 = Counter(); billed_base = Counter()
+    for r in _paged(lambda: db.table("bills").select("business_id, amount, invoice_date")
+                    .gte("invoice_date", cut_120)):
+        amt = float(r.get("amount") or 0)
+        (billed_30 if str(r.get("invoice_date") or "") >= cut_30 else billed_base)[
+            r.get("business_id")] += amt
+    got_30 = Counter(); got_base = Counter()
+    for r in _paged(lambda: db.table("tally_receipts").select("business_id, amount, receipt_date")
+                    .gte("receipt_date", cut_120)):
+        amt = float(r.get("amount") or 0)
+        (got_30 if str(r.get("receipt_date") or "") >= cut_30 else got_base)[
+            r.get("business_id")] += amt
+
+    def _pct(got, billed):
+        return None if billed <= 0 else int(round(got * 100 / billed))
+
     # Scheduler job heartbeats.
     jobs = []
     for j in (db.table("job_heartbeats").select("*").execute().data or []):
@@ -204,6 +234,10 @@ def build_health(db) -> dict:
             # None when we could not ask the shop process. Only an explicit
             # True means "no paired session, a human must scan".
             "wa_needs_scan": b.get("wa_needs_scan"),
+            "billed_30": round(billed_30.get(bid, 0.0)),
+            "collected_30": round(got_30.get(bid, 0.0)),
+            "collect_pct": _pct(got_30.get(bid, 0.0), billed_30.get(bid, 0.0)),
+            "collect_pct_base": _pct(got_base.get(bid, 0.0), billed_base.get(bid, 0.0)),
         })
         tot["businesses"] += 1
         tot["online"] += 1 if online else 0
@@ -302,6 +336,25 @@ def evaluate(health: dict) -> list[dict]:
                              "body": "The shop's WhatsApp is not connected, so bills and "
                                      "reminders cannot go out. Have the shopkeeper re-scan "
                                      "at localhost:3001/qr on the shop laptop."})
+        # The money check. Everything else here watches machinery; this watches
+        # the outcome, which is the only thing that tells you a shop is dying
+        # while every socket and sync looks fine.
+        now_pct, base_pct = r.get("collect_pct"), r.get("collect_pct_base")
+        if (now_pct is not None and base_pct is not None
+                and r.get("billed_30", 0) >= COLLECT_FLOOR_RS
+                and base_pct >= COLLECT_BASE_MIN_PCT
+                and now_pct < base_pct / 2):
+            problems.append({"kind": "collection_collapsed", "business_id": r["id"],
+                             "severity": "critical",
+                             "title": f"{name}: collecting {now_pct}% of what they bill",
+                             "body": f"Over the last 30 days this shop billed "
+                                     f"Rs {r.get('billed_30', 0):,} and collected "
+                                     f"Rs {r.get('collected_30', 0):,}, which is {now_pct}%. "
+                                     f"Over the 90 days before that it was {base_pct}%. "
+                                     f"Either ASVA has stopped working for them or they "
+                                     f"have stopped recording receipts in Tally. Ask them "
+                                     f"which, today - this is what a shop about to cancel "
+                                     f"looks like from the inside."})
         if r["queued"] >= settings.outbox_backlog_alert:
             problems.append({"kind": "outbox_stuck", "business_id": r["id"], "severity": "warn",
                              "title": f"{name}: {r['queued']} messages stuck in queue",

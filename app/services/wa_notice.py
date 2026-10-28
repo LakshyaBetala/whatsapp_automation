@@ -30,8 +30,22 @@ from app.services import i18n, whatsapp
 log = logging.getLogger(__name__)
 
 GRACE_MIN = 20          # how long it must stay down before the owner hears about it
-REPEAT_HOURS = 24       # while still down: one reminder a day, no more
+REPEAT_HOURS = 24       # legacy floor, kept for the "sending again" window below
 RECENT_HOURS = 72       # "sending again" only closes a notice from the last 3 days
+
+# How often we are willing to interrupt an owner about the same problem.
+#
+# This used to be "once a day, forever", which on a shop that had quietly
+# stopped using ASVA meant a WhatsApp message every single morning with no end.
+# A nudge is worth sending while there is still a shop on the other side of it;
+# past that it is just noise from a product they already left.
+#
+# So: TWO messages per episode, in total, spaced two days apart - and nothing at
+# all once the lapse passes a week. An episode ends when the thing is fixed, so
+# a shop that syncs and later lapses again gets a fresh pair.
+MAX_NUDGES = 2          # per episode, ever - not per day
+NUDGE_GAP_H = 48        # so the pair lands around day 3 and day 5
+GIVE_UP_DAYS = 7        # a lapse older than this gets silence, not a third message
 
 DOWN = "wa_down_notice"
 BACK = "wa_back_notice"
@@ -123,6 +137,27 @@ def _last_notice(db, business_id: str, template: str) -> _dt.datetime | None:
     return _parse(r.data[0]["created_at"]) if r.data else None
 
 
+def _notice_count(db, business_id: str, template: str,
+                  since: _dt.datetime | None) -> int:
+    """How many of this notice the shop has already had in the CURRENT episode.
+
+    `since` is when the episode started - the last Tally sync, or when the
+    WhatsApp went down - so counting from it resets the budget every time the
+    problem is actually fixed.
+    """
+    if since is None:
+        return MAX_NUDGES          # unknown start: treat the budget as spent
+    try:
+        r = (db.table("messages").select("id")
+             .eq("business_id", business_id).eq("template_name", template)
+             .gte("created_at", since.isoformat())
+             .limit(MAX_NUDGES + 1).execute())
+        return len(r.data or [])
+    except Exception:
+        log.warning("wa_notice: could not count %s", template, exc_info=True)
+        return MAX_NUDGES          # unknown: stay quiet rather than risk a repeat
+
+
 def _down_since(db, business_id: str) -> _dt.datetime | None:
     """When the open wa_down incident for this shop was raised."""
     try:
@@ -187,11 +222,16 @@ async def run(db, problems: list[dict], health: dict) -> int:
         english = i18n.is_english(biz.get("owner_language") or biz.get("msg_language"))
 
         if bid in down_ids:
-            if _mins(_down_since(db, bid)) < GRACE_MIN:
+            since = _down_since(db, bid)
+            if _mins(since) < GRACE_MIN:
                 continue                   # a blip, not an outage
+            if _mins(since) > GIVE_UP_DAYS * 1440:
+                continue                   # down for a week: they know, or they left
+            if _notice_count(db, bid, DOWN, since) >= MAX_NUDGES:
+                continue                   # two is the whole budget for this outage
             last = _last_notice(db, bid, DOWN)
-            if last is not None and _mins(last) < REPEAT_HOURS * 60:
-                continue                   # already told today
+            if last is not None and _mins(last) < NUDGE_GAP_H * 60:
+                continue                   # space the pair out
             queued = int(row.get("queued") or 0)
             waiting = (f" {queued} message{'s' if queued != 1 else ''} "
                        f"{'are' if queued != 1 else 'is'} waiting." if queued else "")
@@ -205,12 +245,22 @@ async def run(db, problems: list[dict], health: dict) -> int:
 
         # Figures too old to chase on: say what stopped and how to restart it.
         if bid in stale_ids:
-            last = _last_notice(db, bid, STALE)
-            if last is not None and _mins(last) < REPEAT_HOURS * 60:
-                continue                   # already told today
             full = bizes.get(bid) or {}
-            when = fresh.last_sync_label(full, english=english)
             hrs = fresh.hours_since_sync(full)
+            # The floor is settings.tally_stale_hold_h (72h), which is what put
+            # the shop in stale_ids at all - a one-day-old figure is not worth
+            # interrupting anyone over. This is the ceiling: a shop that has not
+            # opened ASVA in a week is not coming back because of a third
+            # message, so stop rather than nag it forever.
+            if (hrs or 0) > GIVE_UP_DAYS * 24:
+                continue
+            synced_at = _now() - _dt.timedelta(hours=(hrs or 0))
+            if _notice_count(db, bid, STALE, synced_at) >= MAX_NUDGES:
+                continue
+            last = _last_notice(db, bid, STALE)
+            if last is not None and _mins(last) < NUDGE_GAP_H * 60:
+                continue                   # space the pair out
+            when = fresh.last_sync_label(full, english=english)
             text = (_STALE_EN if english else _STALE_HI).format(
                 name=name, when=when, days=int((hrs or 0) // 24) or 1)
             if await _send(db, biz, STALE, text):

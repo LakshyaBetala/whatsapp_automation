@@ -248,3 +248,49 @@ def test_an_unanswered_shop_process_is_not_called_a_scan_problem():
     we do not send the owner to the QR page on a guess."""
     assert [p for p in monitoring.evaluate(_server_shop(wa_needs_scan=None))
             if p["kind"] == "wa_down"] == []
+
+
+# ── The money check ───────────────────────────────────────────────────────
+# Every other check in here watches machinery. This one watches the outcome,
+# because one shop's collection fell from 94% of billings to 3% over three
+# months while every socket, sync and queue check stayed green.
+
+def _money_shop(**kw):
+    row = {"id": "m", "name": "MoneyShop", "status": "active", "online": True,
+           "last_seen_min": 5, "wa_ready": True, "wa_transport": "server",
+           "wa_needs_scan": False, "queued": 0, "queue_oldest_min": 0,
+           "sent_today": 0, "failed_today": 0, "blocked_today": 0,
+           "billed_30": 1013478, "collected_30": 32790,
+           "collect_pct": 3, "collect_pct_base": 35}
+    row.update(kw)
+    return {"businesses": [row]}
+
+
+def _collapsed(health):
+    return [p for p in monitoring.evaluate(health) if p["kind"] == "collection_collapsed"]
+
+
+def test_a_collapse_in_collection_is_raised():
+    p = _collapsed(_money_shop())
+    assert p and p[0]["severity"] == "critical"
+    assert "3%" in p[0]["title"]
+    assert "35%" in p[0]["body"]          # says what it used to be
+
+
+def test_a_shop_that_never_collected_much_is_not_accused_of_collapsing():
+    """No habit to fall from, so a low ratio is how that shop has always been."""
+    assert _collapsed(_money_shop(collect_pct=8, collect_pct_base=12)) == []
+
+
+def test_a_tiny_month_is_not_judged():
+    """One slow month at a small shop is noise, not a dying account."""
+    assert _collapsed(_money_shop(billed_30=20000)) == []
+
+
+def test_a_healthy_shop_is_quiet():
+    assert _collapsed(_money_shop(collect_pct=71, collect_pct_base=78)) == []
+
+
+def test_a_shop_with_no_billing_history_is_quiet():
+    """None is 'nothing to divide by', which must never read as a failure."""
+    assert _collapsed(_money_shop(collect_pct=None, collect_pct_base=None)) == []

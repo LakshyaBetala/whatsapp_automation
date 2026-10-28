@@ -75,7 +75,12 @@ class _MsgTbl(_Tbl):
 
     def execute(self):
         at = self.state.get("notices", {}).get(self.template)
-        return _Resp([{"created_at": at}] if at else [])
+        if not at:
+            return _Resp([])
+        # notice_n lets a test say "this shop has already had N of these in the
+        # current episode", which is what the two-nudge budget counts.
+        n = int(self.state.get("notice_n", {}).get(self.template, 1))
+        return _Resp([{"created_at": at}] * n)
 
 
 class FakeDB:
@@ -101,7 +106,7 @@ def _run(monkeypatch, state, *, problems=(PROBLEM,), rows=(ROW_DOWN,), in_window
 
 
 def _state(**over):
-    s = {"biz": dict(BIZ), "down_since": _ago(hours=2), "notices": {}}
+    s = {"biz": dict(BIZ), "down_since": _ago(hours=2), "notices": {}, "notice_n": {}}
     s.update(over)
     return s
 
@@ -126,10 +131,37 @@ def test_does_not_repeat_the_same_day(monkeypatch):
     assert out == 0 and sent == []
 
 
-def test_reminds_once_a_day_while_it_stays_down(monkeypatch):
-    state = _state(notices={"wa_down_notice": _ago(hours=26)})
+def test_sends_the_second_nudge_two_days_later(monkeypatch):
+    """Two messages per outage, spaced out - not one every morning."""
+    state = _state(down_since=_ago(hours=50),
+                   notices={"wa_down_notice": _ago(hours=49)})
     out, sent = _run(monkeypatch, state)
     assert out == 1 and sent[0]["template"] == "wa_down_notice"
+
+
+def test_does_not_send_a_third_nudge_ever(monkeypatch):
+    """The budget is two per outage. After that the owner either knows or has
+    left, and a daily message is just something to mute."""
+    state = _state(down_since=_ago(hours=100),
+                   notices={"wa_down_notice": _ago(hours=60)},
+                   notice_n={"wa_down_notice": 2})
+    out, sent = _run(monkeypatch, state)
+    assert out == 0 and sent == []
+
+
+def test_gives_up_on_a_shop_that_has_been_down_a_week(monkeypatch):
+    """A week of silence is a shop that stopped using ASVA. Nudging it again is
+    noise from a product they already left."""
+    state = _state(down_since=_ago(days=8))
+    out, sent = _run(monkeypatch, state)
+    assert out == 0 and sent == []
+
+
+def test_a_second_nudge_still_waits_out_the_gap(monkeypatch):
+    state = _state(down_since=_ago(hours=50),
+                   notices={"wa_down_notice": _ago(hours=20)})
+    out, sent = _run(monkeypatch, state)
+    assert out == 0 and sent == []
 
 
 def test_stays_quiet_at_night(monkeypatch):
