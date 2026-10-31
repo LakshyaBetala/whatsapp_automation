@@ -44,13 +44,27 @@ class _Resp:
 class _Tbl:
     def __init__(self, name, state):
         self.name, self.state = name, state
+        self.cols = None
+
+    def select(self, cols="*", *a, **k):
+        # Honour the column list. A fake that hands back every column no matter
+        # what was asked for cannot catch a forgotten one, and a forgotten
+        # last_tally_sync_at is exactly what shipped.
+        self.cols = None if "*" in cols else [c.strip() for c in cols.split(",")]
+        return self
 
     def __getattr__(self, _):
         return lambda *a, **k: self
 
     def execute(self):
         if self.name == "businesses":
-            return _Resp([dict(self.state["biz"])] if self.state.get("biz") else [])
+            biz = self.state.get("biz")
+            if not biz:
+                return _Resp([])
+            row = dict(biz)
+            if self.cols is not None:
+                row = {k: v for k, v in row.items() if k in self.cols}
+            return _Resp([row])
         if self.name == "alert_log":
             at = self.state.get("down_since")
             return _Resp([{"created_at": at}] if at else [])
@@ -200,4 +214,64 @@ def test_english_unless_the_shop_chose_hinglish(monkeypatch):
 
 def test_a_shop_with_no_number_is_skipped(monkeypatch):
     out, sent = _run(monkeypatch, _state(biz=dict(BIZ, whatsapp_number="")))
+    assert out == 0 and sent == []
+
+
+# ── The stale-figures notice ──────────────────────────────────────────────
+# This branch had no coverage at all, which is how it shipped reading every
+# shop as "1 days old" and messaging shops that last synced in August every
+# other day. The cause was a missing column in run()'s own select, so these
+# tests build the business row the way the real query returns it.
+
+ROW_UP_OK = {"id": "b1", "wa_ready": True, "queued": 0}
+
+
+def _stale_state(hours_since_sync, **over):
+    biz = dict(BIZ)
+    if hours_since_sync is not None:
+        biz["last_tally_sync_at"] = _ago(hours=hours_since_sync)
+    s = {"biz": biz, "down_since": None, "notices": {}, "notice_n": {}}
+    s.update(over)
+    return s
+
+
+def _run_stale(monkeypatch, state):
+    return _run(monkeypatch, state, problems=(), rows=(ROW_UP_OK,))
+
+
+def test_tells_a_shop_its_figures_are_stale(monkeypatch):
+    out, sent = _run_stale(monkeypatch, _stale_state(96))      # 4 days
+    assert out == 1 and sent[0]["template"] == "tally_stale_notice"
+    assert "4 days old" in sent[0]["text"]
+
+
+def test_says_nothing_before_the_three_day_floor(monkeypatch):
+    out, sent = _run_stale(monkeypatch, _stale_state(30))      # ~1 day
+    assert out == 0 and sent == []
+
+
+def test_gives_up_on_a_shop_stale_for_more_than_a_week(monkeypatch):
+    """These shops last synced in August. They were getting a message every
+    other day telling them their figures were one day old."""
+    out, sent = _run_stale(monkeypatch, _stale_state(1735))     # ~72 days
+    assert out == 0 and sent == []
+
+
+def test_two_nudges_is_the_whole_budget(monkeypatch):
+    state = _stale_state(120, notices={"tally_stale_notice": _ago(hours=60)},
+                         notice_n={"tally_stale_notice": 2})
+    out, sent = _run_stale(monkeypatch, state)
+    assert out == 0 and sent == []
+
+
+def test_the_second_nudge_waits_out_the_gap(monkeypatch):
+    state = _stale_state(120, notices={"tally_stale_notice": _ago(hours=20)})
+    out, sent = _run_stale(monkeypatch, state)
+    assert out == 0 and sent == []
+
+
+def test_without_a_sync_date_it_stays_quiet(monkeypatch):
+    """The exact production bug: run() did not select last_tally_sync_at, so
+    every gate read the shop as freshly synced and messaged it forever."""
+    out, sent = _run_stale(monkeypatch, _stale_state(None))
     assert out == 0 and sent == []

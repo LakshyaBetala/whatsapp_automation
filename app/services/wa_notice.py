@@ -201,7 +201,12 @@ async def run(db, problems: list[dict], health: dict) -> int:
     bizes = {}
     try:
         r = (db.table("businesses")
-             .select("id, business_name, whatsapp_number, msg_language, owner_language")
+             # last_tally_sync_at is what dates the whole stale branch. Without
+             # it hours_since_sync returns None, every gate below reads it as
+             # zero, and a shop that last synced in August was told its figures
+             # were "1 days old" every other day, forever.
+             .select("id, business_name, whatsapp_number, msg_language, owner_language, "
+                     "last_tally_sync_at")
              .in_("id", list(rows)).execute())
         bizes = {b["id"]: b for b in (r.data or [])}
     except Exception:
@@ -247,6 +252,11 @@ async def run(db, problems: list[dict], health: dict) -> int:
         if bid in stale_ids:
             full = bizes.get(bid) or {}
             hrs = fresh.hours_since_sync(full)
+            # No readable sync date means we cannot tell how stale this is or
+            # when the episode began, so both the ceiling and the two-nudge
+            # budget would silently pass. Say nothing rather than guess.
+            if hrs is None:
+                continue
             # The floor is settings.tally_stale_hold_h (72h), which is what put
             # the shop in stale_ids at all - a one-day-old figure is not worth
             # interrupting anyone over. This is the ceiling: a shop that has not

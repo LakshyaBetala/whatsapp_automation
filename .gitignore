@@ -77,3 +77,7 @@ dev/*.log
 
 # Playwright MCP scratch output (screenshots, page snapshots)
 .playwright-mcp/
+
+# Personal strategy docs, not part of the product
+Betala Fifty Ideas.html
+WhatsApp Image*.jpeg
