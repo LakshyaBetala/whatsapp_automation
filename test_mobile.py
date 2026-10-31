@@ -27,6 +27,7 @@ class _Q:
     def select(self, *a, **k): return self
     def eq(self, f, v): self._filters.append((f, "eq", v)); return self
     def in_(self, f, v): self._filters.append((f, "in", list(v))); return self
+    def is_(self, f, v): self._filters.append((f, "is", v)); return self
     def order(self, *a, **k): return self
     def limit(self, n): self._n = n; return self
 
@@ -35,6 +36,10 @@ class _Q:
             if op == "eq" and r.get(f) != v:
                 return False
             if op == "in" and r.get(f) not in v:
+                return False
+            # .is_(col, "null") must match a row that simply has no such key,
+            # which is how every fixture here stores "not archived".
+            if op == "is" and str(v) == "null" and r.get(f) is not None:
                 return False
         return True
 
@@ -54,7 +59,8 @@ class FakeDB:
         return _Q(self.tables.get(name, []))
 
 
-BIZ = {"id": "biz1", "business_name": "RISHAB TRADING", "agent_token": "tok-good"}
+BIZ = {"id": "biz1", "business_name": "RISHAB TRADING", "agent_token": "tok-good",
+       "last_tally_sync_at": None}
 
 
 def _db(clients, bills):
@@ -70,12 +76,18 @@ def _no_holds(monkeypatch):
 
 # ── the read-only guarantee ─────────────────────────────────────────────────
 # The phone app is read-only EXCEPT two owner actions the owner explicitly
-# triggers - send this reminder now, and record a payment - both auth-gated and
-# reusing the desktop endpoints. No other mobile route may write.
-_MOBILE_WRITE_ALLOWED = {"/m/api/remind", "/m/api/record-payment"}
+# triggers that reuse the desktop endpoints, so the phone can never do
+# something the Command Center cannot and business_id scoping lives in one
+# place. Adding a route here is a deliberate act: anything not listed fails
+# the test below, which is the point.
+_MOBILE_WRITE_ALLOWED = {
+    "/m/api/remind", "/m/api/record-payment", "/m/api/reminders",
+    "/m/api/exclude", "/m/api/terms", "/m/api/number", "/m/api/release",
+    "/m/api/pick", "/m/api/bill",
+}
 
 
-def test_only_the_two_action_routes_write():
+def test_only_allowed_routes_write():
     for route in mobile.router.routes:
         methods = getattr(route, "methods", set()) or set()
         writes = methods & {"POST", "PUT", "PATCH", "DELETE"}
@@ -208,10 +220,17 @@ def test_pwa_shell_serves_installable_html(monkeypatch):
     assert "ASVA" in r.text
     assert "/m/manifest.webmanifest" in r.text          # installable
     assert "serviceWorker" in r.text                    # registers the SW
-    # The phone app can now remind + record payments; the footer bar says so and
-    # points setup back to the shop computer (it is no longer "view only").
-    assert "record payments" in r.text
-    assert "shop computer" in r.text
+    # Four destinations in a bottom bar, not a chat thread full of verbs.
+    for tab in ("Today", "Parties", "Money", "Setup"):
+        assert "'" + tab + "'" in r.text, tab + " tab missing from the bottom bar"
+    # The screen that decides whether a shop keeps ASVA.
+    assert "Who should ASVA chase?" in r.text
+    assert "shop computer" in r.text                    # desktop still owns setup
+    # A token arrives in the query string once and must not linger anywhere.
+    assert "history.replaceState" in r.text
+    assert r.headers.get("cache-control") == "no-store"
+    assert r.headers.get("referrer-policy") == "no-referrer"
+    assert r.headers.get("x-frame-options") == "DENY"
 
 
 def test_pwa_manifest_is_valid(monkeypatch):
@@ -255,3 +274,47 @@ def test_qr_returns_png_for_valid_token(monkeypatch):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("image/png")
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"      # real PNG bytes
+
+
+# ── the shell must actually run ─────────────────────────────────────────────
+# The phone app is one inline <script>. A stray quote there is a white screen
+# for every owner, and no Python test would notice, so the emitted JS is parsed
+# by node the same way the desktop pages already are.
+import re
+import shutil
+import subprocess
+import tempfile
+
+_NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(_NODE is None, reason="needs node to parse the emitted JS")
+def test_phone_app_javascript_parses():
+    from app.routers.mobile_ui import APP_HTML
+    scripts = re.findall(r"<script>(.*?)</script>", APP_HTML, re.S)
+    assert scripts, "the shell has no inline script"
+    for i, js in enumerate(scripts):
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         encoding="utf-8") as fh:
+            fh.write(js)
+            path = fh.name
+        p = subprocess.run([_NODE, "--check", path], capture_output=True, text=True)
+        assert p.returncode == 0, "script #%d does not parse:\n%s" % (i, p.stderr)
+
+
+def test_every_write_action_has_a_screen_that_calls_it():
+    """A POST route nobody can reach from the UI is dead weight, and a button
+    that calls a route that does not exist is a dead button. Keep them paired."""
+    from app.routers.mobile_ui import APP_HTML
+    for path in _MOBILE_WRITE_ALLOWED:
+        name = path.rsplit("/", 1)[-1]
+        assert "post('" + name + "'" in APP_HTML, \
+            "no screen calls " + path
+
+
+def test_the_shell_never_hardcodes_a_token():
+    """The page is identical for every shop; the token only ever arrives from
+    localStorage or the query string the page immediately scrubs."""
+    from app.routers.mobile_ui import APP_HTML
+    assert "asva_m_token" in APP_HTML
+    assert "history.replaceState" in APP_HTML
