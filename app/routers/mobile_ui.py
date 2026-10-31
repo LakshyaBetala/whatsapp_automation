@@ -1030,10 +1030,21 @@ async function renderMoney(){
            + '</button></div></div>'; }).join('') + '</div>'
     : '';
 
+  // On the 1st of a month every shop has recovered zero, and a big zero with
+  // no context reads as "the app is broken" on exactly the day an owner is
+  // most likely to open it. Last month carries the screen until this one has
+  // numbers of its own.
+  var nil = String(m.recovered_this_month || '').replace(/[^1-9]/g, '') === '';
+  var lastLine = (nil && m.recovered_last_month)
+    ? '<div class="s">Nothing yet this month. Last month you recovered '
+      + rupee(m.recovered_last_month) + '.</div>'
+    : '';
+
   shell(shopName(), shopSub(),
     inbox + sigBlock
     + '<div class="big fade"><div class="l">Recovered in ' + esc(m.recovered_month || 'this month')
-    + '</div><div class="v num">' + rupee(m.recovered_this_month) + '</div>' + pct + '</div>'
+    + '</div><div class="v num">' + rupee(m.recovered_this_month) + '</div>'
+    + pct + lastLine + '</div>'
     + '<div class="duo">'
     + '<div class="big fade d1"><div class="l">Coming in</div><div class="v num">'
     + rupee(m.coming_total) + '</div><div class="s">next ' + m.coming_days + ' days</div></div>'
