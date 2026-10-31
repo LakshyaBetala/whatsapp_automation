@@ -35,13 +35,19 @@ def test_t_returns_each_language():
     # The short everyday menu (HELP) and the full one (MORE), in both languages.
     en, hi = i18n.t("english", "help"), i18n.t("hinglish", "help")
     assert en != hi and "MORE" in en and "MORE" in hi
-    for cmd in ("LIST", "CHECK", "REMIND", "PAID", "BILL", "DIGEST"):
+    # Only verbs the chat still answers may appear. LIST, STOP, CHECK and the
+    # rest moved to the phone app, and teaching them here sends the owner to a
+    # dead end.
+    for cmd in ("PAID", "TEAM"):
         assert cmd in en and cmd in hi
+    for gone in ("LIST", "CHECK", "REMIND", "STOP ", "CHASE", "TERMS"):
+        assert gone not in en, gone
+        assert gone not in hi, gone
+    assert "{app}" in en and "{app}" in hi           # filled in by bot._with_app_link
     en_all, hi_all = i18n.t("english", "help_more"), i18n.t("hinglish", "help_more")
-    assert "SEE YOUR MONEY" in en_all                # pure English
-    assert "APNA PAISA DEKHEIN" in hi_all            # Hinglish
-    # every command name stays literal in both (owner types the same word)
-    for cmd in ("LIST", "PAID", "STOP", "CHASE", "REMIND"):
+    assert "IN THE APP ON YOUR PHONE" in en_all      # pure English
+    assert "PHONE KI APP ME" in hi_all               # Hinglish
+    for cmd in ("PAID", "TEAM"):
         assert cmd in en_all and cmd in hi_all
 
 

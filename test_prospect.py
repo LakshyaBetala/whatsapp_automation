@@ -127,5 +127,12 @@ def test_owner_free_text_gets_no_automated_reply():
 
 
 def test_owner_mistyped_command_still_gets_help():
-    r = bot._owner_fallback("chek ramesh", "english")
-    assert "CHECK ramesh" in r and "LIST" in r
+    r = bot._owner_fallback("pad ramesh 5000", "english")
+    assert "PAID ramesh 5000" in r                  # the live verb, corrected
+    assert "{app}" in r or "/m" in r                # and where everything else is
+
+
+def test_a_typo_of_a_retired_verb_gets_no_suggestion():
+    """CHECK lives in the app now. Offering "did you mean CHECK ramesh?" would
+    send the owner to a reply that only tells him to open the app."""
+    assert bot._suggest_command("chek ramesh", "english") == ""

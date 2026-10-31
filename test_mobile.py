@@ -83,7 +83,7 @@ def _no_holds(monkeypatch):
 _MOBILE_WRITE_ALLOWED = {
     "/m/api/remind", "/m/api/record-payment", "/m/api/reminders",
     "/m/api/exclude", "/m/api/terms", "/m/api/number", "/m/api/release",
-    "/m/api/pick", "/m/api/bill",
+    "/m/api/pick", "/m/api/bill", "/m/api/letter", "/m/api/letter/send",
 }
 
 
@@ -307,7 +307,9 @@ def test_every_write_action_has_a_screen_that_calls_it():
     that calls a route that does not exist is a dead button. Keep them paired."""
     from app.routers.mobile_ui import APP_HTML
     for path in _MOBILE_WRITE_ALLOWED:
-        name = path.rsplit("/", 1)[-1]
+        # the full path after the prefix: "letter" and "letter/send" are two
+        # different screens and the last segment alone would conflate them
+        name = path.split("/m/api/", 1)[1]
         assert "post('" + name + "'" in APP_HTML, \
             "no screen calls " + path
 

@@ -54,7 +54,7 @@ def test_partial_messy_name_resolves_the_right_party(monkeypatch):
     _owner(monkeypatch, rec, [
         {"id": "c1", "name": "M/S RAMESH TRADERS-RTE4"},
         {"id": "c2", "name": "Suresh Textiles"}])
-    out = asyncio.run(bot.handle("919444294894", "EXCLUDE ramesh tr", channel="bot"))
+    out = asyncio.run(bot._handle_exclude("biz1", "ramesh tr", True))
     assert rec.updates == [{"excluded": True}]        # matched despite M/S + route tag
     assert "Ramesh Traders" in out                    # shown as the clean name
 
@@ -64,7 +64,7 @@ def test_ambiguous_name_asks_which_one(monkeypatch):
     _owner(monkeypatch, rec, [
         {"id": "c1", "name": "Ramesh Traders"},
         {"id": "c2", "name": "Ramesh Electricals"}])
-    out = asyncio.run(bot.handle("919444294894", "EXCLUDE ramesh", channel="bot"))
+    out = asyncio.run(bot._handle_exclude("biz1", "ramesh", True))
     assert rec.updates == []                           # never guessed
     # A clean, numbered which-one prompt (reply a number), not a run-on line.
     assert "1." in out and "2." in out
@@ -74,16 +74,18 @@ def test_ambiguous_name_asks_which_one(monkeypatch):
 
 def test_hinglish_owner_is_answered_in_hinglish(monkeypatch):
     rec = _Rec()
-    _owner(monkeypatch, rec, [{"id": "c1", "name": "Ramesh Traders"}], lang="hinglish")
-    out = asyncio.run(bot.handle("919444294894", "EXCLUDE Ramesh", channel="bot"))
+    lang = "hinglish"
+    _owner(monkeypatch, rec, [{"id": "c1", "name": "Ramesh Traders"}], lang=lang)
+    out = asyncio.run(bot._handle_exclude("biz1", "Ramesh", True, lang=lang))
     assert rec.updates == [{"excluded": True}]
     assert "list par hai" in out                       # the Hinglish excluded_on copy
 
 
 def test_english_owner_is_answered_in_english(monkeypatch):
     rec = _Rec()
-    _owner(monkeypatch, rec, [{"id": "c1", "name": "Ramesh Traders"}], lang="english")
-    out = asyncio.run(bot.handle("919444294894", "EXCLUDE Ramesh", channel="bot"))
+    lang = "english"
+    _owner(monkeypatch, rec, [{"id": "c1", "name": "Ramesh Traders"}], lang=lang)
+    out = asyncio.run(bot._handle_exclude("biz1", "Ramesh", True, lang=lang))
     assert "do-not-chase" in out and "par hai" not in out
 
 
@@ -108,7 +110,7 @@ def test_canon_command_leaves_english_and_unknowns():
 def test_band_alias_stops_a_party(monkeypatch):
     rec = _Rec()
     _owner(monkeypatch, rec, [{"id": "c1", "name": "Ramesh Traders", "reminders_enabled": True}])
-    out = asyncio.run(bot.handle("919444294894", "BAND Ramesh", channel="bot"))
+    out = asyncio.run(bot._handle_stop("biz1", "Ramesh"))
     assert rec.updates == [{"reminders_enabled": False}]     # BAND -> STOP worked end to end
     assert "Ramesh Traders" in out
 

@@ -60,7 +60,10 @@ APP_HTML = r"""<!doctype html><html lang="en"><head>
  header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:11px;
    padding:calc(env(safe-area-inset-top) + 11px) 16px 11px;background:color-mix(in srgb,var(--bg) 88%,transparent);
    backdrop-filter:saturate(150%) blur(14px);border-bottom:1px solid var(--line)}
- header .mark{flex:none;width:30px;height:30px}
+ header .mark{flex:none;width:32px;height:32px;display:grid;place-items:center;
+   border-radius:9px;overflow:hidden;line-height:0}
+ header .mark svg{display:block;width:32px;height:32px}
+ .login .lm svg{display:block;width:100%;height:100%}
  header .who{flex:1;min-width:0}
  header .n{font-weight:700;font-size:.97rem;letter-spacing:-.01em;white-space:nowrap;
    overflow:hidden;text-overflow:ellipsis}
@@ -128,6 +131,41 @@ APP_HTML = r"""<!doctype html><html lang="en"><head>
    background:var(--bg2);color:var(--ink2);border:1px solid var(--line)}
  .row .mini svg{width:17px;height:17px}
  .rk{flex:none;width:22px;text-align:center;font-weight:700;font-size:.8rem;color:var(--muted)}
+ .trow{display:block;padding:12px 14px 11px;border-top:1px solid var(--line2);position:relative;
+   cursor:pointer}
+ .trow:first-child{border-top:0}
+ .trow:active{background:var(--bg2)}
+ .trow.sv2 .stripe{background:var(--crit)}
+ .trow.sv1 .stripe{background:var(--warn)}
+ .thead{display:flex;align-items:center;gap:12px}
+ /* .row .nm rules do not reach here, and without these the party name and the
+    "312 days late" line render as one run-on string. */
+ .trow .nm{flex:1;min-width:0}
+ .trow .nm b{display:block;font-weight:650;font-size:.95rem;letter-spacing:-.01em;
+   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ /* direct child only: the reliability dot is a span INSIDE <b>, and a blanket
+    span{display:block} here knocked it onto its own line above the name. */
+ .trow .nm > span{display:block;font-size:.76rem;color:var(--muted);margin-top:2px}
+ .trow .amt{flex:none;font-weight:700;font-size:.95rem;letter-spacing:-.01em}
+ .gd{display:inline-block;width:7px;height:7px;border-radius:999px;margin-right:7px;
+   vertical-align:middle}
+ .ract{display:flex;gap:7px;margin:10px 0 0 34px;flex-wrap:wrap}
+ .qa{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+   font:inherit;font-size:.82rem;font-weight:650;padding:8px 12px;border-radius:9px;
+   border:1px solid var(--line);background:var(--bg2);color:var(--ink2);cursor:pointer;
+   text-decoration:none;min-height:38px;white-space:nowrap}
+ .qa svg{width:15px;height:15px}
+ .qa:active{transform:scale(.97)}
+ .qa[disabled]{opacity:.55;pointer-events:none}
+ .qa-pri{background:var(--accent);border-color:var(--accent);color:#fff}
+ /* 320px phones are still common in this trade. Shrink the action strip
+    rather than let it wrap, so Check never drops onto its own line. */
+ @media(max-width:379px){
+   .ract{margin-left:0;gap:6px}
+   .qa{font-size:.78rem;padding:7px 9px}
+   .qa svg{width:14px;height:14px}
+   .big .l{letter-spacing:.06em}
+ }
 
  /* ── settings rows ──────────────────────────────────────────────────── */
  .srow{display:flex;align-items:center;gap:12px;padding:14px;border-top:1px solid var(--line2)}
@@ -188,6 +226,7 @@ APP_HTML = r"""<!doctype html><html lang="en"><head>
  .bill .inv{flex:1;min-width:0;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .bill .od{margin-left:7px;font-size:.72rem;font-weight:700;color:var(--crit)}
  .bill .amt{font-weight:650}
+ .letter{white-space:pre-wrap;font-size:.9rem;line-height:1.62;color:var(--ink2);overflow-wrap:anywhere}
  .msg{padding:11px 0;border-top:1px solid var(--line2);font-size:.9rem;color:var(--ink2);line-height:1.5}
  .msg:first-child{border-top:0}
  .msg span{display:block;font-size:.73rem;color:var(--muted);margin-top:3px}
@@ -239,7 +278,7 @@ try {
 } catch (e) { TOKEN = ''; }
 
 var app = document.getElementById('app');
-var S = {sum:null, money:null, picks:null};
+var S = {sum:null, today:null, money:null, picks:null};
 var TAB = 'today';
 var INSTALL_EVT = null;
 window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); INSTALL_EVT = e; });
@@ -351,11 +390,15 @@ function go(tab){
   if (tab === 'money')   return renderMoney();
   return renderSetup();
 }
-function shopName(){ return (S.sum && S.sum.business_name) || 'ASVA'; }
+function shopName(){
+  return (S.today && S.today.business) || (S.sum && S.sum.business_name) || 'ASVA';
+}
 function shopSub(){
-  if (!S.sum) return '';
-  var t = S.sum.tally_synced;
-  var on = S.sum.reminders_on;
+  var d = S.today || S.sum;
+  if (!d) return '';
+  var t = d.tally_synced;
+  var on = (d.reminders_on_count !== undefined) ? d.reminders_on_count : d.reminders_on;
+  if (on === undefined) return '';
   return 'Tally ' + (t === 'never' ? 'not synced yet' : t)
        + ' · chasing ' + on + ' part' + (on === 1 ? 'y' : 'ies');
 }
@@ -378,7 +421,8 @@ function severity(days, paused){
   return ['', 'not due yet'];
 }
 function actCard(){
-  var d = S.sum;
+  var d = S.today || S.sum;
+  if (!d) return '';
   if (d.stage === 'pick') {
     return '<div class="act fade"><h3>ASVA is not reminding anybody yet</h3>'
      + '<p>It never chases a customer you have not picked. Start with the ten who '
@@ -397,46 +441,114 @@ function actCard(){
   }
   return '';
 }
-function renderToday(){
-  var d = S.sum;
+function inr(n){
+  // Indian grouping, done here because the morning brief hands over raw floats.
+  var x = Math.round(Number(n) || 0), s = String(Math.abs(x)), out;
+  if (s.length <= 3) out = s;
+  else { var last3 = s.slice(-3), rest = s.slice(0, -3);
+         out = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3; }
+  return (x < 0 ? '-' : '') + out;
+}
+function gradeDot(p){
+  if (!p.grade) return '';
+  return '<span class="gd" title="' + esc(p.grade_label || '') + '" style="background:'
+   + esc(p.grade_color || 'var(--muted)') + '"></span>';
+}
+async function renderToday(){
+  if (!S.today) {
+    shell(shopName(), shopSub(), skeleton());
+    try { S.today = await api('today'); }
+    catch (e) { if (String(e.message) !== 'unauthorised')
+                  shell(shopName(), shopSub(), errBox('renderToday()')); return; }
+  }
+  var d = S.today;
   var act = actCard();
-  var chase = (d.chase || []).filter(function(p){ return !p.paused; });
-  var top = chase.slice(0, 8);
-  var list = top.length
-    ? '<div class="rows fade d1">' + top.map(function(p,i){
-        var sv = severity(p.overdue_days, p.paused);
-        var w = waNum(p.whatsapp), t = telNum(p.whatsapp);
-        var why = !p.whatsapp ? sv[1] + ' \u00b7 no number'
-                : (p.reminders_on === false ? sv[1] + ' \u00b7 not chased' : sv[1]);
-        var mini = w ? '<a class="mini" href="https://wa.me/'+esc(w)+'" target="_blank" rel="noopener"'
-                     + ' onclick="event.stopPropagation()" aria-label="WhatsApp '+esc(p.name)+'">'+I.wa+'</a>'
-                 : (t ? '<a class="mini" href="tel:'+esc(t)+'" onclick="event.stopPropagation()"'
-                      + ' aria-label="Call '+esc(p.name)+'">'+I.call+'</a>'
-                      // No number saved: the row keeps its shape and the gap
-                      // itself becomes the prompt to fix it.
-                      : '<span class="mini" style="border-style:dashed;color:var(--muted)"'
-                      + ' aria-label="No number saved">'+I.plus+'</span>');
-        return '<button class="row ' + sv[0] + '" onclick="partyView(' + jq(p.id) + ')">'
-         + '<span class="stripe"></span><span class="rk num">' + (i+1) + '</span>'
-         + '<span class="nm"><b>' + esc(p.name) + '</b><span>' + esc(why) + '</span></span>'
-         + '<span class="amt num">' + rupee(p.outstanding) + '</span>' + mini + '</button>';
-      }).join('') + '</div>'
-    : emptyBox(I.tick, 'Nothing to chase', 'Every party with a due bill has been handled.');
+  var chase = d.chase || [];
 
-  var money = '<div class="big fade"><div class="l">Outstanding</div>'
-   + '<div class="v num">' + rupee(d.total_outstanding) + '</div>'
-   + '<div class="s">' + d.parties_owing + ' part' + (d.parties_owing===1?'y':'ies')
-   + ' owe you money right now</div></div>';
+  // The brief's own opening line, so the app and the 8am message agree.
+  var hello = '<div class="lede">' + esc(d.greeting || 'Today') + '</div>'
+   + '<div class="leded">' + esc(d.date_label || '') + '</div>';
+
+  var mi = d.money_in || {today:{amount:0,count:0}, yesterday:{amount:0,count:0}};
+  var money = '<div class="duo" style="margin-top:14px">'
+   + '<div class="big fade"><div class="l">Came in</div><div class="v num">'
+   + rupee(inr(mi.today.amount)) + '</div><div class="s">'
+   + (mi.today.count ? mi.today.count + ' receipt' + (mi.today.count>1?'s':'')
+                     : 'nothing yet') + '</div></div>'
+   + '<div class="big fade"><div class="l">Still out</div><div class="v num">'
+   + rupee(inr((d.outstanding||{}).total)) + '</div><div class="s">'
+   + ((d.outstanding||{}).party_count || 0) + ' parties</div></div></div>';
+
+  // Needs a decision: the handful of things only the owner can settle. These
+  // were the bot messages he used to get and ignore.
+  var dec = (d.decisions || []).length
+    ? '<div class="sect">Needs you<span class="cnt">' + d.decisions.length + '</span></div>'
+      + '<div class="rows fade d1">' + d.decisions.map(function(x){
+          var go_ = x.action === 'numbers' ? "setPF('nonum');go('parties')"
+                  : (x.client_id ? 'partyView(' + jq(x.client_id) + ')' : "go('money')");
+          return '<button class="row sv1" onclick="' + esc(go_) + '">'
+           + '<span class="stripe"></span>'
+           + '<span class="nm"><b>' + esc(x.display) + '</b><span>' + esc(x.text)
+           + '</span></span><span class="chev">&#8250;</span></button>'; }).join('')
+      + '</div>'
+    : '';
+
+  var list = chase.length
+    ? '<div class="rows fade d1">' + chase.map(function(p, i){
+        var sv = severity(p.days_late, false);
+        var why = !p.has_number ? sv[1] + ' · no number'
+                : (p.reminders_on === false ? sv[1] + ' · not chased' : sv[1]);
+        var w = waNum(p.phone);
+        var acts = '<span class="ract">'
+         + (p.has_number
+             ? '<button class="qa qa-pri" onclick="event.stopPropagation();rowRemind('
+               + jq(p.client_id) + ',' + jq(p.name) + ',this)">' + I.bell + ' Remind</button>'
+               + '<a class="qa" target="_blank" rel="noopener" onclick="event.stopPropagation()"'
+               + ' href="https://wa.me/' + esc(w) + '">' + I.wa + '</a>'
+             : '<button class="qa qa-pri" onclick="event.stopPropagation();partyView('
+               + jq(p.client_id) + ')">' + I.plus + ' Add number</button>')
+         + '<button class="qa" onclick="event.stopPropagation();rowStop(' + jq(p.client_id)
+         + ',' + jq(p.display) + ',' + (p.reminders_on ? 'true' : 'false') + ',this)">'
+         + (p.reminders_on ? 'Stop' : 'Start') + '</button>'
+         + '<button class="qa" onclick="event.stopPropagation();partyView('
+         + jq(p.client_id) + ')">Check</button></span>';
+        return '<div class="trow ' + sv[0] + '" onclick="partyView(' + jq(p.client_id) + ')">'
+         + '<span class="stripe"></span>'
+         + '<span class="thead"><span class="rk num">' + (i+1) + '</span>'
+         + '<span class="nm"><b>' + gradeDot(p) + esc(p.display) + '</b><span>'
+         + esc(why) + '</span></span>'
+         + '<span class="amt num">' + rupee(inr(p.amount)) + '</span></span>'
+         + acts + '</div>'; }).join('') + '</div>'
+    : emptyBox(I.tick, 'Nobody to chase today',
+               'Every overdue party has been handled.');
 
   shell(shopName(), shopSub(),
-    installBar() + money + (act ? '<div style="margin-top:12px">' + act + '</div>' : '')
-    + '<div class="sect">Chase today<span class="cnt">' + chase.length + ' waiting</span></div>'
+    installBar() + hello + money
+    + (act ? '<div style="margin-top:14px">' + act + '</div>' : '')
+    + dec
+    + '<div class="sect">Chase today<span class="cnt">'
+    + (d.chase_overdue_count || chase.length) + ' overdue</span></div>'
     + list
-    + (chase.length > top.length
+    + ((d.chase_overdue_count || 0) > chase.length
         ? '<div style="margin-top:12px"><button class="btn btn-full" onclick="go(\'parties\')">'
           + 'See all parties</button></div>' : '')
-    + '<div class="foot">ASVA sends from your own WhatsApp number.<br>'
-    + 'Nothing is filed with anyone.</div>');
+    + '<div class="foot">'
+    + (d.sent_today ? '<b>' + d.sent_today + '</b> reminder'
+        + (d.sent_today === 1 ? '' : 's') + ' went out today.<br>' : '')
+    + 'This is the same list as your morning message.<br>'
+    + 'ASVA sends from your own WhatsApp number.</div>');
+}
+async function rowRemind(cid, name, btn){
+  var done = busy(btn, 'Sending');
+  try { await post('remind', {party: name}); toast('Reminder queued'); btn.innerHTML = 'Sent'; }
+  catch (e) { toast('Could not send: ' + e.message); done(); }
+}
+async function rowStop(cid, name, isOn, btn){
+  var done = busy(btn, '...');
+  try { await post('reminders', {client_id: cid, on: !isOn});
+        toast(isOn ? name + ' will not be chased' : 'ASVA will chase ' + name);
+        S.today = null; S.sum = null; await refresh(); renderToday(); }
+  catch (e) { toast('Could not save: ' + e.message); done(); }
 }
 
 // ── 2. PARTIES ───────────────────────────────────────────────────────────
@@ -450,7 +562,7 @@ function renderParties(){
     + '<option value="amount">Biggest</option><option value="name">A to Z</option></select></div>'
     + '<div id="plist"></div><div id="ppage"></div>');
   var chips = [['owing','Owing'],['chasing','ASVA chasing'],['promise','On promise'],
-               ['off','Not chased'],['all','All']];
+               ['off','Not chased'],['nonum','No number'],['all','All']];
   document.getElementById('pchips').innerHTML = chips.map(function(c){
     return '<button class="chip ' + (PF===c[0]?'on':'') + '" onclick="setPF(' + jq(c[0]) + ')">'
       + c[1] + '</button>'; }).join('');
@@ -460,12 +572,13 @@ function renderParties(){
   sr.onchange = function(){ PSORT = sr.value; PPAGE = 0; paintParties(); };
   paintParties();
 }
-function setPF(f){ PF = f; PPAGE = 0; renderParties(); }
+function setPF(f){ PF = f; PPAGE = 0; if (TAB === 'parties') renderParties(); }
 function partyPool(){
   var all = S.sum.chase || [];
   if (PF === 'chasing') return all.filter(function(p){ return p.reminders_on && !p.paused; });
   if (PF === 'promise') return all.filter(function(p){ return p.paused; });
   if (PF === 'off')     return all.filter(function(p){ return !p.reminders_on; });
+  if (PF === 'nonum')   return all.filter(function(p){ return !p.whatsapp; });
   return all;                                   // owing + all are the same list
 }
 function paintParties(){
@@ -487,8 +600,11 @@ function paintParties(){
   }
   el.innerHTML = '<div class="rows">' + page.map(function(p){
     var sv = severity(p.overdue_days, p.paused);
-    var tag = p.paused ? 'on promise \u00b7 ' + sv[1]
-            : (p.reminders_on === false ? sv[1] + ' \u00b7 not chased' : sv[1]);
+    // severity() already answers "on promise" when paused, so ask it for the
+    // lateness instead and add the state once, not twice.
+    var late = severity(p.overdue_days, false)[1];
+    var tag = p.paused ? 'on promise \u00b7 ' + late
+            : (p.reminders_on === false ? late + ' \u00b7 not chased' : late);
     return '<button class="row ' + (p.paused ? '' : sv[0]) + '" onclick="partyView(' + jq(p.id) + ')">'
      + '<span class="stripe"></span>'
      + '<span class="nm"><b>' + esc(p.name) + '</b><span>' + esc(tag) + '</span></span>'
@@ -587,7 +703,10 @@ function paintParty(){
    + '<button class="btn btn-pri btn-full fade d2" onclick="payView()">' + I.tick
    + ' Payment received</button>'
    + '<button class="btn btn-full fade d2" style="margin-top:9px" onclick="billView()">'
-   + I.plus + ' Add a bill</button>';
+   + I.plus + ' Add a bill</button>'
+   + (d.whatsapp
+       ? '<button class="btn btn-full fade d2" style="margin-top:9px"'
+         + ' onclick="letterView()">Formal reminder letter</button>' : '');
 
   app.innerHTML = header(d.name, d.whatsapp || 'no number saved', 'go(\'' + TAB + '\')')
    + '<div class="wrap">' + head + actions + promise
@@ -709,6 +828,43 @@ function numberView(){
 function today(){
   var d = new Date(Date.now() + 5.5*3600*1000);
   return d.toISOString().slice(0,10);
+}
+
+// The formal reminder. Two screens on purpose: the owner reads the exact words
+// first and sends on a second, separate tap. Escalation is never one gesture.
+async function letterView(){
+  document.body.classList.add('noTabs');
+  app.innerHTML = header('Formal reminder', CUR.name, 'paintParty()')
+   + '<div class="wrap">' + skeleton() + '</div>';
+  var r;
+  try { r = await post('letter', {client_id: CUR.id}); }
+  catch (e) { toast('Could not build it: ' + e.message); return paintParty(); }
+  var body = r.text || r.message || r.body || '';
+  if (r.ok === false || !body) {
+    app.innerHTML = header('Formal reminder', CUR.name, 'paintParty()')
+     + '<div class="wrap">' + emptyBox(I.find, 'Nothing to send',
+        r.detail || 'This party has no overdue bill that needs a formal letter.')
+     + '</div>';
+    return;
+  }
+  app.innerHTML = header('Formal reminder', CUR.name, 'paintParty()')
+   + '<div class="wrap">'
+   + '<div class="leded" style="margin-bottom:12px">This is exactly what '
+   + esc(CUR.name) + ' will receive. Read it before you send it.</div>'
+   + '<div class="card fade"><div class="letter">' + esc(body) + '</div></div>'
+   + '<div style="margin-top:14px"><button class="btn btn-pri btn-full" id="lsend"'
+   // Not "Send this to <party name>": a long trade name wraps the button to
+   // two lines, and a two-line button is the clearest sign of a page nobody
+   // opened on a phone.
+   + ' onclick="letterSend(this)">Send this letter</button></div>'
+   + '<div class="foot">ASVA will not send a letter on its own. This one goes '
+   + 'only because you tapped send.</div></div>';
+}
+async function letterSend(btn){
+  var done = busy(btn, 'Sending...');
+  try { await post('letter/send', {client_id: CUR.id});
+        toast('Letter sent to ' + CUR.name); partyView(CUR.id); }
+  catch (e) { toast('Could not send: ' + e.message); done(); }
 }
 
 // ── 4. MONEY ─────────────────────────────────────────────────────────────
@@ -877,7 +1033,7 @@ function hideInstall(){
 }
 function logout(){
   try { localStorage.removeItem('asva_m_token'); } catch(e){}
-  TOKEN = ''; S = {sum:null, money:null, picks:null}; loginView();
+  TOKEN = ''; S = {sum:null, today:null, money:null, picks:null}; loginView();
 }
 function loginView(){
   document.body.classList.add('noTabs');
@@ -899,7 +1055,8 @@ function doLogin(){
   try { localStorage.setItem('asva_m_token', v); } catch(e){}
   TOKEN = v; boot();
 }
-async function refresh(){ try { S.sum = await api('summary'); } catch (e) {} }
+async function refresh(){ S.today = null;
+  try { S.sum = await api('summary'); } catch (e) {} }
 
 // ── go ───────────────────────────────────────────────────────────────────
 boot();

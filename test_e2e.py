@@ -123,7 +123,9 @@ def test_owner_gets_menu_on_bot_channel(monkeypatch):
     # A SYNCED owner asking HELP gets the full command menu.
     monkeypatch.setattr(bot, "_sync_state", lambda db, bid: "fresh")
     reply = _run(bot.handle(OWNER, "HELP", channel="bot"))
-    assert "LIST" in reply and "BILL" in reply       # owner command menu
+    # the owner menu points at the phone app now; the chat keeps PAID,
+    # the morning/evening summary and alerts
+    assert "/m" in reply and "PAID" in reply
 
 
 def test_unsynced_owner_help_gets_first_sync_step(monkeypatch):

@@ -78,6 +78,52 @@ _CMD_ALIASES = {
 }
 
 
+# ── Verbs that moved to the phone app ──────────────────────────────────────
+# The owner used to run ASVA by typing at this bot: LIST, STOP Ramesh,
+# TERMS Suresh 45, REMIND, PAID. Every one of those is now a button in the
+# phone app, where a thousand-party list can actually be read and a party can
+# be paused without remembering a word.
+#
+# The handlers below are NOT deleted. The desktop and the app still call them,
+# and the day the app cannot do something this is the fallback. What changed is
+# that the bot no longer pretends to be the control panel: it does alerts, the
+# morning and evening summary, and answering a question.
+MOVED_TO_APP = frozenset({
+    "LIST", "CHECK", "STOP", "START", "TERMS", "REMIND", "PROMISES", "CHASE",
+    "EXCLUDE", "INCLUDE", "RECOVERED", "CASH", "FORECAST", "CARD",
+    "REPORTCARD", "SCORE", "SCORECARD", "LETTER", "NOTICE", "SENT",
+    "REMINDED", "REMINDERS", "RECOVERY",
+})
+
+
+def _app_link() -> str:
+    from app.config import settings as _st
+    base = (getattr(_st, "public_base_url", "") or "https://app.tryasva.com")
+    return base.rstrip("/") + "/m"
+
+
+def _with_app_link(text: str) -> str:
+    return text.replace("{app}", _app_link())
+
+
+def _app_moved_reply(lang: str, base_url: str = "") -> str:
+    """One line, and the link. Never a list of other verbs to try instead."""
+    url = (base_url or "https://app.tryasva.com").rstrip("/") + "/m"
+    if _is_en_lang(lang):
+        return ("That is in the ASVA app on your phone now, where you can see "
+                "every party and tap Remind, Stop or Check.\n\n" + url
+                + "\n\nThis chat still sends your morning list, the evening "
+                  "summary and any alert. Ask me anything here.")
+    return ("Ab ye aapke phone ki ASVA app me hai. Wahan har party dikhti hai, "
+            "aur Remind, Stop ya Check ek tap me.\n\n" + url
+            + "\n\nYe chat subah ki list, shaam ka summary aur alerts bhejti "
+              "rahegi. Kuch bhi poochh lijiye.")
+
+
+def _is_en_lang(lang: str) -> bool:
+    return str(lang or "english").lower().startswith("en")
+
+
 def _canon_command(upper: str) -> str:
     """Rewrite a leading Hindi/Hinglish command verb to its English form, so the
     normal command dispatch below understands it. Only the first word is touched."""
@@ -88,17 +134,15 @@ def _canon_command(upper: str) -> str:
     return upper
 
 
-# Every command verb the owner can type (+ Hindi aliases), for "did you mean".
+# Every command verb the owner can still type here, for "did you mean".
+# Deliberately short now: suggesting a verb that only answers with "that is in
+# the app" is worse than not suggesting anything, so the retired ones are gone.
 _KNOWN_CMDS = [
-    "PAID", "LIST", "HISAB", "CHECK", "STOP", "START", "TERMS", "REMIND",
-    "PROMISES", "CHASE", "EXCLUDE", "INCLUDE", "BILL", "RECOVERED", "TEAM",
-    "SUPPORT", "HELP", "MENU", "BAND", "SOOCHI", "CHALU", "SHURU", "YAAD",
-    "CASH", "FORECAST", "CARD", "REPORTCARD", "SCORE", "SCORECARD", "LETTER", "NOTICE",
+    "PAID", "HISAB", "BILL", "DIGEST", "HOLD", "TEAM", "SUPPORT",
+    "HELP", "MENU", "MORE",
 ]
 # Verbs that take a party name, so the suggestion can show a real example.
-_CMD_TAKES_NAME = {"PAID", "CHECK", "STOP", "START", "TERMS", "REMIND", "CHASE",
-                   "EXCLUDE", "INCLUDE", "BAND", "CHALU", "SHURU", "YAAD", "SOOCHI",
-                   "SCORE", "SCORECARD", "LETTER", "NOTICE"}
+_CMD_TAKES_NAME = {"PAID", "BILL"}
 
 
 def _suggest_command(text: str, lang: str) -> str:
@@ -542,10 +586,18 @@ async def handle(
         # is affected.
         upper = _canon_command(upper)
 
+        first_word = upper.split(None, 1)[0] if upper else ""
+
+        # ── Moved to the phone app ────────────────────────────────────
+        # Checked before anything else so the owner gets the same answer
+        # whether he typed LIST, "list", SOOCHI or "stop ramesh traders".
+        if first_word in MOVED_TO_APP:
+            from app.config import settings as _st
+            return _app_moved_reply(lang, getattr(_st, "public_base_url", "") or "")
+
         # ── First-run guard: paired but Tally never synced ────────────
         # A read/summary command would look broken with no data yet, so guide the
         # owner to the one step that unlocks everything instead of "no customers".
-        first_word = upper.split(None, 1)[0] if upper else ""
         if first_word in _NEEDS_SYNC and _sync_state(db, business_id) == "never":
             return _first_sync_help(lang)
 
@@ -694,9 +746,9 @@ async def handle(
             # after that, the short everyday menu.
             if _sync_state(db, business_id) == "never":
                 return _first_sync_help(lang)
-            return i18n.t(lang, "help")
+            return _with_app_link(i18n.t(lang, "help"))
         if upper in ("MORE", "ALL", "COMMANDS", "SAB"):
-            return i18n.t(lang, "help_more")
+            return _with_app_link(i18n.t(lang, "help_more"))
         # Plain words: "Ramesh ka kitna baki hai?" -> CHECK Ramesh. Only a message
         # that reads like a question to the bot reaches the AI, and only READ-ONLY
         # commands are ever run this way (owner_intent).

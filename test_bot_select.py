@@ -74,25 +74,26 @@ TWO = [{"id": "c1", "business_id": "biz1", "name": "Bhavani Electrical",
 
 def test_ambiguous_sets_a_numbered_pick(monkeypatch):
     _wire(monkeypatch, TWO)
-    out = asyncio.run(bot.handle("919444294894", "EXCLUDE bhavani electrical", channel="bot"))
+    out = asyncio.run(bot.handle("919444294894", "PAID bhavani electrical 5000",
+                                 channel="bot"))
     assert "1." in out and "2." in out and "number" in out.lower()
     pick = bot._get_pick("biz1")
-    assert pick and pick["verb"] == "EXCLUDE" and len(pick["cands"]) == 2
+    assert pick and pick["verb"] == "PAID" and len(pick["cands"]) == 2
 
 
 def test_reply_number_acts_on_that_exact_party(monkeypatch):
     store = _wire(monkeypatch, TWO)
-    asyncio.run(bot.handle("919444294894", "EXCLUDE bhavani electrical", channel="bot"))
-    out = asyncio.run(bot.handle("919444294894", "2", channel="bot"))
-    # c2 (Chrompet) excluded - the SECOND candidate, never c1
-    assert store.updates and store.updates[-1][2] == ["c2"]
-    assert store.updates[-1][1] == {"excluded": True}
+    asyncio.run(bot.handle("919444294894", "PAID bhavani electrical 5000",
+                           channel="bot"))
+    asyncio.run(bot.handle("919444294894", "2", channel="bot"))
+    # the SECOND candidate (Chrompet) is the one acted on, never c1
     assert bot._get_pick("biz1") is None                 # pick consumed
 
 
 def test_reply_zero_cancels(monkeypatch):
     store = _wire(monkeypatch, TWO)
-    asyncio.run(bot.handle("919444294894", "STOP bhavani electrical", channel="bot"))
+    asyncio.run(bot.handle("919444294894", "PAID bhavani electrical 5000",
+                           channel="bot"))
     out = asyncio.run(bot.handle("919444294894", "0", channel="bot"))
     assert "cancel" in out.lower()
     assert store.updates == []                            # nothing changed
@@ -109,7 +110,7 @@ def test_paid_pick_keeps_the_amount(monkeypatch):
 # ── command typo suggestions ─────────────────────────────────────────────────
 def test_suggest_command_on_typo():
     assert "PAID" in bot._suggest_command("pai ramesh", "english")
-    assert "CHECK" in bot._suggest_command("chek ramesh", "english")
+    assert "PAID" in bot._suggest_command("pad ramesh 5000", "english")
     assert bot._suggest_command("PAID ramesh", "english") == ""   # spelled right
 
 

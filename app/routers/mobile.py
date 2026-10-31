@@ -24,6 +24,7 @@ Endpoints:
   GET  /m/sw.js                -> offline shell service worker
   GET  /m/api/summary          -> totals, who to chase, where the shop stands
   GET  /m/api/party?id=        -> one party: dues, replies, promise, settings
+  GET  /m/api/today            -> the morning brief, same source as the 8am message
   GET  /m/api/money            -> recovered, coming in, open promises
   GET  /m/api/picks            -> who ASVA suggests chasing first
   POST /m/api/remind           -> send this party's reminder now
@@ -35,6 +36,8 @@ Endpoints:
   POST /m/api/release          -> drop a promise hold and chase again
   POST /m/api/pick             -> switch reminders on for the chosen parties
   POST /m/api/bill             -> add a bill that is not in Tally
+  POST /m/api/letter           -> read the formal reminder before sending it
+  POST /m/api/letter/send      -> send that formal reminder (owner approved)
 """
 from __future__ import annotations
 
@@ -375,6 +378,75 @@ def api_bill(p: _MBill):
     return admin_nt_bill_add(NTBillAddPayload(
         token=p.token, client_id=p.client_id, amount=p.amount,
         invoice_number=p.invoice_number, invoice_date=p.invoice_date))
+
+
+@router.post("/api/letter")
+async def api_letter(p: _MParty):
+    """The formal reminder, for reading only. Escalation is never automatic and
+    never one tap: the owner sees the exact words first. Was LETTER at the bot,
+    where the preview and the send looked identical."""
+    _biz(p.token)
+    from app.routers.admin import admin_letter_preview, LetterPayload
+    return await admin_letter_preview(LetterPayload(
+        token=p.token, client_id=p.client_id))
+
+
+@router.post("/api/letter/send")
+async def api_letter_send(p: _MParty):
+    _biz(p.token)
+    from app.routers.admin import admin_send_letter, LetterPayload
+    return await admin_send_letter(LetterPayload(
+        token=p.token, client_id=p.client_id))
+
+
+@router.get("/api/today")
+def api_today(token: str = Query("")):
+    """The morning brief, built by the SAME function that writes the good
+    morning WhatsApp message (services/today.build_today).
+
+    This matters more than it looks. The owner reads a message at 8am naming
+    six parties, opens the app, and has to see those six parties. Two lists
+    built two ways drift apart within a week and the app stops being trusted.
+    """
+    biz = _biz(token)
+    db = require_db()
+    row = (db.table("businesses")
+           .select("id, business_name, setup_problem, last_tally_sync_at")
+           .eq("id", biz["id"]).limit(1).execute()).data or [{}]
+    full = {**biz, **(row[0] or {})}
+    from app.services import today as today_svc
+    snap = today_svc.build_today(db, biz["id"], full)
+    # What the brief cannot know: whether this shop has pointed ASVA at anyone
+    # yet, and whether each named party is actually being chased.
+    flags = (db.table("clients")
+             .select("id, reminders_enabled, excluded, reminder_anchor")
+             .eq("business_id", biz["id"]).is_("archived_at", "null").execute()).data or []
+    on = {c["id"] for c in flags if c.get("reminders_enabled") and not c.get("excluded")}
+    from app.services import shortlist
+    st = shortlist.stage(flags)
+    for row_ in snap.get("chase") or []:
+        row_["reminders_on"] = row_.get("client_id") in on
+    snap["reminders_on_count"] = len(on)
+    snap["stage"] = st["what"]
+    snap["stage_on"] = st["on"]
+    snap["tally_synced"] = _tally_ago(db, biz["id"])
+    snap["sent_today"] = _sent_today(db, biz["id"])
+    return JSONResponse(snap)
+
+
+def _sent_today(db, bid: str) -> int:
+    """How many reminders actually left today. Cadence markers are bookkeeping
+    rows, not messages, so they are excluded - counting them was how a shop that
+    sent nothing could still look busy."""
+    try:
+        start = _dt.datetime.now(IST).replace(hour=0, minute=0, second=0,
+                                              microsecond=0).astimezone(_dt.timezone.utc)
+        rows = (db.table("messages").select("id, template_name")
+                .eq("business_id", bid).eq("delivery_status", "sent")
+                .gte("created_at", start.isoformat()).limit(2000).execute()).data or []
+        return sum(1 for r in rows if r.get("template_name") != "cadence_marker")
+    except Exception:
+        return 0
 
 
 @router.get("/api/money")

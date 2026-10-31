@@ -59,19 +59,19 @@ def _owner(monkeypatch, rec, clients=CLIENTS):
 
 def test_exclude_sets_flag(monkeypatch):
     rec = _Rec(); _owner(monkeypatch, rec)
-    out = asyncio.run(bot.handle("919444294894", "EXCLUDE Ramesh", channel="bot"))
+    out = asyncio.run(bot._handle_exclude("biz1", "Ramesh", True))
     assert rec.updates == [{"excluded": True}]
     assert "do-not-chase" in out and "INCLUDE" in out
 
 
 def test_include_clears_flag(monkeypatch):
     rec = _Rec(); _owner(monkeypatch, rec)
-    out = asyncio.run(bot.handle("919444294894", "INCLUDE Ramesh", channel="bot"))
+    out = asyncio.run(bot._handle_exclude("biz1", "Ramesh", False))
     assert rec.updates == [{"excluded": False}]
     assert "back on" in out
 
 
 def test_exclude_unknown_party(monkeypatch):
     rec = _Rec(); _owner(monkeypatch, rec)
-    out = asyncio.run(bot.handle("919444294894", "EXCLUDE Nobody", channel="bot"))
+    out = asyncio.run(bot._handle_exclude("biz1", "Nobody", True))
     assert rec.updates == [] and "No party matches" in out

@@ -75,19 +75,17 @@ def test_nothing_today(monkeypatch):
     assert out == "No reminders have gone out today yet."
 
 
-def test_command_routes_from_handle(monkeypatch):
-    """SENT / REMINDED reach the handler for a recognised owner."""
-    calls = []
-
-    async def fake_handler(bid):
-        calls.append(bid); return "OK-SENT"
-
-    monkeypatch.setattr(bot, "_handle_sent_today", fake_handler)
+def test_retired_commands_now_point_at_the_phone_app(monkeypatch):
+    """These used to print lists into the chat. They live in the app now, so
+    the bot answers with the link instead of keeping a second, drifting copy."""
     monkeypatch.setattr(bot, "_match_row",
                         lambda db, table, sel, num: {"id": "biz1", "business_name": "R",
-                                                     "plan": "growth"} if table == "businesses" else None)
+                                                     "plan": "growth"}
+                        if table == "businesses" else None)
     monkeypatch.setattr(bot, "require_db", lambda: object())
-    for cmd in ("SENT", "sent today", "reminded"):
-        calls.clear()
+    for cmd in ("SENT", "sent today", "reminded", "LIST", "stop ramesh",
+                "CASH", "recovered", "check ramesh"):
         r = asyncio.run(bot.handle("919444294894", cmd, channel="bot"))
-        assert r == "OK-SENT" and calls == ["biz1"], cmd
+        assert "/m" in r, cmd + " did not point at the app"
+        assert "morning" in r.lower(), cmd + " did not say what the chat still does"
+
