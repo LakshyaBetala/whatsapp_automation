@@ -84,6 +84,9 @@ _MOBILE_WRITE_ALLOWED = {
     "/m/api/remind", "/m/api/record-payment", "/m/api/reminders",
     "/m/api/exclude", "/m/api/terms", "/m/api/number", "/m/api/release",
     "/m/api/pick", "/m/api/bill", "/m/api/letter", "/m/api/letter/send",
+    "/m/api/pending/confirm", "/m/api/pending/cancel", "/m/api/signal/dismiss",
+    "/m/api/hold", "/m/api/photo-bill", "/m/api/photo-bill/save",
+    "/m/api/party",
 }
 
 
@@ -347,3 +350,62 @@ def test_the_phone_says_when_whatsapp_is_down():
     from app.routers.mobile_ui import APP_HTML
     assert "Your WhatsApp is not connected" in APP_HTML
     assert "waPill" in APP_HTML and "waWord" in APP_HTML
+
+
+# ── chat/phone parity ───────────────────────────────────────────────────────
+# The rule the product now follows: the phone can do everything the chat could,
+# the chat keeps alerts and the morning/evening messages, and settings stay on
+# the desktop exe. Each row below is a thing the owner used to type at the bot.
+CHAT_CAPABILITIES = {
+    "LIST":       "/m/api/summary",          # who owes you
+    "CHECK":      "/m/api/party",            # one party
+    "REMIND":     "/m/api/remind",
+    "STOP":       "/m/api/reminders",
+    "START":      "/m/api/reminders",
+    "TERMS":      "/m/api/terms",
+    "EXCLUDE":    "/m/api/exclude",
+    "INCLUDE":    "/m/api/exclude",
+    "CHASE":      "/m/api/release",
+    "PROMISES":   "/m/api/money",
+    "RECOVERED":  "/m/api/money",
+    "CASH":       "/m/api/money",
+    "DIGEST":     "/m/api/today",
+    "SENT":       "/m/api/today",
+    "HOLD":       "/m/api/hold",
+    "PAID":       "/m/api/record-payment",
+    "BILL":       "/m/api/bill",
+    "PHOTO BILL": "/m/api/photo-bill",
+    "LETTER":     "/m/api/letter",
+}
+
+
+def test_every_chat_capability_exists_on_the_phone():
+    paths = {getattr(r, "path", "") for r in mobile.router.routes}
+    for verb, path in sorted(CHAT_CAPABILITIES.items()):
+        assert path in paths, verb + " has no phone equivalent (" + path + ")"
+
+
+def test_settings_stay_on_the_desktop():
+    """UPI, language, tone, send hours and the WhatsApp connection are the
+    desktop exe's job. The phone may SHOW health, never change these."""
+    paths = {getattr(r, "path", "") for r in mobile.router.routes}
+    for forbidden in ("/m/api/settings", "/m/api/accounts", "/m/api/batches",
+                      "/m/api/upi", "/m/api/language", "/m/api/whatsapp"):
+        assert forbidden not in paths, forbidden + " must live on the desktop"
+
+
+def test_a_confirmed_payment_is_queued_not_claimed_as_posted():
+    """The agent writes receipts into Tally when the shop PC is on. The phone
+    must not tell the owner it is already in Tally, or he goes looking for a
+    voucher that is not there yet."""
+    from app.routers.mobile_ui import APP_HTML
+    assert "posts when the shop computer is on" in APP_HTML
+    assert "It will post into Tally" not in APP_HTML
+
+
+def test_the_bill_photo_can_come_from_the_gallery():
+    """Bill photos arrive on WhatsApp, which saves them to the gallery.
+    capture="environment" would force the camera and hide exactly that."""
+    from app.routers.mobile_ui import APP_HTML
+    assert 'id="pbfile" accept="image/*"' in APP_HTML
+    assert "capture=" not in APP_HTML

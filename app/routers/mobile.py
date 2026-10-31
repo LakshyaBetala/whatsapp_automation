@@ -38,6 +38,15 @@ Endpoints:
   POST /m/api/bill             -> add a bill that is not in Tally
   POST /m/api/letter           -> read the formal reminder before sending it
   POST /m/api/letter/send      -> send that formal reminder (owner approved)
+  GET  /m/api/inbox            -> payment claims waiting on the owner
+  POST /m/api/pending/confirm  -> book a claimed payment into Tally
+  POST /m/api/pending/cancel   -> it was not a payment
+  POST /m/api/signal/dismiss   -> clear a pay-page tap
+  GET  /m/api/checkpoint       -> today's list, before it goes out
+  POST /m/api/hold             -> hold one party today (or all of them)
+  POST /m/api/photo-bill       -> read a bill from a photo
+  POST /m/api/photo-bill/save  -> turn that reading into a real bill
+  POST /m/api/party            -> add a party that is not in Tally yet
 """
 from __future__ import annotations
 
@@ -199,6 +208,8 @@ def _build_party(db, biz: dict, client_id: str) -> dict:
              .eq("business_id", bid).eq("client_id", client_id)
              .order("invoice_date", desc=True).limit(200).execute()).data or []
     open_bills = [b for b in bills if b.get("status") in ("pending", "partial", "overdue")]
+    settled = [b for b in bills if b.get("status") not in
+               ("pending", "partial", "overdue")]
     total = sum(Decimal(str(b.get("outstanding") or 0)) for b in open_bills)
 
     promise = None
@@ -231,7 +242,36 @@ def _build_party(db, biz: dict, client_id: str) -> dict:
         } for b in open_bills[:60]],
         "recent": recent,
         "promise": promise,
+        "schedule": _schedule(db, biz, c, open_bills, today),
+        # "Did bill 2291 ever get paid?" had no answer on the phone.
+        "settled_bills": [{
+            "invoice": b.get("invoice_number") or "-",
+            "amount": _inr(b.get("amount") or 0),
+            "date": str(b.get("invoice_date") or "")[:10],
+        } for b in settled[:40]],
+        "settled_count": len(settled),
     }
+
+
+def _schedule(db, biz: dict, client: dict, open_bills: list, today) -> dict:
+    """When this party next hears from ASVA, in words.
+
+    The owner's most common question after "how much" is "when does he get
+    the next message", and the only place that existed was the desktop.
+    """
+    try:
+        from app.routers.admin import _next_reminder, _client_anchor
+        row = (db.table("businesses").select(
+            "id, reminder_style, reminder_cadence, overdue_repeat_days, "
+            "overdue_max_repeats, weekly_off_day, blackout_dates, reminder_hour")
+            .eq("id", biz["id"]).limit(1).execute()).data or [{}]
+        full = {**biz, **(row[0] or {})}
+        label, colour = _next_reminder(
+            full, open_bills, int(client.get("credit_days") or 30), today,
+            _client_anchor(client))
+        return {"label": label or "", "colour": colour or ""}
+    except Exception:
+        return {"label": "", "colour": ""}
 
 
 # ── Read-only API ───────────────────────────────────────────────────────────
@@ -397,6 +437,189 @@ async def api_letter_send(p: _MParty):
     from app.routers.admin import admin_send_letter, LetterPayload
     return await admin_send_letter(LetterPayload(
         token=p.token, client_id=p.client_id))
+
+
+class _MId(BaseModel):
+    token: str
+    id: str
+
+
+class _MConfirm(BaseModel):
+    token: str
+    id: str
+    amount: float | None = None
+    deposit_ledger: str | None = None
+    receipt_date: str | None = None
+
+
+class _MHold(BaseModel):
+    token: str
+    client_id: str = ""
+    all: bool = False
+
+
+class _MPhoto(BaseModel):
+    token: str
+    image_b64: str
+    image_type: str = "image/jpeg"
+
+
+class _MPhotoSave(BaseModel):
+    """What the owner corrected on screen before saving the read."""
+    token: str
+    party_name: str = ""
+    bill_number: str = ""
+    amount: float | None = None
+    bill_date: str | None = None
+
+
+class _MNewParty(BaseModel):
+    token: str
+    name: str
+    whatsapp_number: str = ""
+    credit_days: int | None = None
+
+
+@router.post("/api/party")
+def api_new_party(p: _MNewParty):
+    """A party who is not in Tally yet: a cash customer, a new buyer, someone
+    the owner just agreed terms with while standing in his shop. That moment
+    never happens at the desktop."""
+    _biz(p.token)
+    from app.routers.admin import admin_party_create, PartyCreatePayload
+    return admin_party_create(PartyCreatePayload(
+        token=p.token, name=p.name, whatsapp_number=p.whatsapp_number,
+        credit_days=p.credit_days))
+
+
+@router.get("/api/inbox")
+def api_inbox(token: str = Query("")):
+    """Customers who say they have paid, waiting on the owner to agree.
+
+    In the chat this arrived as a nudge and was settled by replying PAID or
+    YES, which meant scrolling back up a thread to find it. It is a list now.
+    """
+    _biz(token)
+    from app.routers.admin import admin_payments_data
+    d = admin_payments_data(token=token)
+    return JSONResponse({
+        "pending": d.get("pending") or [],
+        "signals": d.get("pay_signals") or [],
+        "deposit_ledgers": d.get("deposit_ledgers") or [],
+    })
+
+
+@router.post("/api/pending/confirm")
+def api_pending_confirm(p: _MConfirm):
+    _biz(p.token)
+    from app.routers.admin import admin_pending_confirm, PendingConfirmPayload
+    return admin_pending_confirm(PendingConfirmPayload(
+        token=p.token, id=p.id, amount=p.amount,
+        deposit_ledger=p.deposit_ledger, receipt_date=p.receipt_date))
+
+
+@router.post("/api/pending/cancel")
+def api_pending_cancel(p: _MId):
+    _biz(p.token)
+    from app.routers.admin import admin_pending_cancel, PendingCancelPayload
+    return admin_pending_cancel(PendingCancelPayload(token=p.token, id=p.id))
+
+
+@router.post("/api/signal/dismiss")
+def api_signal_dismiss(p: _MId):
+    _biz(p.token)
+    from app.routers.admin import admin_pay_signal_dismiss, PaySignalPayload
+    return admin_pay_signal_dismiss(PaySignalPayload(token=p.token, id=p.id))
+
+
+@router.get("/api/checkpoint")
+def api_checkpoint(token: str = Query("")):
+    """Today's list before it goes out, with who is already held.
+
+    This is the morning checkpoint the chat used to ask about. Holding a
+    party who has already paid is a thirty-second job that stops an
+    embarrassing message, and it belongs on a screen, not in a thread.
+    """
+    biz = _biz(token)
+    from app.services import checkpoint
+    cp = checkpoint.get_today(require_db(), biz["id"]) or {}
+    held = set(cp.get("held") or [])
+    items = []
+    for it in (cp.get("items") or []):
+        cid = it.get("client_id") or it.get("id")
+        items.append({
+            "client_id": cid,
+            "name": names.clean_display(it.get("name") or "") or "(unnamed)",
+            "amount": _inr(it.get("amount") or 0),
+            "held": cid in held,
+        })
+    return JSONResponse({"open": bool(cp), "items": items, "held": len(held)})
+
+
+@router.post("/api/hold")
+def api_hold(p: _MHold):
+    """Skip today's reminder for a party who has already paid. Nothing is
+    marked paid and nothing is written to Tally: the party simply comes back
+    on its next cadence day, which is what the chat's HOLD always did."""
+    biz = _biz(p.token)
+    from app.services import checkpoint
+    db = require_db()
+    if p.all:
+        return JSONResponse({"ok": True, "held": checkpoint.hold_all(db, biz["id"])})
+    if not p.client_id:
+        raise HTTPException(status_code=400, detail="Pick a party to hold.")
+    checkpoint.hold(db, biz["id"], p.client_id)
+    return JSONResponse({"ok": True, "held": 1})
+
+
+@router.post("/api/photo-bill")
+async def api_photo_bill(p: _MPhoto):
+    """Read a bill from a photo. The camera is on the phone, so this is the
+    one thing the chat did that the phone had the better claim to."""
+    biz = _biz(p.token)
+    from app.services import bot, ocr
+    if not ocr.is_configured():
+        return JSONResponse({"ok": False,
+                             "detail": "Photo bills are not set up on this shop."})
+    await bot._handle_photo_bill({"id": biz["id"],
+                                  "business_name": biz.get("business_name") or ""},
+                                 p.image_b64, p.image_type)
+    pb = await bot._latest_pending_photo_bill(biz["id"])
+    if not pb:
+        return JSONResponse({"ok": False,
+                             "detail": "Could not read that photo. Try again in "
+                                       "good light, straight from above."})
+    return JSONResponse({"ok": True, "read": {
+        "party_name": pb.get("party_name") or "",
+        "phone": pb.get("phone") or "",
+        "amount": pb.get("amount"),
+        "bill_number": pb.get("bill_number") or "",
+        "bill_date": str(pb.get("bill_date") or "")[:10],
+    }})
+
+
+@router.post("/api/photo-bill/save")
+async def api_photo_bill_save(p: _MPhotoSave):
+    """Confirm the reading (after any edits) and create the bill."""
+    biz = _biz(p.token)
+    from app.services import bot
+    db = require_db()
+    patch = {}
+    for k in ("party_name", "bill_number"):
+        v = (getattr(p, k, "") or "").strip()
+        if v:
+            patch[k] = v
+    if p.amount is not None:
+        patch["amount"] = p.amount
+    if p.bill_date:
+        patch["bill_date"] = p.bill_date
+    if patch:
+        db.table("photo_bills").update(patch).eq(
+            "business_id", biz["id"]).eq("status", "pending").execute()
+    msg = await bot._confirm_photo_bill({"id": biz["id"],
+                                         "business_name": biz.get("business_name") or "",
+                                         "plan": biz.get("plan") or "starter"})
+    return JSONResponse({"ok": True, "message": msg})
 
 
 @router.get("/api/today")

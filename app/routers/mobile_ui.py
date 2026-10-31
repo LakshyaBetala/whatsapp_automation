@@ -278,7 +278,7 @@ try {
 } catch (e) { TOKEN = ''; }
 
 var app = document.getElementById('app');
-var S = {sum:null, today:null, money:null, picks:null};
+var S = {sum:null, today:null, money:null, picks:null, inbox:null, cp:null};
 var TAB = 'today';
 var INSTALL_EVT = null;
 window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); INSTALL_EVT = e; });
@@ -308,7 +308,8 @@ var I = {
   bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15.5V10a6 6 0 1 0-12 0v5.5L4.5 18h15z"/><path d="M9.5 21h5"/></svg>',
   tick:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l5 5 10-11"/></svg>',
   find:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.2"/><path d="M15.6 15.6 21 21"/></svg>',
-  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  cam:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5h3.2l1.4-2h8.8l1.4 2H21v10H3z"/><circle cx="12" cy="13" r="3.2"/></svg>'
 };
 // The real ASVA mark, served by the site router on this same host. What was
 // here before was a hand-drawn green chevron that resembled nothing.
@@ -461,6 +462,7 @@ async function renderToday(){
     try { S.today = await api('today'); }
     catch (e) { if (String(e.message) !== 'unauthorised')
                   shell(shopName(), shopSub(), errBox('renderToday()')); return; }
+    try { S.cp = await api('checkpoint'); } catch (e) { S.cp = {}; }
   }
   var d = S.today;
   var act = actCard();
@@ -532,10 +534,31 @@ async function renderToday(){
       + 'not lost.</p></div>'
     : '';
 
+  // Today's list, before it goes out. Holding a party who has already paid
+  // is a thirty second job that stops an embarrassing message, and it used to
+  // mean replying HOLD to a chat thread.
+  var cp = S.cp || {};
+  var checkpoint = (cp.open && (cp.items || []).length)
+    ? '<div class="sect">Going out today<span class="cnt">'
+      + cp.items.length + (cp.held ? ' \u00b7 ' + cp.held + ' held' : '') + '</span></div>'
+      + '<div class="rows fade d1">' + cp.items.map(function(it){
+          return '<div class="row" style="cursor:default">'
+           + '<span class="nm"><b>' + esc(it.name) + '</b><span>'
+           + (it.held ? 'held, nothing goes to them today' : 'will be reminded today')
+           + '</span></span><span class="amt num">' + rupee(it.amount) + '</span>'
+           + (it.held ? '<span class="pill pill-off">held</span>'
+               : '<button class="qa" onclick="doHold(' + jq(it.client_id) + ',this)">'
+                 + 'Hold</button>') + '</div>'; }).join('') + '</div>'
+      + (cp.held < cp.items.length
+          ? '<div style="margin-top:10px"><button class="btn btn-full"'
+            + ' onclick="doHoldAll(this)">They have all paid, hold everyone</button></div>'
+          : '')
+    : '';
+
   shell(shopName(), shopSub(),
     installBar() + waDown + hello + money
     + (act ? '<div style="margin-top:14px">' + act + '</div>' : '')
-    + dec
+    + dec + checkpoint
     + '<div class="sect">Chase today<span class="cnt">'
     + (d.chase_overdue_count || chase.length) + ' overdue</span></div>'
     + list
@@ -547,6 +570,19 @@ async function renderToday(){
         + (d.sent_today === 1 ? '' : 's') + ' went out today.<br>' : '')
     + 'This is the same list as your morning message.<br>'
     + 'ASVA sends from your own WhatsApp number.</div>');
+}
+async function doHold(cid, btn){
+  var done = busy(btn, '...');
+  try { await post('hold', {client_id: cid});
+        toast('Held for today'); S.cp = null; S.today = null; renderToday(); }
+  catch (e) { toast('Could not hold: ' + e.message); done(); }
+}
+async function doHoldAll(btn){
+  var done = busy(btn, 'Holding...');
+  try { var r = await post('hold', {all: true});
+        toast('Held ' + (r.held || 0) + ' for today');
+        S.cp = null; S.today = null; renderToday(); }
+  catch (e) { toast('Could not hold: ' + e.message); done(); }
 }
 async function rowRemind(cid, name, btn){
   var done = busy(btn, 'Sending');
@@ -565,7 +601,9 @@ async function rowStop(cid, name, isOn, btn){
 var PQ = '', PF = 'owing', PSORT = 'overdue', PPAGE = 0, PER = 25;
 function renderParties(){
   shell(shopName(), shopSub(),
-    '<div class="chips" id="pchips"></div>'
+    '<button class="btn btn-full fade" style="margin-bottom:12px" onclick="newPartyView()">'
+    + I.plus + ' Add a party</button>'
+    + '<div class="chips" id="pchips"></div>'
     + '<div class="find"><input id="q" placeholder="Search a party" autocomplete="off"'
     + ' value="' + esc(PQ) + '">'
     + '<select id="srt"><option value="overdue">Most late</option>'
@@ -583,6 +621,43 @@ function renderParties(){
   paintParties();
 }
 function setPF(f){ PF = f; PPAGE = 0; if (TAB === 'parties') renderParties(); }
+
+// A party who is not in Tally yet: a cash customer, a new buyer, somebody the
+// owner just agreed terms with standing in the shop. It was desktop-only, and
+// the owner is never at the desktop when it happens.
+function newPartyView(){
+  document.body.classList.add('noTabs');
+  app.innerHTML = header('Add a party', '', "go('parties')")
+   + '<div class="wrap"><div class="card fade"><div class="fgrid">'
+   + '<div><label class="fl" for="npname">Party name</label>'
+   + '<input id="npname" placeholder="As you would write it in Tally"></div>'
+   + '<div><label class="fl" for="npnum">Their WhatsApp number</label>'
+   + '<input id="npnum" type="tel" inputmode="numeric" placeholder="9876543210"></div>'
+   + '<div><label class="fl" for="npcd">Days to pay</label>'
+   + '<input id="npcd" type="number" inputmode="numeric" value="30" min="0" max="365">'
+   + '</div></div>'
+   + '<div style="margin-top:16px"><button class="btn btn-pri btn-full" id="npsave"'
+   + ' onclick="newPartySave(this)">Add this party</button></div></div>'
+   + '<div class="foot">ASVA will not chase them until you switch their reminders '
+   + 'on. Bills you add to them work straight away.</div></div>';
+  var f = document.getElementById('npname'); if (f) f.focus();
+}
+async function newPartySave(btn){
+  var nm = fval('npname');
+  if (!nm) return toast('Enter the party name.');
+  var num = digits(fval('npnum'));
+  if (num && num.length < 10) return toast('That number is too short.');
+  var cd = parseInt(fval('npcd'), 10);
+  var done = busy(btn, 'Adding...');
+  try {
+    var r = await post('party', {name: nm, whatsapp_number: num,
+                                 credit_days: (cd >= 0 && cd <= 365) ? cd : 30});
+    toast('Added ' + nm);
+    await refresh();
+    if (r && r.client_id) { TAB = 'parties'; partyView(r.client_id); }
+    else go('parties');
+  } catch (e) { toast('Could not add: ' + e.message); done(); }
+}
 function partyPool(){
   var all = S.sum.chase || [];
   if (PF === 'chasing') return all.filter(function(p){ return p.reminders_on && !p.paused; });
@@ -676,6 +751,23 @@ function paintParty(){
      + 'He has not paid, chase again</button></div></div>';
   }
 
+  var sched = (d.schedule && d.schedule.label)
+    ? '<div class="card fade d1" style="margin-top:12px;display:flex;'
+      + 'align-items:center;gap:12px"><div style="flex:1;min-width:0">'
+      + '<div style="font-size:.72rem;font-weight:700;letter-spacing:.09em;'
+      + 'text-transform:uppercase;color:var(--muted)">Next reminder</div>'
+      + '<div style="font-weight:650;margin-top:3px">' + esc(d.schedule.label)
+      + '</div></div>'
+      + (d.reminders_on ? '' : '<span class="pill pill-off">paused</span>')
+      + '</div>'
+    : '';
+  var settled = (d.settled_bills && d.settled_bills.length)
+    ? '<div class="sect">Settled bills<span class="cnt">' + d.settled_count
+      + '</span></div><div class="card fade d2">' + d.settled_bills.map(function(b){
+          return '<div class="bill"><div class="inv">' + esc(b.invoice)
+           + '</div><div class="amt num" style="color:var(--muted)">'
+           + rupee(b.amount) + '</div></div>'; }).join('') + '</div>'
+    : '';
   var bills = d.open_bills.length
     ? '<div class="card fade d2">' + d.open_bills.map(function(b){
         return '<div class="bill"><div class="inv">' + esc(b.invoice)
@@ -720,8 +812,9 @@ function paintParty(){
 
   app.innerHTML = header(d.name, d.whatsapp || 'no number saved', 'go(\'' + TAB + '\')')
    + '<div class="wrap">' + head + actions + promise
+   + sched
    + (bills ? '<div class="sect">Open bills</div>' + bills : '')
-   + book + settings + replies + '</div>' + tabs();
+   + settled + book + settings + replies + '</div>' + tabs();
 }
 function srow(title, sub, control){
   return '<div class="srow"><div class="sl"><b>' + esc(title) + '</b><span>' + sub
@@ -785,7 +878,8 @@ function payView(){
       var done = busy(btn, 'Booking...');
       try { await post('record-payment',
               {client_id: CUR.id, amount: amt, payment_date: fval('pdate') || null});
-            toast('Booked. It will post into Tally.'); await refresh(); partyView(CUR.id); }
+            toast('Saved. It posts when the shop computer is on.');
+            await refresh(); partyView(CUR.id); }
       catch (e) { toast('Could not book: ' + e.message); done(); }
     });
 }
@@ -885,6 +979,7 @@ async function renderMoney(){
   catch (e) { if (String(e.message) !== 'unauthorised')
                 shell(shopName(), shopSub(), errBox('renderMoney()')); return; }
   S.money = m;
+  try { S.inbox = await api('inbox'); } catch (e) { S.inbox = {pending:[], signals:[]}; }
   var low = (m.collected_pct !== null && m.collected_pct !== undefined
              && m.collected_pct < 40);
   var pct = (m.collected_pct === null || m.collected_pct === undefined) ? ''
@@ -904,8 +999,40 @@ async function renderMoney(){
          + jq(p.client_id) + ',this)">Chase again</button></div>'; }).join('') + '</div>'
     : emptyBox(I.tick, 'No open promises', 'Nobody has asked for more time.');
 
+  // "Someone says they paid" used to arrive as a chat nudge and was settled
+  // by scrolling back up the thread to find it. It is a list now.
+  var inb = S.inbox || {};
+  var claims = (inb.pending || []).concat([]);
+  var sigs = (inb.signals || []);
+  var sigBlock = sigs.length
+    ? '<div class="sect">Tapped pay, nothing yet<span class="cnt">' + sigs.length
+      + '</span></div><div class="rows fade">' + sigs.map(function(g){
+          return '<div class="row" style="cursor:default">'
+           + '<span class="nm"><b>' + esc(g.party_display || g.name || 'A customer')
+           + '</b><span>opened your pay page'
+           + (g.amount ? ' for ' + rupee(inr(g.amount)) : '') + '</span></span>'
+           + '<button class="qa" onclick="sigGone(' + jq(g.id) + ',this)">Clear</button>'
+           + '</div>'; }).join('') + '</div>'
+    : '';
+  var inbox = claims.length
+    ? '<div class="sect">Says they paid<span class="cnt">' + claims.length + '</span></div>'
+      + '<div class="rows fade">' + claims.map(function(c){
+          var amt = c.amount ? rupee(inr(c.amount)) : 'amount not given';
+          return '<div class="row" style="cursor:default;display:block">'
+           + '<div style="display:flex;align-items:center;gap:12px">'
+           + '<span class="nm"><b>' + esc(c.party_display || c.name || 'A customer')
+           + '</b><span>' + esc(c.note || c.raw_text || 'said they have paid')
+           + '</span></span><span class="amt num">' + amt + '</span></div>'
+           + '<div class="ract" style="margin-left:0">'
+           + '<button class="qa qa-pri" onclick="claimOk(' + jq(c.id) + ',this)">'
+           + 'Book it</button>'
+           + '<button class="qa" onclick="claimNo(' + jq(c.id) + ',this)">Not a payment'
+           + '</button></div></div>'; }).join('') + '</div>'
+    : '';
+
   shell(shopName(), shopSub(),
-    '<div class="big fade"><div class="l">Recovered in ' + esc(m.recovered_month || 'this month')
+    inbox + sigBlock
+    + '<div class="big fade"><div class="l">Recovered in ' + esc(m.recovered_month || 'this month')
     + '</div><div class="v num">' + rupee(m.recovered_this_month) + '</div>' + pct + '</div>'
     + '<div class="duo">'
     + '<div class="big fade d1"><div class="l">Coming in</div><div class="v num">'
@@ -914,9 +1041,91 @@ async function renderMoney(){
     + rupee(m.billed_this_month) + '</div><div class="s">this month</div></div></div>'
     + '<div class="sect">Promised to pay<span class="cnt">' + (m.promises||[]).length + '</span></div>'
     + promises
+    + '<div class="sect">Add a bill</div>'
+    + '<button class="btn btn-full fade" onclick="photoPick()">' + I.cam
+    + ' Read a bill from a photo</button>'
+    + '<input type="file" id="pbfile" accept="image/*"'
+    + ' style="display:none" onchange="photoRead(this)">'
+    + '<div class="hint" style="margin-top:9px;color:var(--muted);font-size:.8rem;'
+    + 'line-height:1.5">Pick it from your gallery (WhatsApp saves what customers '
+    + 'send you), or take a new photo. You can also forward the bill straight to '
+    + 'the ASVA number and it will read it there.</div>'
     + '<div class="foot">Recovered counts receipts booked in Tally.<br>'
     + 'Coming in is what customers promised plus what falls due.</div>');
 }
+async function claimOk(id, btn){
+  var done = busy(btn, 'Booking...');
+  try { await post('pending/confirm', {id: id});
+        toast('Approved. It posts when the shop computer is on.');
+        S.inbox = null; await refresh(); renderMoney(); }
+  catch (e) { toast('Could not book: ' + e.message); done(); }
+}
+async function sigGone(id, btn){
+  var done = busy(btn, '...');
+  try { await post('signal/dismiss', {id: id}); toast('Cleared');
+        S.inbox = null; renderMoney(); }
+  catch (e) { toast('Could not clear: ' + e.message); done(); }
+}
+async function claimNo(id, btn){
+  var done = busy(btn, '...');
+  try { await post('pending/cancel', {id: id});
+        toast('Cleared'); S.inbox = null; renderMoney(); }
+  catch (e) { toast('Could not clear: ' + e.message); done(); }
+}
+
+// ── a bill from a photo ─────────────────────────────────────────────────
+// The camera is on the phone, so this is the one thing the chat did that the
+// phone has the better claim to.
+function photoPick(){ document.getElementById('pbfile').click(); }
+function photoRead(inp){
+  var f = inp.files && inp.files[0];
+  inp.value = '';
+  if (!f) return;
+  if (f.size > 6 * 1024 * 1024) return toast('That photo is too large. Try again.');
+  toast('Reading the photo...');
+  var fr = new FileReader();
+  fr.onload = async function(){
+    var b64 = String(fr.result).split(',')[1] || '';
+    try {
+      var r = await post('photo-bill', {image_b64: b64, image_type: f.type || 'image/jpeg'});
+      if (!r.ok) return toast(r.detail || 'Could not read that photo.');
+      photoForm(r.read || {});
+    } catch (e) { toast('Could not read it: ' + e.message); }
+  };
+  fr.onerror = function(){ toast('Could not open that photo.'); };
+  fr.readAsDataURL(f);
+}
+function photoForm(rd){
+  document.body.classList.add('noTabs');
+  app.innerHTML = header('Bill from a photo', 'check it before saving',
+                         "go('money')")
+   + '<div class="wrap"><div class="leded" style="margin-bottom:12px">'
+   + 'ASVA read this from the photo. Fix anything it got wrong.</div>'
+   + '<div class="card fade"><div class="fgrid">'
+   + '<div><label class="fl" for="pbname">Party</label><input id="pbname" value="'
+   + esc(rd.party_name || '') + '" placeholder="Party name"></div>'
+   + '<div><label class="fl" for="pbamt">Amount</label><input id="pbamt" type="number"'
+   + ' inputmode="decimal" value="' + esc(rd.amount == null ? '' : rd.amount) + '"></div>'
+   + '<div><label class="fl" for="pbno">Bill number</label><input id="pbno" value="'
+   + esc(rd.bill_number || '') + '"></div>'
+   + '<div><label class="fl" for="pbdate">Bill date</label><input id="pbdate" type="date"'
+   + ' value="' + esc(rd.bill_date || today()) + '"></div></div>'
+   + '<div style="margin-top:16px"><button class="btn btn-pri btn-full" id="pbsave"'
+   + ' onclick="photoSave(this)">Save this bill</button></div></div>'
+   + '<div class="foot">Saving creates the bill and, if the party has a number, '
+   + 'ASVA sends it to them.</div></div>';
+}
+async function photoSave(btn){
+  var nm = fval('pbname'), amt = parseFloat(fval('pbamt'));
+  if (!nm) return toast('Enter the party name.');
+  if (!(amt > 0)) return toast('Enter the bill amount.');
+  var done = busy(btn, 'Saving...');
+  try { await post('photo-bill/save', {party_name: nm, amount: amt,
+          bill_number: fval('pbno'), bill_date: fval('pbdate') || null});
+        toast('Bill saved'); await refresh(); go('money'); }
+  catch (e) { toast('Could not save: ' + e.message); done(); }
+}
+
 async function releaseFrom(cid, btn){
   var done = busy(btn, '...');
   try { await post('release', {client_id: cid}); toast('Back in the chase list');
@@ -1064,7 +1273,8 @@ function hideInstall(){
 }
 function logout(){
   try { localStorage.removeItem('asva_m_token'); } catch(e){}
-  TOKEN = ''; S = {sum:null, today:null, money:null, picks:null}; loginView();
+  TOKEN = ''; S = {sum:null, today:null, money:null, picks:null, inbox:null,
+                 cp:null}; loginView();
 }
 function loginView(){
   document.body.classList.add('noTabs');
@@ -1086,7 +1296,7 @@ function doLogin(){
   try { localStorage.setItem('asva_m_token', v); } catch(e){}
   TOKEN = v; boot();
 }
-async function refresh(){ S.today = null;
+async function refresh(){ S.today = null; S.money = null; S.inbox = null; S.cp = null;
   try { S.sum = await api('summary'); } catch (e) {} }
 
 // ── go ───────────────────────────────────────────────────────────────────
