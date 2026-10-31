@@ -21,7 +21,7 @@ APP_HTML = r"""<!doctype html><html lang="en"><head>
 <meta name="theme-color" content="#0e1411" media="(prefers-color-scheme: dark)">
 <meta name="referrer" content="no-referrer">
 <link rel="manifest" href="/m/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/m/icon.svg">
+<link rel="apple-touch-icon" href="/logo.png">
 <style>
  :root{
    --bg:#f5f6f2;--bg2:#eef1ea;--card:#ffffff;--ink:#132019;--ink2:#37473e;--muted:#6d7f74;
@@ -61,9 +61,9 @@ APP_HTML = r"""<!doctype html><html lang="en"><head>
    padding:calc(env(safe-area-inset-top) + 11px) 16px 11px;background:color-mix(in srgb,var(--bg) 88%,transparent);
    backdrop-filter:saturate(150%) blur(14px);border-bottom:1px solid var(--line)}
  header .mark{flex:none;width:32px;height:32px;display:grid;place-items:center;
-   border-radius:9px;overflow:hidden;line-height:0}
- header .mark svg{display:block;width:32px;height:32px}
- .login .lm svg{display:block;width:100%;height:100%}
+   line-height:0}
+ header .mark img,header .mark svg{display:block;width:32px;height:32px}
+ .login .lm img,.login .lm svg{display:block;width:100%;height:100%}
  header .who{flex:1;min-width:0}
  header .n{font-weight:700;font-size:.97rem;letter-spacing:-.01em;white-space:nowrap;
    overflow:hidden;text-overflow:ellipsis}
@@ -310,9 +310,10 @@ var I = {
   find:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.2"/><path d="M15.6 15.6 21 21"/></svg>',
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
 };
-var MARK = '<svg viewBox="0 0 100 100" aria-label="ASVA" style="width:100%;height:100%">'
- + '<rect width="100" height="100" rx="24" fill="#0f1512"/>'
- + '<path d="M50 24 L72 74 H61 L50 47 L39 74 H28 Z" fill="#12a150"/></svg>';
+// The real ASVA mark, served by the site router on this same host. What was
+// here before was a hand-drawn green chevron that resembled nothing.
+var MARK = '<img src="/logo.png" alt="ASVA" width="64" height="64"'
+ + ' style="width:100%;height:100%;object-fit:contain;display:block">';
 
 // ── net ──────────────────────────────────────────────────────────────────
 async function api(path){
@@ -522,8 +523,17 @@ async function renderToday(){
     : emptyBox(I.tick, 'Nobody to chase today',
                'Every overdue party has been handled.');
 
+  var waDown = wa().state === 'down'
+    ? '<div class="act fade" style="background:var(--crit-bg);border-color:'
+      + 'color-mix(in srgb,var(--crit) 30%,transparent);margin-bottom:14px">'
+      + '<h3 style="color:var(--crit)">Your WhatsApp is not connected</h3>'
+      + '<p>Nothing is going out to any customer right now. Open ASVA on the '
+      + 'shop computer and scan the code again. Everything below is waiting, '
+      + 'not lost.</p></div>'
+    : '';
+
   shell(shopName(), shopSub(),
-    installBar() + hello + money
+    installBar() + waDown + hello + money
     + (act ? '<div style="margin-top:14px">' + act + '</div>' : '')
     + dec
     + '<div class="sect">Chase today<span class="cnt">'
@@ -915,22 +925,43 @@ async function releaseFrom(cid, btn){
 }
 
 // ── 5. SETUP ─────────────────────────────────────────────────────────────
+function wa(){ return (S.today && S.today.wa) || {state:'unknown'}; }
+function waTag(){
+  var st = wa().state;
+  return st === 'up' ? 'connected' : (st === 'down' ? 'not connected' : 'unknown');
+}
+function waPill(){
+  var st = wa().state;
+  return st === 'up' ? 'pill-on' : (st === 'down' ? 'pill-crit' : 'pill-off');
+}
+function waWord(){
+  var st = wa().state;
+  if (st === 'up') return 'reminders can go out right now';
+  if (st === 'down') return 'nothing can go out until it is reconnected on the shop computer';
+  return 'ASVA has not checked recently';
+}
 function renderSetup(){
-  var d = S.sum;
+  var d = S.today || S.sum;
+  // the brief calls it reminders_on_count, the summary calls it reminders_on
+  var onN = (d.reminders_on_count !== undefined) ? d.reminders_on_count
+          : (d.reminders_on || 0);
   var pickRow = srow('Who ASVA chases',
-    d.reminders_on + ' of your parties are being reminded'
+    onN + ' of your parties are being reminded'
     + (d.stage === 'pick' ? '. Nobody yet, so nothing is going out.' : ''),
     '<button class="btn" style="min-height:40px;padding:9px 13px" onclick="pickView(10)">'
     + (d.stage === 'pick' ? 'Pick' : 'Add more') + '</button>');
   shell(shopName(), shopSub(),
     '<div class="lede">Setup</div>'
-    + '<div class="leded">The few things worth changing from your phone. Everything '
-    + 'else lives on the shop computer.</div>'
-    + '<div class="sect">Reminders</div><div class="rows fade">' + pickRow
+    + '<div class="leded">Whether ASVA is working, and the few things worth '
+    + 'changing from your phone. Batches, timings, UPI and letters live on the '
+    + 'shop computer.</div>'
+    + '<div class="sect">Is it working</div><div class="rows fade">' + pickRow
     + srow('Tally', d.tally_synced === 'never' ? 'has not synced yet'
             : 'last synced ' + d.tally_synced,
            '<span class="pill ' + (d.tally_synced === 'today' ? 'pill-on' : 'pill-warn') + '">'
-           + (d.tally_synced === 'today' ? 'fresh' : 'check') + '</span>') + '</div>'
+           + (d.tally_synced === 'today' ? 'fresh' : 'check') + '</span>')
+    + srow('Your WhatsApp', waWord(),
+           '<span class="pill ' + waPill() + '">' + waTag() + '</span>') + '</div>'
     + '<div class="sect">Help</div><div class="rows fade d1">'
     + srow('Ask ASVA', 'Message the ASVA number on WhatsApp and someone answers',
            '<a class="btn" style="min-height:40px;padding:9px 13px" target="_blank" rel="noopener"'

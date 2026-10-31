@@ -320,3 +320,30 @@ def test_the_shell_never_hardcodes_a_token():
     from app.routers.mobile_ui import APP_HTML
     assert "asva_m_token" in APP_HTML
     assert "history.replaceState" in APP_HTML
+
+
+def test_the_bot_link_carries_the_owner_token():
+    """A bare /m link lands the owner on a sign-in asking for a code he has
+    never seen, which is where the whole move to the app would have died."""
+    from app.services import bot
+    assert "?token=abc123" in bot._app_link("abc123")
+    assert "?token=" in bot._app_moved_reply("english", "abc123")
+    assert "?token=" in bot._with_app_link("open {app} now", "abc123")
+    # no token known: still a usable link, just not a one-tap one
+    assert bot._app_link("").endswith("/m")
+
+
+def test_the_home_screen_icon_is_the_real_mark():
+    """It was a hand-drawn green chevron, which is what every owner who
+    installed ASVA would have had sitting on their home screen."""
+    from app.routers.mobile_ui import APP_HTML
+    assert "/logo.png" in APP_HTML
+    assert "M50 24 L72 74" not in APP_HTML        # the old drawn path is gone
+
+
+def test_the_phone_says_when_whatsapp_is_down():
+    """A shop can show a crore outstanding and a tidy chase list while nothing
+    has left the building for a week."""
+    from app.routers.mobile_ui import APP_HTML
+    assert "Your WhatsApp is not connected" in APP_HTML
+    assert "waPill" in APP_HTML and "waWord" in APP_HTML

@@ -411,7 +411,8 @@ def api_today(token: str = Query("")):
     biz = _biz(token)
     db = require_db()
     row = (db.table("businesses")
-           .select("id, business_name, setup_problem, last_tally_sync_at")
+           .select("id, business_name, setup_problem, last_tally_sync_at, "
+                   "wa_ready, wa_checked_at, wa_transport")
            .eq("id", biz["id"]).limit(1).execute()).data or [{}]
     full = {**biz, **(row[0] or {})}
     from app.services import today as today_svc
@@ -431,7 +432,33 @@ def api_today(token: str = Query("")):
     snap["stage_on"] = st["on"]
     snap["tally_synced"] = _tally_ago(db, biz["id"])
     snap["sent_today"] = _sent_today(db, biz["id"])
+    snap["wa"] = _wa_health(full)
     return JSONResponse(snap)
+
+
+def _wa_health(biz: dict) -> dict:
+    """Is the shop's WhatsApp actually able to send right now?
+
+    The phone could show a crore outstanding and a tidy chase list while
+    nothing had left the building for a week, because nothing on any phone
+    screen said the number was disconnected. Stale checks are reported as
+    unknown rather than guessed at.
+    """
+    ready = biz.get("wa_ready")
+    checked = biz.get("wa_checked_at")
+    fresh = False
+    if checked:
+        try:
+            t = _dt.datetime.fromisoformat(str(checked).replace("Z", "+00:00"))
+            fresh = (_dt.datetime.now(_dt.timezone.utc) - t).total_seconds() < 45 * 60
+        except (TypeError, ValueError):
+            fresh = False
+    state = "unknown"
+    if fresh and ready is True:
+        state = "up"
+    elif fresh and ready is False:
+        state = "down"
+    return {"state": state, "transport": biz.get("wa_transport") or "laptop"}
 
 
 def _sent_today(db, bid: str) -> int:
@@ -549,7 +576,15 @@ def manifest():
         "name": "ASVA", "short_name": "ASVA", "start_url": "/m",
         "display": "standalone", "background_color": "#f4f5f2",
         "theme_color": "#ffffff",
-        "icons": [{"src": "/m/icon.svg", "sizes": "any", "type": "image/svg+xml"}],
+        # The real ASVA mark, already served by the site router on this host.
+        # It was a hand-drawn green chevron, which is what owners would have
+        # had sitting on their home screen.
+        "icons": [
+            {"src": "/logo.png", "sizes": "512x512", "type": "image/png",
+             "purpose": "any"},
+            {"src": "/logo.png", "sizes": "512x512", "type": "image/png",
+             "purpose": "maskable"},
+        ],
     }, media_type="application/manifest+json")
 
 

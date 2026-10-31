@@ -96,19 +96,28 @@ MOVED_TO_APP = frozenset({
 })
 
 
-def _app_link() -> str:
+def _app_link(token: str = "") -> str:
+    """The owner's own one-tap link into the phone app.
+
+    The token matters more than it looks. A bare /m link opens a sign-in
+    asking for a code the owner has never seen, so he closes it and goes back
+    to typing LIST. This chat is owner-only, so the link carries his token and
+    the app is simply open when it loads.
+    """
+    from urllib.parse import quote
     from app.config import settings as _st
     base = (getattr(_st, "public_base_url", "") or "https://app.tryasva.com")
-    return base.rstrip("/") + "/m"
+    url = base.rstrip("/") + "/m"
+    return url + "?token=" + quote(token) if token else url
 
 
-def _with_app_link(text: str) -> str:
-    return text.replace("{app}", _app_link())
+def _with_app_link(text: str, token: str = "") -> str:
+    return text.replace("{app}", _app_link(token))
 
 
-def _app_moved_reply(lang: str, base_url: str = "") -> str:
+def _app_moved_reply(lang: str, token: str = "") -> str:
     """One line, and the link. Never a list of other verbs to try instead."""
-    url = (base_url or "https://app.tryasva.com").rstrip("/") + "/m"
+    url = _app_link(token)
     if _is_en_lang(lang):
         return ("That is in the ASVA app on your phone now, where you can see "
                 "every party and tap Remind, Stop or Check.\n\n" + url
@@ -498,7 +507,7 @@ async def handle(
     # ── Identify sender: owner or customer? ───────────────────────────
     business = _match_row(
         db, "businesses",
-        "id, business_name, plan, whatsapp_number, upi_vpa, upi_vpa_2, upi_vpa_3, "
+        "id, business_name, plan, agent_token, whatsapp_number, upi_vpa, upi_vpa_2, upi_vpa_3, "
         "bank_account_name, bank_account_no, bank_ifsc, bank_name, discount_pct, "
         "msg_language, owner_language, reminder_batches, reminder_hour",
         from_number)
@@ -592,8 +601,7 @@ async def handle(
         # Checked before anything else so the owner gets the same answer
         # whether he typed LIST, "list", SOOCHI or "stop ramesh traders".
         if first_word in MOVED_TO_APP:
-            from app.config import settings as _st
-            return _app_moved_reply(lang, getattr(_st, "public_base_url", "") or "")
+            return _app_moved_reply(lang, business.get("agent_token") or "")
 
         # ── First-run guard: paired but Tally never synced ────────────
         # A read/summary command would look broken with no data yet, so guide the
@@ -746,9 +754,11 @@ async def handle(
             # after that, the short everyday menu.
             if _sync_state(db, business_id) == "never":
                 return _first_sync_help(lang)
-            return _with_app_link(i18n.t(lang, "help"))
+            return _with_app_link(i18n.t(lang, "help"),
+                                  business.get("agent_token") or "")
         if upper in ("MORE", "ALL", "COMMANDS", "SAB"):
-            return _with_app_link(i18n.t(lang, "help_more"))
+            return _with_app_link(i18n.t(lang, "help_more"),
+                                  business.get("agent_token") or "")
         # Plain words: "Ramesh ka kitna baki hai?" -> CHECK Ramesh. Only a message
         # that reads like a question to the bot reaches the AI, and only READ-ONLY
         # commands are ever run this way (owner_intent).
