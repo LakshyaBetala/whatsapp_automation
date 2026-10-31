@@ -221,7 +221,8 @@ def test_outstandings_auto_creates_new_party(fake_db):
     lk = next(c for c in client_inserts if c["name"] == "Lakshya Betala")
     assert lk["tally_ledger_name"] == "Lakshya Betala"
     assert lk["whatsapp_number"] == "918072116397"      # normalized to 91...
-    assert lk["reminders_enabled"] is True
+    # OFF by default: the owner picks who to chase (migration 064).
+    assert lk["reminders_enabled"] is False
     assert lk.get("credit_days") == 30
 
 

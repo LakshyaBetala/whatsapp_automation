@@ -527,10 +527,11 @@ async def import_outstanding(payload: TallyImportPayload):
                     "tally_group": debtor.tally_group,
                     "whatsapp_number": phone,
                     "tally_guid": (debtor.tally_guid or "").strip() or None,
-                    # A recovery tool exists to chase debtors, so new imports
-                    # default to reminders ON. The daily cap + pacing prevent a
-                    # day-one blast; the owner can pause any party.
-                    "reminders_enabled": True,
+                    # OFF, deliberately. Every owner who actually opened ASVA
+                    # had used it to switch ASVA off - 915 of 1,043 parties at
+                    # one shop. Importing the book no longer means chasing it;
+                    # the owner picks who to chase (services/shortlist.py).
+                    "reminders_enabled": False,
                 }
                 # Tally credit period wins; else the shop's trade-category default
                 # (never leave it null - due dates must be category-correct).
@@ -1137,7 +1138,9 @@ def import_outstandings(payload: TallyOutstandingsPayload, background_tasks: Bac
                 "tally_group": p.tally_group,
                 "whatsapp_number": _normalize_phone(p.whatsapp_number),
                 "tally_guid": (p.tally_guid or "").strip() or None,
-                "reminders_enabled": True,
+                # A party that appeared in Tally today was not picked by the
+                # owner, so it is not chased. Same reason as the import path.
+                "reminders_enabled": False,
                 # clients.credit_days is NOT NULL: always fall back to the shop's
                 # trade-category default so a new party with no Tally credit period
                 # never fails the whole insert chunk (was: omitted -> constraint

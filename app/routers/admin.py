@@ -67,6 +67,63 @@ def _warmup_banner(biz: dict) -> str:
         f'Nothing is lost, everyone is reached.</div>')
 
 
+def _pick_banner(db, biz: dict, token: str, lang: str, clients: list,
+                 totals: dict, overdue_days: dict) -> str:
+    """"Start with ten, earn the rest" - the one line the owner sees about it.
+
+    Three states, from services/shortlist.stage(): nobody picked yet (ask for
+    ten), the ten have had a fortnight (show what they paid, ask for fifty), or
+    nothing to say.
+    """
+    from app.services import shortlist
+    try:
+        st = shortlist.stage(clients)
+    except Exception:
+        return ""
+    link = f'/admin/pick?token={_h(token)}&amp;lang={_h(lang)}'
+    if st["what"] == "pick":
+        n = len(shortlist.rank(clients, totals, overdue_days))
+        if not n:
+            return ""
+        return (
+            f'<div class="flash" style="display:block">'
+            f'<b>ASVA is not reminding anybody yet.</b> '
+            f'It never chases a customer you have not picked. '
+            f'Start with the ten who annoy you most and add more when you are ready.'
+            f'<div style="margin-top:10px"><a href="{link}" '
+            f'style="display:inline-block;background:#0a7d33;color:#fff;'
+            f'text-decoration:none;padding:9px 16px;border-radius:8px;'
+            f'font-weight:600">Pick my ten</a></div></div>')
+    if st["what"] == "review":
+        paid = shortlist.collected_for(db, biz["id"], st["ids"], st["since"])
+        since = st["since"].strftime("%d %b")
+        got = (f'They have paid &#8377;{_inr_digits(paid)} since then.' if paid > 0
+               else 'Nothing has come in from them yet, so look at that list '
+                    'before you widen it.')
+        # "Not yet" only has to last a week, so it lives in the browser rather
+        # than costing the clients table another column.
+        return (
+            f'<div class="flash" id="pickrev" style="display:block">'
+            f'<b>You pointed ASVA at {st["on"]} customers on {since}.</b> {got}'
+            f'<div style="margin-top:10px">'
+            f'<a href="{link}&amp;n={shortlist.NEXT_STEP}" '
+            f'style="display:inline-block;background:#0a7d33;color:#fff;'
+            f'text-decoration:none;padding:9px 16px;border-radius:8px;'
+            f'font-weight:600">Add the next {shortlist.NEXT_STEP}</a>'
+            f'<button onclick="pickLater()" style="margin-left:10px;'
+            f'background:#fff;color:#787774;border:1px solid #EAEAEA">Not yet'
+            f'</button></div></div>'
+            '<script>'
+            'function pickHide(){var e=document.getElementById("pickrev");'
+            'if(e)e.style.display="none"}'
+            'function pickLater(){try{localStorage.setItem("pickrev",Date.now())}'
+            'catch(e){}pickHide()}'
+            'try{var t=+(localStorage.getItem("pickrev")||0);'
+            'if(Date.now()-t<6048e5)pickHide()}catch(e){}'
+            '</script>')
+    return ""
+
+
 def _biz_by_token(token: str) -> dict:
     db = require_db()
     resp = (db.table("businesses")
@@ -447,6 +504,28 @@ def _open_bill_rows(db, business_id: str) -> list:
         start += 1000
 
 
+def _outstanding_maps(bills: list, today: _dt.date) -> tuple[dict, dict]:
+    """client_id -> money still out, and client_id -> days past due (worst bill).
+
+    The dashboard, the pick page and the shortlist ranking all want exactly
+    these two, so they are built once here.
+    """
+    totals: dict[str, Decimal] = {}
+    overdue: dict[str, int] = {}
+    for b in bills:
+        cid = b["client_id"]
+        totals[cid] = totals.get(cid, Decimal(0)) + Decimal(str(b["outstanding"]))
+        dd = b.get("due_date")
+        if dd:
+            try:
+                od = (today - _dt.date.fromisoformat(str(dd))).days
+            except (TypeError, ValueError):
+                continue
+            if od > 0:
+                overdue[cid] = max(overdue.get(cid, 0), od)
+    return totals, overdue
+
+
 def _messages_used(db, business_id: str, period: str) -> int:
     r = (db.table("usage").select("message_count")
          .eq("business_id", business_id).eq("period_month", period).limit(1).execute())
@@ -568,23 +647,13 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
     setup_problem_js = json.dumps((biz.get("setup_problem") or "").strip())
     has_parties_js = json.dumps(bool(clients))
 
-    totals: dict[str, Decimal] = {}
-    overdue_days: dict[str, int] = {}   # client_id -> max days past due
+    totals, overdue_days = _outstanding_maps(got["bills"], today)
     bills_by_client: dict[str, list] = {}
     for b in got["bills"]:
-        cid = b["client_id"]
-        totals[cid] = totals.get(cid, Decimal(0)) + Decimal(str(b["outstanding"]))
-        bills_by_client.setdefault(cid, []).append(b)
-        dd = b.get("due_date")
-        if dd:
-            try:
-                od = (today - _dt.date.fromisoformat(str(dd))).days
-                if od > 0:
-                    overdue_days[cid] = max(overdue_days.get(cid, 0), od)
-            except (TypeError, ValueError):
-                pass
+        bills_by_client.setdefault(b["client_id"], []).append(b)
 
     clients.sort(key=lambda c: totals.get(c["id"], Decimal(0)), reverse=True)
+    pick_banner_html = _pick_banner(db, biz, token, lang, clients, totals, overdue_days)
 
     from app.services.batches import get_batches
     batches = get_batches(biz)
@@ -875,6 +944,7 @@ def admin_page(token: str = Query(...), lang: str = Query("english")):
 </style></head><body>
 {_topnav(token, lang, "dashboard")}
 {update_banner_html}
+{pick_banner_html}
 <div class="catchband" id="catchband"></div>
 <h2>{biz['business_name']}</h2>
 <div class="sub">Tick = us party ko reminder ON. Batch, timing aur holidays: <b>Reminders</b> tab.</div>
@@ -3146,6 +3216,8 @@ def admin_party_create(payload: PartyCreatePayload):
         "business_id": biz["id"],
         "name": name,
         "whatsapp_number": phone,
+        # Typing a party in by hand IS the owner picking it, so this one stays
+        # ON while imported parties default off (see migration 064).
         "reminders_enabled": True,
         "credit_days": cd,          # NOT NULL column - never omit
     }
@@ -5034,6 +5106,142 @@ async function finish() {{
         f'<title>ASVA - Setup</title>{_FAVICON}'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<style>{_CSS}</style><div class="wrap">{body}</div>', lang))
+
+
+# -- Start with ten --------------------------------------------------------
+# The audit of 2026-11-01 found that every owner who engaged with ASVA used it
+# to switch ASVA off for 88 to 99 percent of his parties. So ASVA stopped
+# claiming the book and started asking for ten names.
+class PickPayload(BaseModel):
+    token: str
+    client_ids: list[str] = []
+
+
+@router.get("/admin/pick", response_class=HTMLResponse)
+def admin_pick(token: str = Query(...), lang: str = Query("english"),
+               n: int = Query(0)):
+    """The one screen that decides whether a shop keeps ASVA.
+
+    Shows the handful of customers who owe the most for the longest, already
+    ticked, and nothing else. No settings, no batches, no explanation of the
+    cadence: a shopkeeper agrees to ten names, not to a system.
+    """
+    from app.services import shortlist
+    biz = _biz_by_token(token)
+    db = require_db()
+    today = _today()
+    got = _together(
+        clients=lambda: _all_parties(db, biz["id"]),
+        bills=lambda: _open_bill_rows(db, biz["id"]),
+    )
+    clients = got["clients"]
+    totals, overdue = _outstanding_maps(got["bills"], today)
+    want = n if n in (shortlist.STARTER, shortlist.NEXT_STEP) else shortlist.STARTER
+    ranked = shortlist.rank(clients, totals, overdue)[:want]
+    on_now = sum(1 for c in clients
+                 if c.get("reminders_enabled") and not c.get("excluded"))
+
+    if not ranked:
+        why = ("Every customer with money outstanding is already being reminded."
+               if on_now else
+               "Nobody here has both money outstanding and a WhatsApp number yet. "
+               "Add numbers from the parties list and come back.")
+        body = (f'<h1 style="margin:6px 0 10px">Nothing to pick</h1>'
+                f'<div class="muted">{why}</div>'
+                f'<div style="margin-top:18px"><a href="/admin?token={_h(token)}'
+                f'&amp;lang={_h(lang)}">Back to your parties</a></div>')
+        return HTMLResponse(_ui_translate(
+            f'<!doctype html><meta charset="utf-8"><title>ASVA - Pick</title>'
+            f'{_FAVICON}<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<style>{_CSS}</style><div class="wrap">{body}</div>', lang))
+
+    rows = []
+    for r in ranked:
+        late = f'{r["days"]} days late' if r["days"] else 'not due yet'
+        rows.append(
+            f'<label class="prow"><input type="checkbox" checked value="{r["id"]}">'
+            f'<span class="pn">{_h(r["name"])}</span>'
+            f'<span class="pa">&#8377;{_inr_digits(r["amount"])}</span>'
+            f'<span class="pd">{late}</span></label>')
+    already = (f'<div class="hint" style="margin-top:14px">'
+               f'{on_now} customers are already being reminded. '
+               f'This adds to them.</div>' if on_now else '')
+    rows_html = "".join(rows)
+    body = f"""
+<div style="font-weight:800;letter-spacing:.18em;font-size:.78rem;color:#0a7d33">ASVA</div>
+<h1 style="margin:6px 0 4px">Who should ASVA chase?</h1>
+<div class="muted" style="max-width:600px">These are the customers who owe you the
+most, for the longest. ASVA will remind only the ones you leave ticked and will
+stay completely silent about everybody else.</div>
+
+<div class="card" style="margin-top:18px;max-width:640px">
+ {rows_html}
+ <div style="margin-top:18px;padding-top:16px;border-top:1px solid #EAEAEA">
+  <button onclick="go()" id="gob" style="font-size:1.05rem;padding:13px 26px">
+   Start with these <span id="cnt">{len(ranked)}</span></button>
+  <span id="msg" class="okmsg"></span>
+ </div>
+ {already}
+</div>
+<div class="hint" style="margin-top:14px;max-width:600px">
+ You can turn any customer on or off later from the parties list, and ASVA still
+ sends every bill and reads every reply for all of them. This only decides who
+ gets reminded about money.
+</div>
+<style>
+ .prow{{display:flex;align-items:center;gap:12px;padding:11px 0;
+   border-top:1px solid #F0F0EE;cursor:pointer}}
+ .prow:first-child{{border-top:0}}
+ .prow input{{width:18px;height:18px;flex:none;accent-color:#0a7d33}}
+ .pn{{flex:1;min-width:0;font-weight:600;color:#2F3437;overflow-wrap:anywhere}}
+ .pa{{font-variant-numeric:tabular-nums;font-weight:700;color:#2F3437}}
+ .pd{{flex:none;width:110px;text-align:right;color:#787774;font-size:.86rem}}
+ @media(max-width:520px){{
+   .prow{{flex-wrap:wrap}}
+   .pn{{flex-basis:100%}}
+   .pd{{width:auto;text-align:left;margin-left:auto}}
+ }}
+</style>
+<script>
+const TOKEN = {token!r};
+function picked(){{
+  return Array.from(document.querySelectorAll('.prow input:checked')).map(i => i.value);
+}}
+document.querySelectorAll('.prow input').forEach(i => i.onchange = () => {{
+  document.getElementById('cnt').textContent = picked().length; }});
+async function go(){{
+  const ids = picked();
+  const msg = document.getElementById('msg');
+  if (!ids.length) {{ msg.textContent = 'Tick at least one customer.'; return; }}
+  document.getElementById('gob').disabled = true;
+  msg.textContent = 'Saving...';
+  try {{
+    const r = await fetch('/admin/pick/save', {{method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token: TOKEN, client_ids: ids}})}});
+    if (!r.ok) throw new Error('save failed');
+    msg.textContent = 'Done. ASVA will chase these ' + ids.length + '.';
+    setTimeout(() => location.href = '/admin?token=' + encodeURIComponent(TOKEN), 900);
+  }} catch (e) {{
+    document.getElementById('gob').disabled = false;
+    msg.textContent = 'Could not save. Try again.';
+  }}
+}}
+</script>"""
+    return HTMLResponse(_ui_translate(
+        f'<!doctype html><meta charset="utf-8">'
+        f'<title>ASVA - Who to chase</title>{_FAVICON}'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<style>{_CSS}</style><div class="wrap">{body}</div>', lang))
+
+
+@router.post("/admin/pick/save")
+def admin_pick_save(payload: PickPayload):
+    from app.services import shortlist
+    biz = _biz_by_token(payload.token)
+    db = require_db()
+    n = shortlist.enable(db, biz["id"], payload.client_ids)
+    return {"ok": True, "enabled": n}
 
 
 # ── WhatsApp on ASVA's server ───────────────────────────────────────────────

@@ -94,7 +94,7 @@ def _ok(resp):
 @pytest.mark.parametrize("lang", LANGS)
 @pytest.mark.parametrize("page", [
     "admin_page", "admin_today", "admin_payments", "admin_reminders",
-    "admin_analytics", "admin_accounts", "admin_setup",
+    "admin_analytics", "admin_accounts", "admin_setup", "admin_pick",
 ])
 def test_admin_pages_render(page, lang):
     fn = getattr(admin, page)
@@ -227,7 +227,7 @@ def _js_parses(js):
 @pytest.mark.parametrize("lang", LANGS)
 @pytest.mark.parametrize("page", [
     "admin_page", "admin_today", "admin_payments", "admin_reminders",
-    "admin_analytics", "admin_accounts", "admin_setup",
+    "admin_analytics", "admin_accounts", "admin_setup", "admin_pick",
 ])
 def test_admin_page_javascript_parses(page, lang):
     text = _ok(maybe_await(getattr(admin, page)(token="tok", lang=lang)))
@@ -262,7 +262,7 @@ def test_inline_onclick_quotes_are_escaped_for_javascript():
 # ── Slow must not look broken ─────────────────────────────────────────────
 @pytest.mark.parametrize("page", [
     "admin_page", "admin_today", "admin_payments", "admin_reminders",
-    "admin_analytics", "admin_accounts", "admin_setup",
+    "admin_analytics", "admin_accounts", "admin_setup", "admin_pick",
 ])
 def test_every_page_carries_the_responsiveness_layer(page):
     """A server-rendered page over a tunnel takes a second or three to come
@@ -295,3 +295,52 @@ def test_the_rescue_only_frees_buttons_asva_itself_made_busy():
     )
     r = _subprocess.run([_NODE, "-e", script], capture_output=True, text=True)
     assert r.returncode == 0 and "OK" in r.stdout, (r.stdout + r.stderr)[:400]
+
+
+def _pick_data(monkeypatch, n=12):
+    """The pick page with a real shortlist on it: the stub DB returns no bills,
+    so without this the only branch ever rendered is "nothing to pick"."""
+    parties = [{**CLIENT, "id": f"c{i}", "name": f"Party <{i}> & Co",
+                "reminders_enabled": False} for i in range(n)]
+    bills = [{"client_id": f"c{i}", "outstanding": 1000 * (i + 1),
+              "due_date": "2026-01-0%d" % ((i % 9) + 1),
+              "invoice_date": "2025-12-01"} for i in range(n)]
+    monkeypatch.setattr(admin, "_all_parties", lambda db, bid: parties)
+    monkeypatch.setattr(admin, "_open_bill_rows", lambda db, bid: bills)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_pick_page_lists_the_shortlist(monkeypatch, lang):
+    from app.services import shortlist
+    _pick_data(monkeypatch)
+    text = _ok(maybe_await(admin.admin_pick(token="tok", lang=lang, n=0)))
+    assert text.count('class="prow"') == shortlist.STARTER   # ten, not the book
+    # names are escaped: a party called "R & S <Traders>" must not inject markup
+    assert "&lt;" in text and "&gt; &amp; Co" in text
+    assert "<1>" not in text
+
+
+@pytest.mark.skipif(_NODE is None, reason="needs node to parse the emitted JS")
+def test_pick_page_javascript_parses(monkeypatch):
+    _pick_data(monkeypatch)
+    text = _ok(maybe_await(admin.admin_pick(token="tok", lang="english", n=0)))
+    for i, js in enumerate(_inline_scripts(text)):
+        ok, err = _js_parses(js)
+        assert ok, "pick script #%d does not parse:\n%s" % (i, err)
+
+
+def test_pick_page_can_ask_for_the_next_fifty(monkeypatch):
+    from app.services import shortlist
+    _pick_data(monkeypatch, n=80)
+    text = _ok(maybe_await(admin.admin_pick(token="tok", lang="english",
+                                            n=shortlist.NEXT_STEP)))
+    assert text.count('class="prow"') == shortlist.NEXT_STEP
+
+
+def test_pick_banner_asks_a_shop_that_is_chasing_nobody(monkeypatch):
+    """The dashboard's one line about it. A shop with everything switched off
+    was shown nothing at all, which is how 88 percent opt-out stayed invisible."""
+    _pick_data(monkeypatch)
+    text = _ok(maybe_await(admin.admin_page(token="tok", lang="english")))
+    assert "not reminding anybody yet" in text
+    assert "/admin/pick?token=tok" in text
